@@ -83,6 +83,23 @@ def datensatz_aus_ergebnis(erg: auslesen.Ergebnis, kat: K.Katalog, ds: Datensatz
     return ds
 
 
+GERAETETYP_HINWEISE = [("ac/ac", "AC/AC"), ("frequency converter", "AC/AC"), ("frequenzumrichter", "AC/AC"),
+                       ("dc/ac", "DC/AC"), ("inverter", "DC/AC"), ("wechselrichter", "DC/AC"),
+                       ("dc/dc", "DC/DC"), ("ac/dc", "AC/DC"), ("elektronische last", "Elektronische Last"),
+                       ("electronic load", "Elektronische Last"), ("ladegerät", "Ladegeräte"), ("charger", "Ladegeräte")]
+
+
+def geraetetyp_vorschlag(text: str, kat: K.Katalog) -> list[str]:
+    """Vorschlag für den Gerätetyp aus eindeutigen Begriffen im Datenblatt (bleibt ungeprüft)."""
+    t = text.lower()
+    erlaubt = {de for de, _ in kat.feld("geraetetyp").auswahl} if kat.hat("geraetetyp") else set()
+    treffer = []
+    for wort, typ in GERAETETYP_HINWEISE:
+        if wort in t and typ in erlaubt and typ not in treffer:
+            treffer.append(typ)
+    return treffer[:1]
+
+
 # ------------------------------------------------------------------------ Modellauswahl
 
 class ModellDialog(tk.Toplevel):
@@ -242,6 +259,9 @@ def dialog(app):
         erg = auslesen.auslesen(pfad, app.kat, modell)
         app.configure(cursor="")
         datensatz_aus_ergebnis(erg, app.kat, ds, modell.label if modell else "")
+        gt = geraetetyp_vorschlag(text, app.kat)
+        if gt and "geraetetyp" not in ds.werte:
+            ds.werte["geraetetyp"] = Wert(auswahl=gt, herkunft=HERKUNFT_PDF)
 
     haendler = app.einst.ist_haendlerware(hersteller)
     ds.regel = REGEL_HAENDLER if haendler else REGEL_EPS

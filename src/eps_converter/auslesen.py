@@ -305,8 +305,8 @@ def auslesen(pfad: Path, kat: K.Katalog, modell: Modellspalte | None = None) -> 
         funde[fid] = Fund(fid, txt, wert_stuecke[0].seite, box, label)
 
     for zi, z in enumerate(zeilen):
-        if _norm(z.stuecke[0].text) in KOPF_WOERTER:
-            continue                                                    # Tabellenkopf, keine Werte
+        if _norm(z.stuecke[0].text) in KOPF_WOERTER and not z.stuecke[0].text.rstrip().endswith(":"):
+            continue                                                    # Tabellenkopf, keine Werte („Model:“ dagegen schon)
         for si, st in enumerate(z.stuecke):
             fid, label, rest = _passt(st.text, kat)
             if not fid or fid in funde or not ist_label_position(st, si):
@@ -325,11 +325,13 @@ def auslesen(pfad: Path, kat: K.Katalog, modell: Modellspalte | None = None) -> 
             rechts = vorne + z.stuecke[si + 1:]
             # rechte Nachbarn, die selbst Bezeichnungen/Überschriften sind, gehören nicht zum Wert
             werte = []
+            doppelpunkt = st.text.rstrip().endswith(":")
             for r in rechts:
-                if r.fett or _passt(r.text, kat)[0]:
+                # „Model:  FTC1K…“ – nach einer Bezeichnung mit Doppelpunkt darf der Wert auch fett sein
+                if (r.fett and not (doppelpunkt and not werte)) or _passt(r.text, kat)[0]:
                     break
                 werte.append(r)
-            if st.fett and werte and werte[0].x0 - st.x1 > 40:
+            if st.fett and not doppelpunkt and werte and werte[0].x0 - st.x1 > 40:
                 werte = []                                              # fette Überschrift: Wert steht darunter
             tab = _tabelle_fuer(z, tabs)
             if tab and werte and not st.fett:                           # Muster 4

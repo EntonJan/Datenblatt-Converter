@@ -279,13 +279,13 @@ s("luftfeuchtigkeit", "Luftfeuchtigkeit", "Humidity", "Relative humidity", "Rel.
 s("betriebshoehe", "Betriebshöhe", "Altitude", "Aufstellhöhe")
 s("kuehlung", "Kühlung", "Cooling", "Kühlart")
 s("abmessungen", "Abmessungen", "Abmessungen (BxHxT)", "Abmessungen (B x H x T)", "Dimensions", "Package Dimensions (W x H x L)",
-  "Dimensions (WxHxD)", "Maße")
+  "Dimensions (WxHxD)", "Maße", "Package / Dimensions", "Package Dimensions")
 s("gewicht", "Gewicht", "Weight", "Net weight")
 s("normen", "Normen", "Standards", "Sicherheitszertifikate", "Zertifizierungen")
 s("schutzklasse", "Schutzklasse", "Protection class")
 s("ueberspannungskategorie", "Überspannungskategorie", "Overvoltage category")
 s("spannungsfestigkeit_ein_aus", "Isolation Eingang/Ausgang", "Isolation In-/Output", "Isolation input/output")
-s("anzeige", "Anzeige", "Display", "Anzeige und Bedieneinheit")
+s("anzeige", "Anzeige", "Display", "Anzeige und Bedieneinheit", "Indicators", "Anzeigen")
 s("betriebsarten", "Betriebsarten", "Operation modes", "Operating modes", "Regelart")
 s("klirrfaktor", "Klirrfaktor", "THD", "Total Harmonic Distortion")
 s("scheitelfaktor", "Scheitelfaktor", "Crest factor", "Load Crest Factor")
@@ -300,7 +300,7 @@ s("parallelschaltung", "Parallelschaltung", "Parallel operation", "Parallelbetri
 s("funktionsgenerator", "Funktionsgenerator", "Function generator")
 s("netzrueckspeisung", "Netzrückspeisung", "Energy recovery", "Energierückspeisung")
 s("hersteller_bestellnummer", "Artikelnummer", "Part number", "Bestellnummer", "Order code", "Best.-Nr.", "Art.-Nr.")
-s("hersteller_typ", "Model", "Modell", "Typ", "Type", "MODEL")
+s("hersteller_typ", "Model", "Modell", "Typ", "Type", "MODEL", "Model No.", "Typenbezeichnung")
 
 # ---------------- Excel schreiben
 ARIAL = "Arial"

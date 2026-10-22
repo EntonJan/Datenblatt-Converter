@@ -58,3 +58,10 @@ def test_schaefer_aufzaehlung_mit_doppelpunkt():
     f = _lesen("Schäfer Elektronik/EPS_DC-DC Serie DE.pdf")
     assert f["eingangsspannung"] == "10 - 800 VDC"
     assert f["ausgangsleistung"] == "50 W - 22 kW"
+
+
+def test_absopulse_model_mit_doppelpunkt_und_anzeige():
+    f = _lesen("Absopulse/SCD - FTC 1K-3PAE-3U3-S8736 EPS.pdf")
+    assert f["hersteller_typ"] == "FTC1K-3PA/E-3U3-S8736"
+    assert f["anzeige"] == "None"
+    assert f["abmessungen"].startswith("3U3: 187 x 132 x 432mm")

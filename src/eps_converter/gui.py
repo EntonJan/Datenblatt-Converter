@@ -902,6 +902,18 @@ class App(tk.Tk):
             ttk.Style(self).theme_use("vista" if sys.platform.startswith("win") else "clam")
         except tk.TclError:
             pass
+        # Auf Windows ändert das Mausrad über einer Auswahlliste sonst unbemerkt den Wert.
+        # Stattdessen wird das Rad an den Bildlaufbereich weitergegeben.
+        def _rad_umleiten(e):
+            w = e.widget
+            while w is not None and not isinstance(w, tk.Canvas):
+                w = w.master
+            if w is not None:
+                delta = -1 if (getattr(e, "num", 0) == 4 or e.delta > 0) else 1
+                w.yview_scroll(delta * 3, "units")
+            return "break"
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.bind_class("TCombobox", seq, _rad_umleiten)
         self.einst = E.laden()
         try:
             self.kat = K.laden()
