@@ -9,7 +9,7 @@ from tkinter import ttk, filedialog, messagebox
 
 from . import auslesen, regeln
 from . import katalog as K
-from .modell import Datensatz, Wert, HERKUNFT_PDF, REGEL_HAENDLER, REGEL_EPS
+from .modell import Datensatz, Wert, Bild, HERKUNFT_PDF, REGEL_HAENDLER, REGEL_EPS
 
 QUELLE = "quelle.pdf"
 
@@ -69,6 +69,8 @@ def datensatz_aus_ergebnis(erg: auslesen.Ergebnis, kat: K.Katalog, ds: Datensatz
             en, de = txt, kat.uebersetze_rueck(txt) or txt
         else:
             de, en = txt, kat.uebersetze(txt) or txt
+        if fid == "beschreibung" and erg.sprache == "en":
+            de = ""             # englischer Fließtext gehört nicht ins deutsche Feld – Übersetzung folgt (KI/von Hand)
         w = Wert(de=de, en=en, herkunft=HERKUNFT_PDF, geprueft=False, fundstelle=fund.fundstelle())
         if f.typ in (K.BEREICH, K.ZAHL) and f.einheit:
             w.min, w.max = regeln.parse_bereich(txt, f.einheit)
@@ -76,6 +78,7 @@ def datensatz_aus_ergebnis(erg: auslesen.Ergebnis, kat: K.Katalog, ds: Datensatz
             w.auswahl = auswahl_vorschlag(f, txt)
         elif f.typ == K.JA_NEIN:
             w.ja = not txt.strip().lower().startswith(NEIN_WOERTER)
+            w.de = w.en = ""        # Datenblatt zeigt „Ja“/„Nein“; der Originaltext bleibt über die Fundstelle sichtbar
         ds.werte[fid] = w
     if modell_label:
         ds.werte["hersteller_typ"] = Wert(de=modell_label, en=modell_label, herkunft=HERKUNFT_PDF)
@@ -259,6 +262,10 @@ def dialog(app):
         erg = auslesen.auslesen(pfad, app.kat, modell)
         app.configure(cursor="")
         datensatz_aus_ergebnis(erg, app.kat, ds, modell.label if modell else "")
+        try:                                            # Produktfotos aus dem PDF als Vorschlag übernehmen
+            ds.bilder = [Bild(datei=d) for d in auslesen.bilder_extrahieren(pfad, ordner)]
+        except Exception:
+            ds.bilder = []
         gt = geraetetyp_vorschlag(text, app.kat)
         if gt and "geraetetyp" not in ds.werte:
             ds.werte["geraetetyp"] = Wert(auswahl=gt, herkunft=HERKUNFT_PDF)
@@ -274,4 +281,5 @@ def dialog(app):
     app.maske_zeigen(ds)
     app.original_zeigen(ordner / QUELLE)
     app.aktuell.hinweis(f"{n} Werte aus dem PDF übernommen (Sprache: {'Deutsch' if erg.sprache == 'de' else 'Englisch'}). "
-                        "Alle Werte sind Vorschläge – bitte prüfen. Feld anklicken zeigt die Fundstelle.")
+                        "Alle Werte sind Vorschläge – bitte prüfen. Feld anklicken zeigt die Fundstelle."
+                        + (f" {len(ds.bilder)} Bild(er) aus dem PDF übernommen – auf Herstellerlogos prüfen." if ds.bilder else ""))

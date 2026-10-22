@@ -80,3 +80,20 @@ def test_absopulse_schraegstrich_in_einer_zeile():
     f = _lesen("Absopulse/CTP_5K_3P480_E_3U7_3U3_U9118_SCD_U9118A_EPS.pdf")
     assert (f["ausgangsspannung"], f["ausgangsstrom"], f["ausgangsleistung"], f["ausgangsfrequenz"]) == \
         ("230Vac", "21.7Arms", "5000VA continuous", "50Hz")
+
+
+def test_absopulse_ableitungen_und_merkmale():
+    f = _lesen("Absopulse/SCD - FTP3K-E-M3P-3U7-19-T5192.pdf")
+    assert f["eingangsfrequenz"] == "47 – 65Hz"
+    assert f["spannungsfestigkeit_aus_geh"] == "3000Vdc"
+    assert f["einschaltstrombegrenzung"] == "Inrush current limiting"
+    assert f["alarmmanagement"] == "Not installed"
+    assert f["produkttyp"] == "3000VA Industrial Quality Frequency Converter"
+    assert f["beschreibung"].startswith("This rugged, AC/AC frequency converter")
+    assert "bauform" in f and "ueberhitzungsschutz" in f
+
+
+def test_produktbild_ohne_logos():
+    b = auslesen.bilder_finden(Path(B) / "Absopulse/SCD - FTP3K-E-M3P-3U7-19-T5192.pdf")
+    assert len(b) == 1 and b[0][0] == 0
+    assert auslesen.bilder_finden(Path(B) / "Gustav Klein/Datenblatt TS-AC-5446-120.pdf") == []   # nur Logo

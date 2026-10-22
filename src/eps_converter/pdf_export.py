@@ -246,7 +246,7 @@ def erzeugen(ds: Datensatz, kat: K.Katalog, ziel: Path, sprache: str, bild_dir: 
 
     # Wenig Inhalt auf Seite 1 (kein Bild, kurze/keine Beschreibung) → Technische Daten direkt
     # anschließen statt einer fast leeren ersten Seite. Überlauf geht auf die Folgeseite.
-    fuellung = len(beschr) + 60 * len(lief) + 80 * len(opts) + (1500 if bilder else 0)
+    fuellung = len(beschr) + 60 * len(lief) + 80 * len(opts) + (600 if bilder else 0)
     if fuellung < 1200:
         s.append(Spacer(1, 4))
         for titel_abschnitt, zeilen in ((K.ALLG, allg), (K.TECH, tech), (K.SCHN, schn)):

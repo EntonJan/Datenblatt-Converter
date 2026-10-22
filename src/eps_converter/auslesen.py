@@ -333,9 +333,21 @@ def auslesen(pfad: Path, kat: K.Katalog, modell: Modellspalte | None = None) -> 
                 if (r.fett and not (doppelpunkt and not werte)) or _passt(r.text, kat)[0]:
                     break
                 werte.append(r)
+            ja_nein = kat.hat(fid) and kat.feld(fid).typ == K.JA_NEIN
+            if ja_nein and werte and not doppelpunkt and not st.fett and werte[0].x0 - st.x1 > 40 \
+                    and not _tabelle_fuer(z, tabs):
+                werte = []                                              # rechts steht schon die nächste Spalte
+            if not werte and not st.fett and not rest and ja_nein:
+                merken(fid, [st], label)                                # Merkmal als Aufzählungszeile → „Ja“
+                continue
             if st.fett and not doppelpunkt and werte and werte[0].x0 - st.x1 > 40:
                 werte = []                                              # fette Überschrift: Wert steht darunter
             tab = _tabelle_fuer(z, tabs)
+            if not tab and len(werte) > 1:                              # außerhalb von Tabellen: große Lücke = nächste Spalte
+                for i in range(1, len(werte)):
+                    if werte[i].x0 - werte[i - 1].x1 > 40:
+                        werte = werte[:i]
+                        break
             if tab and werte and not st.fett:                           # Muster 4
                 if modell is not None and modell.tabelle == tab.nr:
                     w = _wert_aus_spalte(werte, modell, tab.spalten)
@@ -361,11 +373,60 @@ def auslesen(pfad: Path, kat: K.Katalog, modell: Modellspalte | None = None) -> 
                         break
                     unten.append(s2)
                     letzte = s2.bottom
-                    if len(unten) >= (5 if fid in AUSGANG_BLOCK else 3):
+                    if len(unten) >= (5 if fid in AUSGANG_BLOCK else 14 if fid in FLIESSTEXT else 3):
                         break
                 merken(fid, unten, label)
     _ausgang_aufteilen(funde, kat)
+    _ableiten(funde, zeilen, kat)
     return erg
+
+
+FLIESSTEXT = ("beschreibung",)
+# Merkmale, die oft nur im Fließtext stehen. Treffer → Vorschlag „Ja“ mit Fundstelle.
+STICHWORTE_JA = {
+    "ueberhitzungsschutz": r"thermal shutdown|over[- ]?temperature protection|overheat protection|übertemperatur|thermische abschaltung",
+    "begrenzung_ausgangsstrom": r"current limiting|current limit\b|strombegrenzung",
+    "einschaltstrombegrenzung": r"inrush current limit|einschaltstrombegrenzung",
+    "robust": r"ruggedi[sz]|conformal coating|schutzlack",
+}
+# Reihenfolge = Vorrang (19-Zoll-Angaben sind am eindeutigsten)
+BAUFORM_STICHWORTE = [r"19\s*(?:[\"”″]|’’|'')?\s*(?:rack|zoll|inch)|rack\s*19\s*(?:[\"”″]|’’|'')?|rackmount|rack[- ]mount|19\s*-?\s*zoll",
+                      r"schrank|cabinet", r"tower", r"tischgerät|desktop|benchtop"]
+
+
+def _stueck_fund(fid, m_text, st: Stueck, label: str) -> Fund:
+    return Fund(fid, m_text, st.seite, (st.x0, st.top, st.x1, st.bottom), label)
+
+
+def _ableiten(funde: dict, zeilen: list[Zeile], kat: K.Katalog) -> None:
+    """Werte, die nicht unter einer eigenen Bezeichnung stehen, aus dem übrigen Text ableiten (nur wörtliche Teilstücke)."""
+    stuecke = [st for z in zeilen for st in z.stuecke]
+    # Eingangsfrequenz aus „230Vac nominal, 47 – 65Hz“
+    ein = funde.get("eingangsspannung")
+    if ein and "eingangsfrequenz" not in funde and kat.hat("eingangsfrequenz"):
+        m = re.search(r"\d+(?:[.,]\d+)?\s*(?:[-–…]|\.\.\.?)\s*\d+(?:[.,]\d+)?\s*Hz\b|\d+(?:[.,]\d+)?(?:/\d+)?\s*Hz\b", ein.text, re.I)
+        if m:
+            funde["eingangsfrequenz"] = Fund("eingangsfrequenz", m.group(0), ein.seite, ein.box, ein.bezeichnung)
+    # Bauform aus Abmessungen oder Text
+    if "bauform" not in funde and kat.hat("bauform"):
+        q = funde.get("abmessungen")
+        for muster in BAUFORM_STICHWORTE:
+            m = re.search(muster, q.text, re.I) if q else None
+            if m:
+                funde["bauform"] = Fund("bauform", m.group(0), q.seite, q.box, q.bezeichnung)
+                break
+            st = next((x for x in stuecke if re.search(muster, x.text, re.I)), None)
+            if st:
+                funde["bauform"] = _stueck_fund("bauform", re.search(muster, st.text, re.I).group(0), st, "")
+                break
+    for fid, muster in STICHWORTE_JA.items():
+        if fid in funde or not kat.hat(fid):
+            continue
+        for st in stuecke:
+            m = re.search(muster, st.text, re.I)
+            if m:
+                funde[fid] = _stueck_fund(fid, m.group(0), st, "")
+                break
 
 
 AUSGANG_BLOCK = ("ausgangsspannung",)
@@ -428,3 +489,56 @@ def _ausgang_aufteilen(funde: dict, kat: K.Katalog) -> None:
     for fid, txt, box in neu:
         if kat.hat(fid):
             funde[fid] = Fund(fid, txt, fu.seite, box, fu.bezeichnung)
+
+
+# ------------------------------------------------------------------------ Produktbilder
+
+def bilder_finden(pfad: Path, max_seiten: int = 2) -> list[tuple[int, tuple[float, float, float, float]]]:
+    """Mögliche Produktfotos: ausreichend große Bilder, keine Logos/Hintergründe.
+    Logos erkennt man daran, dass sie auf mehreren Seiten an derselben Stelle stehen."""
+    with pdfplumber.open(str(pfad)) as pdf:
+        alle = []
+        for i, p in enumerate(pdf.pages):
+            for im in p.images:
+                alle.append((i, float(p.width), (float(im["x0"]), float(im["top"]), float(im["x1"]), float(im["bottom"]))))
+    pos = {}
+    for i, _, b in alle:
+        pos.setdefault(tuple(round(v) for v in b), set()).add(i)
+    kand = []
+    for i, pw, b in alle:
+        x0, t, x1, bo = b
+        w, h = x1 - x0, bo - t
+        if i >= max_seiten or w * h < 8000 or max(w / h, h / w) > 3 or w > pw * 0.8 or x0 < 0 or t < 0:
+            continue
+        if len(pos[tuple(round(v) for v in b)]) > 1:
+            continue                                            # wiederkehrend → Logo/Kopfgrafik
+        kand.append((w * h, i, b))
+    kand.sort(key=lambda k: (k[1], -k[0]))                    # Seite 1 zuerst, dann nach Größe
+    erg = []
+    for _, i, b in kand:
+        if any(i == j and not (b[2] < c[0] or c[2] < b[0] or b[3] < c[1] or c[3] < b[1]) for j, c in erg):
+            continue                                            # überlappt ein größeres Bild
+        erg.append((i, b))
+    return erg[:3]
+
+
+def bilder_extrahieren(pfad: Path, ordner: Path, max_n: int = 3) -> list[str]:
+    """Schneidet die gefundenen Produktbilder aus der gerenderten Seite aus (so sehen sie aus wie im PDF)."""
+    import pypdfium2 as pdfium
+    dateien = []
+    funde = bilder_finden(pfad)[:max_n]
+    if not funde:
+        return dateien
+    doc = pdfium.PdfDocument(str(pfad))
+    try:
+        for n, (i, (x0, t, x1, bo)) in enumerate(funde, start=1):
+            skala = 3
+            bild = doc[i].render(scale=skala).to_pil()
+            r = 1.5                                             # kleiner Rand weg: dort liegen oft Tabellenlinien
+            ausschnitt = bild.crop((int((x0 + r) * skala), int((t + r) * skala), int((x1 - r) * skala), int((bo - r) * skala)))
+            name = f"pdf_bild_{n}.png"
+            ausschnitt.save(ordner / name)
+            dateien.append(name)
+    finally:
+        doc.close()
+    return dateien
