@@ -65,6 +65,7 @@ class Fund:
     seite: int
     box: tuple[float, float, float, float]      # x0, top, x1, bottom (PDF-Punkte)
     bezeichnung: str = ""
+    teile: list = field(default_factory=list)   # [(text, box)] je Zeile, falls der Wert aus mehreren Zeilen besteht
 
     def fundstelle(self) -> str:
         x0, t, x1, b = self.box
@@ -302,7 +303,8 @@ def auslesen(pfad: Path, kat: K.Katalog, modell: Modellspalte | None = None) -> 
             return                                   # Zahlenfeld ohne Zahl → kein sicherer Wert
         box = (min(s.x0 for s in wert_stuecke), min(s.top for s in wert_stuecke),
                max(s.x1 for s in wert_stuecke), max(s.bottom for s in wert_stuecke))
-        funde[fid] = Fund(fid, txt, wert_stuecke[0].seite, box, label)
+        teile = [(w.text, (w.x0, w.top, w.x1, w.bottom)) for w in wert_stuecke] if len(wert_stuecke) > 1 else []
+        funde[fid] = Fund(fid, txt, wert_stuecke[0].seite, box, label, teile)
 
     for zi, z in enumerate(zeilen):
         if _norm(z.stuecke[0].text) in KOPF_WOERTER and not z.stuecke[0].text.rstrip().endswith(":"):
@@ -359,7 +361,70 @@ def auslesen(pfad: Path, kat: K.Katalog, modell: Modellspalte | None = None) -> 
                         break
                     unten.append(s2)
                     letzte = s2.bottom
-                    if len(unten) >= 3:
+                    if len(unten) >= (5 if fid in AUSGANG_BLOCK else 3):
                         break
                 merken(fid, unten, label)
+    _ausgang_aufteilen(funde, kat)
     return erg
+
+
+AUSGANG_BLOCK = ("ausgangsspannung",)
+_RE_LEISTUNG = re.compile(r"\d\s*(?:k?W|k?VA)\b")
+_RE_STROM = re.compile(r"\d\s*A(?:rms|dc|ac)?\b", re.I)
+_RE_SPANNUNG = re.compile(r"\d\s*(?:k?V)(?:ac|dc|rms)?\b", re.I)
+_RE_FREQ = re.compile(r"\d+(?:[.,]\d+)?\s*Hz\b", re.I)
+
+
+def _ausgang_aufteilen(funde: dict, kat: K.Katalog) -> None:
+    """Ausgangsangaben, die in einem Block stehen („115Vac, 400Hz / 8.7Arms / 3000W“),
+    auf Spannung, Strom, Leistung und Frequenz verteilen. Es werden nur wörtliche Teilstücke übernommen."""
+    fu = funde.get("ausgangsspannung")
+    if not fu:
+        return
+    teile = []
+    for txt, box in (fu.teile or [(fu.text, fu.box)]):
+        # „230Vac/21.7Arms/50Hz“ bzw. „230Vac / 4.5Arms …“ innerhalb einer Zeile weiter zerlegen
+        for t in re.split(r"\s+/\s+|(?<=[A-Za-z])/(?=\d)", txt):
+            t = t.strip(" ,;")
+            if t:
+                teile.append((t, box))
+    if len(teile) <= 1:
+        return
+    spannung, strom, leistung, freq = [], None, None, []
+    for txt, box in teile:
+        if _RE_FREQ.search(txt) and not (_RE_SPANNUNG.search(txt) or _RE_STROM.search(txt) or _RE_LEISTUNG.search(txt)):
+            freq.append(txt)                          # „50Hz“ / „at 50Hz“ als eigenes Teilstück
+            if strom is None and leistung is None:
+                spannung.append((txt, box))
+            continue
+        if _RE_LEISTUNG.search(txt) and not _RE_SPANNUNG.search(txt):
+            leistung = leistung or (txt, box)
+        elif _RE_STROM.search(txt) and not _RE_SPANNUNG.search(txt):
+            if strom is None and not re.search(r"surge|peak|spitze|inrush", txt, re.I):
+                strom = (txt, box)                    # Spitzen-/Einschaltströme gehören nicht in den Nennstrom
+        elif strom is None and leistung is None:
+            spannung.append((txt, box))
+        elif not _RE_SPANNUNG.search(txt):
+            break                                     # nach Strom/Leistung: Fließtext eines anderen Absatzes
+    if not spannung or (strom is None and leistung is None):
+        return
+
+    def box_von(boxen):
+        return (min(b[0] for b in boxen), min(b[1] for b in boxen), max(b[2] for b in boxen), max(b[3] for b in boxen))
+
+    fu.text = ", ".join(t for t, _ in spannung)
+    fu.box = box_von([b for _, b in spannung])
+    fu.teile = []
+    neu = []
+    if strom and "ausgangsstrom" not in funde:
+        neu.append(("ausgangsstrom", strom[0], strom[1]))
+    if leistung and "ausgangsleistung" not in funde:
+        neu.append(("ausgangsleistung", leistung[0], leistung[1]))
+    m = None
+    for txt in freq + [t for t, _ in spannung + [x for x in (strom, leistung) if x]]:
+        m = m or _RE_FREQ.search(txt)
+    if m and "ausgangsfrequenz" not in funde:
+        neu.append(("ausgangsfrequenz", m.group(0), fu.box))
+    for fid, txt, box in neu:
+        if kat.hat(fid):
+            funde[fid] = Fund(fid, txt, fu.seite, box, fu.bezeichnung)

@@ -34,7 +34,7 @@ AUSWAHL_HINWEISE = {
     "anzeige": [("touch", "TFT-Touch-Display"), ("tft", "TFT-Display"), ("lcd", "LCD"), ("led", "LED"), ("none", "ohne Anzeige (nur Fernsteuerung)")],
     "parallelschaltung": [("master", "Master-Slave"), ("nein", "Nein"), ("no", "Nein"), ("ja", "Ja"), ("yes", "Ja"), ("standard", "Ja")],
     "ausgangsfrequenz": [("400", "400 Hz"), ("50/60", "50/60 Hz"), ("einstell", "einstellbar"), ("adjust", "einstellbar"),
-                         ("60 hz", "60 Hz"), ("50 hz", "50 Hz"), ("dc", "DC")],
+                         (r"60\s*hz", "60 Hz"), (r"50\s*hz", "50 Hz"), ("dc", "DC")],
 }
 NEIN_WOERTER = ("nein", "no", "none", "nicht", "not available", "–", "-")
 
@@ -54,7 +54,7 @@ def auswahl_vorschlag(feld: K.Feld, text: str) -> list[str]:
     t = text.lower()
     erlaubt = {de for de, _ in feld.auswahl}
     for wort, wert in AUSWAHL_HINWEISE.get(feld.id, []):
-        if re.search(r"(?<![a-zäöü])" + re.escape(wort), t) and wert in erlaubt:
+        if re.search(r"(?<![a-zäöü0-9])" + wort, t) and wert in erlaubt:
             return [wert]
     return []
 

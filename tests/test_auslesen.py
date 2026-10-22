@@ -65,3 +65,18 @@ def test_absopulse_model_mit_doppelpunkt_und_anzeige():
     assert f["hersteller_typ"] == "FTC1K-3PA/E-3U3-S8736"
     assert f["anzeige"] == "None"
     assert f["abmessungen"].startswith("3U3: 187 x 132 x 432mm")
+
+
+def test_absopulse_ausgangsblock_aufteilen():
+    f = _lesen("Absopulse/SCD - FTP3K-E-M3P-3U7-19-T5192.pdf")
+    assert f["ausgangsspannung"] == "115Vac (L-N), 3-phase, 400Hz"
+    assert f["ausgangsstrom"] == "8.7Arms per phase"
+    assert f["ausgangsleistung"] == "3000W continuous"
+    assert f["ausgangsfrequenz"] == "400Hz"
+    assert f["abmessungen"].startswith("3U7: 432 x 132 x 483mm")
+
+
+def test_absopulse_schraegstrich_in_einer_zeile():
+    f = _lesen("Absopulse/CTP_5K_3P480_E_3U7_3U3_U9118_SCD_U9118A_EPS.pdf")
+    assert (f["ausgangsspannung"], f["ausgangsstrom"], f["ausgangsleistung"], f["ausgangsfrequenz"]) == \
+        ("230Vac", "21.7Arms", "5000VA continuous", "50Hz")

@@ -6,6 +6,7 @@ mitgelieferte Fassung dorthin kopiert.
 """
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -190,6 +191,11 @@ def laden(pfad: Path | None = None) -> Katalog:
             fid, begriff = _text(r[0]), _text(r[1] if len(r) > 1 else "")
             if fid and begriff and (fid in by_id):
                 synonyme[normalisieren(begriff)] = fid
+    # Synonyme aus dem mitgelieferten Katalog ergänzen (neue Programmversion → neue Begriffe,
+    # auch wenn neben der EXE noch ein älterer, vom Nutzer gepflegter Katalog liegt).
+    for begriff, fid in _mitgelieferte_synonyme(pfad).items():
+        if fid in by_id:
+            synonyme.setdefault(begriff, fid)
     for f in felder:                      # Feldnamen selbst gelten immer als Synonyme
         if f.abschnitt != INTERN:
             synonyme.setdefault(normalisieren(f.de), f.id)
@@ -199,9 +205,28 @@ def laden(pfad: Path | None = None) -> Katalog:
                    synonyme=synonyme)
 
 
+def _mitgelieferte_synonyme(pfad: Path) -> dict[str, str]:
+    m = pfade.KATALOG_MITGELIEFERT
+    try:
+        if not m.exists() or m.resolve() == Path(pfad).resolve():
+            return {}
+        wb = load_workbook(m, read_only=True, data_only=True)
+    except Exception:
+        return {}
+    erg: dict[str, str] = {}
+    if "Synonyme" in wb.sheetnames:
+        for r in list(wb["Synonyme"].iter_rows(values_only=True))[1:]:
+            fid, begriff = _text(r[0]), _text(r[1] if len(r) > 1 else "")
+            if fid and begriff:
+                erg[normalisieren(begriff)] = fid
+    wb.close()
+    return erg
+
+
 def normalisieren(s: str) -> str:
     s = (s or "").lower().strip()
     for z in ("■", "•", "–", "—"):
         s = s.replace(z, " ")
     s = s.strip(" -:.\t")
+    s = re.sub(r"\s*/\s*", "/", s)
     return " ".join(s.split())

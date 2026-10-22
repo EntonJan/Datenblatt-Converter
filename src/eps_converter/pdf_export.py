@@ -240,11 +240,29 @@ def erzeugen(ds: Datensatz, kat: K.Katalog, ziel: Path, sprache: str, bild_dir: 
                                 ("BOTTOMPADDING", (0, 0), (-1, -1), 1), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
         s.append(ot)
 
-    s.append(PageBreak())
-    cw = (W2 - 0.6 * cm) / 2
     allg = darstellung.zeilen(ds, kat, K.ALLG, sprache)
     tech = darstellung.zeilen(ds, kat, K.TECH, sprache)
     schn = darstellung.zeilen(ds, kat, K.SCHN, sprache)
+
+    # Wenig Inhalt auf Seite 1 (kein Bild, kurze/keine Beschreibung) → Technische Daten direkt
+    # anschließen statt einer fast leeren ersten Seite. Überlauf geht auf die Folgeseite.
+    fuellung = len(beschr) + 60 * len(lief) + 80 * len(opts) + (1500 if bilder else 0)
+    if fuellung < 1200:
+        s.append(Spacer(1, 4))
+        for titel_abschnitt, zeilen in ((K.ALLG, allg), (K.TECH, tech), (K.SCHN, schn)):
+            if zeilen:
+                kopf_t = K.ABSCHNITT_EN[titel_abschnitt] if sprache == "en" else titel_abschnitt
+                s += [_section(kopf_t, W), _kv(zeilen, W, 5.0 * cm), Spacer(1, 8)]
+        for b in bilder[1:3]:
+            cap = b.en if sprache == "en" else b.de
+            s += [Spacer(1, 6), _bild(bild_dir / b.datei, W, 4.5 * cm)]
+            if cap:
+                s.append(_p(cap, _st("cap", fontSize=7.5, textColor=GREY, alignment=TA_CENTER)))
+        doc.build(s)
+        return ziel
+
+    s.append(PageBreak())
+    cw = (W2 - 0.6 * cm) / 2
     col1, col2 = [], []
     if allg:
         col1 += [_section(K.ABSCHNITT_EN[K.ALLG] if sprache == "en" else K.ALLG, cw), _kv(allg, cw, 4.0 * cm)]
