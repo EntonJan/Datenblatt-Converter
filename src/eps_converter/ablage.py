@@ -11,7 +11,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from .modell import Datensatz, jetzt
+from .modell import Datensatz, ENTWURF, jetzt
 from . import pfade
 
 
@@ -51,6 +51,27 @@ class LokaleAblage:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(ds.to_dict(), fh, ensure_ascii=False, indent=2)
         os.replace(tmp, ziel)
+
+    def duplizieren(self, ds_id: str) -> Datensatz:
+        """Kopie als neuer Entwurf (z. B. für ein weiteres Gerät derselben Serie).
+        Bestellnummern und Prüfhaken werden zurückgesetzt, Bilder und Original-PDF mitkopiert."""
+        alt = self.laden(ds_id)
+        neu = Datensatz.aus_dict(alt.to_dict())
+        neu.id = Datensatz().id
+        neu.status = ENTWURF
+        neu.erstellt = jetzt()
+        neu.freigegeben_am = ""
+        neu.weclapp = {"status": "ausstehend"}
+        for fid in ("bestellnummer", "hersteller_bestellnummer"):
+            neu.werte.pop(fid, None)
+        for w in neu.werte.values():
+            w.geprueft = False
+        quelle, ziel = self.basis / ds_id, self.ordner(neu.id)
+        for f in quelle.iterdir():
+            if f.is_file() and f.name != "datensatz.json":
+                shutil.copy2(f, ziel / f.name)
+        self.speichern(neu)
+        return neu
 
     def loeschen(self, ds_id: str) -> None:
         p = self.basis / ds_id

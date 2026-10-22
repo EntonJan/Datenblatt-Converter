@@ -5,6 +5,7 @@ erscheinen nie auf dem Datenblatt.
 """
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 from PIL import Image as PILImage
@@ -183,104 +184,115 @@ def erzeugen(ds: Datensatz, kat: K.Katalog, ziel: Path, sprache: str, bild_dir: 
         c.restoreState()
 
     ziel.parent.mkdir(parents=True, exist_ok=True)
-    doc = BaseDocTemplate(str(ziel), pagesize=A4, title=f"{titel} – {tx['datenblatt'].capitalize()}",
-                          author="EPS Stromversorgung GmbH", subject=nr)
-    f1 = Frame(MX, 1.3 * cm, W, A4H - 1.0 * cm - 1.3 * cm, leftPadding=0, rightPadding=0, topPadding=0)
-    f2 = Frame(M, 1.3 * cm, W2, A4H - 2.0 * cm - 1.3 * cm, leftPadding=0, rightPadding=0, topPadding=0)
-    doc.addPageTemplates([PageTemplate("p1", [f1], onPage=page1), PageTemplate("p2", [f2], onPage=page2)])
 
-    s = [NextPageTemplate("p2")]
-    serie = ds.text("serie", sprache)
-    kopf = tx["datenblatt"] + (f" · {tx['serie']} {serie}" if serie else "")
-    s.append(_p(kopf, _st("se", fontName="EPS-B", fontSize=9, textColor=CYAN, leading=11)))
-    s.append(_p(titel, _st("ti", fontName="EPS-B", fontSize=23, leading=26, textColor=NAVY)))
-    unter = [x for x in [ds.text("produkttyp", sprache),
-                         darstellung.text(ds, kat.feld("geraetetyp"), kat, sprache) if kat.hat("geraetetyp") else ""] if x]
-    if unter:
-        s.append(_p(" · ".join(unter), _st("su", fontSize=11, textColor=GREY, leading=14)))
-    s.append(Spacer(1, 6))
+    def bauen(ausgabe, kompakt: bool) -> int:
+        """Baut das Datenblatt; liefert die Seitenzahl."""
+        doc = BaseDocTemplate(ausgabe, pagesize=A4, title=f"{titel} – {tx['datenblatt'].capitalize()}",
+                              author="EPS Stromversorgung GmbH", subject=nr)
+        f1 = Frame(MX, 1.3 * cm, W, A4H - 1.0 * cm - 1.3 * cm, leftPadding=0, rightPadding=0, topPadding=0)
+        f2 = Frame(M, 1.3 * cm, W2, A4H - 2.0 * cm - 1.3 * cm, leftPadding=0, rightPadding=0, topPadding=0)
+        doc.addPageTemplates([PageTemplate("p1", [f1], onPage=page1), PageTemplate("p2", [f2], onPage=page2)])
 
-    bilder = [b for b in ds.bilder if bild_dir and (bild_dir / b.datei).exists()]
-    if bilder:
-        s.append(_bild(bild_dir / bilder[0].datei, W, 4.2 * cm))
-        cap = bilder[0].en if sprache == "en" else bilder[0].de
-        if cap:
-            s.append(_p(cap, _st("cap", fontSize=7.5, textColor=GREY, alignment=TA_CENTER)))
-        s.append(Spacer(1, 8))
-
-    beschr = ds.text("beschreibung", sprache)
-    for absatz in [a for a in beschr.split("\n\n") if a.strip()]:
-        s.append(_p(absatz.strip(), _st("d", fontSize=8.8, leading=11.6, spaceAfter=4)))
-
-    lief = [(e.en or e.de) if sprache == "en" else e.de for e in ds.lieferumfang]
-    lief = [x for x in lief if x.strip()]
-    if lief:
-        s.append(_section(tx["lieferumfang"], W))
-        half = (len(lief) + 1) // 2
-        sl = _st("li", fontSize=8.4, leading=10.6)
-        a, b = lief[:half], lief[half:] + [""] * (half - len(lief[half:]))
-        lt = Table([[_p("– " + x, sl), _p(("– " + y) if y else "", sl)] for x, y in zip(a, b)], colWidths=[W / 2, W / 2])
-        lt.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 1),
-                                ("BOTTOMPADDING", (0, 0), (-1, -1), 1), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        s.append(lt)
+        s = [NextPageTemplate("p2")]
+        serie = ds.text("serie", sprache)
+        kopf = tx["datenblatt"] + (f" · {tx['serie']} {serie}" if serie else "")
+        s.append(_p(kopf, _st("se", fontName="EPS-B", fontSize=9, textColor=CYAN, leading=11)))
+        s.append(_p(titel, _st("ti", fontName="EPS-B", fontSize=23, leading=26, textColor=NAVY)))
+        unter = [x for x in [ds.text("produkttyp", sprache),
+                             darstellung.text(ds, kat.feld("geraetetyp"), kat, sprache) if kat.hat("geraetetyp") else ""] if x]
+        if unter:
+            s.append(_p(" · ".join(unter), _st("su", fontSize=11, textColor=GREY, leading=14)))
         s.append(Spacer(1, 6))
 
-    opts = [o for o in ds.optionen if (o.code or o.de or o.en)]
-    if opts:
-        s.append(_section(tx["optionen"], W))
-        so = _st("o", fontSize=8.4, leading=10.6)
-        sob = _st("ob", fontName="EPS-B", fontSize=8.4, leading=10.6, textColor=NAVY)
-        rows = []
-        for o in opts:
-            besch = (o.en or o.de) if sprache == "en" else o.de
-            nrtxt = f"Option {o.nr}  " if o.nr else ""
-            rows.append([_p(nrtxt + o.code, sob), _p(besch, so)])
-        ot = Table(rows, colWidths=[4.0 * cm, W - 4.0 * cm])
-        ot.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 1),
-                                ("BOTTOMPADDING", (0, 0), (-1, -1), 1), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        s.append(ot)
-
-    allg = darstellung.zeilen(ds, kat, K.ALLG, sprache)
-    tech = darstellung.zeilen(ds, kat, K.TECH, sprache)
-    schn = darstellung.zeilen(ds, kat, K.SCHN, sprache)
-
-    # Wenig Inhalt auf Seite 1 (kein Bild, kurze/keine Beschreibung) → Technische Daten direkt
-    # anschließen statt einer fast leeren ersten Seite. Überlauf geht auf die Folgeseite.
-    fuellung = len(beschr) + 60 * len(lief) + 80 * len(opts) + (600 if bilder else 0)
-    if fuellung < 1200:
-        s.append(Spacer(1, 4))
-        for titel_abschnitt, zeilen in ((K.ALLG, allg), (K.TECH, tech), (K.SCHN, schn)):
-            if zeilen:
-                kopf_t = K.ABSCHNITT_EN[titel_abschnitt] if sprache == "en" else titel_abschnitt
-                s += [_section(kopf_t, W), _kv(zeilen, W, 5.0 * cm), Spacer(1, 8)]
-        for b in bilder[1:3]:
-            cap = b.en if sprache == "en" else b.de
-            s += [Spacer(1, 6), _bild(bild_dir / b.datei, W, 4.5 * cm)]
+        bilder = [b for b in ds.bilder if bild_dir and (bild_dir / b.datei).exists()]
+        if bilder:
+            s.append(_bild(bild_dir / bilder[0].datei, W, 4.2 * cm))
+            cap = bilder[0].en if sprache == "en" else bilder[0].de
             if cap:
                 s.append(_p(cap, _st("cap", fontSize=7.5, textColor=GREY, alignment=TA_CENTER)))
-        doc.build(s)
-        return ziel
+            s.append(Spacer(1, 8))
 
-    s.append(PageBreak())
-    cw = (W2 - 0.6 * cm) / 2
-    col1, col2 = [], []
-    if allg:
-        col1 += [_section(K.ABSCHNITT_EN[K.ALLG] if sprache == "en" else K.ALLG, cw), _kv(allg, cw, 4.0 * cm)]
-    if tech:
-        col2 += [_section(K.ABSCHNITT_EN[K.TECH] if sprache == "en" else K.TECH, cw), _kv(tech, cw, 3.7 * cm), Spacer(1, 6)]
-    if schn:
-        col2 += [_section(K.ABSCHNITT_EN[K.SCHN] if sprache == "en" else K.SCHN, cw), _kv(schn, cw, 3.7 * cm)]
-    for b in bilder[1:3]:
-        cap = b.en if sprache == "en" else b.de
-        col2 += [Spacer(1, 10), _bild(bild_dir / b.datei, cw, 4.5 * cm)]
-        if cap:
-            col2.append(_p(cap, _st("cap", fontSize=7.5, textColor=GREY, alignment=TA_CENTER)))
-    if col1 or col2:
-        t = Table([[col1 or [Spacer(1, 1)], col2 or [Spacer(1, 1)]]], colWidths=[cw + 0.6 * cm, cw])
-        t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                               ("RIGHTPADDING", (0, 0), (0, 0), 0.6 * cm), ("RIGHTPADDING", (1, 0), (1, 0), 0)]))
-        s.append(t)
-    doc.build(s)
+        beschr = ds.text("beschreibung", sprache)
+        for absatz in [a for a in beschr.split("\n\n") if a.strip()]:
+            s.append(_p(absatz.strip(), _st("d", fontSize=8.8, leading=11.6, spaceAfter=4)))
+
+        lief = [(e.en or e.de) if sprache == "en" else e.de for e in ds.lieferumfang]
+        lief = [x for x in lief if x.strip()]
+        if lief:
+            s.append(_section(tx["lieferumfang"], W))
+            half = (len(lief) + 1) // 2
+            sl = _st("li", fontSize=8.4, leading=10.6)
+            a, b = lief[:half], lief[half:] + [""] * (half - len(lief[half:]))
+            lt = Table([[_p("– " + x, sl), _p(("– " + y) if y else "", sl)] for x, y in zip(a, b)], colWidths=[W / 2, W / 2])
+            lt.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 1),
+                                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+            s.append(lt)
+            s.append(Spacer(1, 6))
+
+        opts = [o for o in ds.optionen if (o.code or o.de or o.en)]
+        if opts:
+            s.append(_section(tx["optionen"], W))
+            so = _st("o", fontSize=8.4, leading=10.6)
+            sob = _st("ob", fontName="EPS-B", fontSize=8.4, leading=10.6, textColor=NAVY)
+            rows = []
+            for o in opts:
+                besch = (o.en or o.de) if sprache == "en" else o.de
+                nrtxt = f"Option {o.nr}  " if o.nr else ""
+                rows.append([_p(nrtxt + o.code, sob), _p(besch, so)])
+            ot = Table(rows, colWidths=[4.0 * cm, W - 4.0 * cm])
+            ot.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 1),
+                                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+            s.append(ot)
+
+        allg = darstellung.zeilen(ds, kat, K.ALLG, sprache)
+        tech = darstellung.zeilen(ds, kat, K.TECH, sprache)
+        schn = darstellung.zeilen(ds, kat, K.SCHN, sprache)
+
+        # Wenig Inhalt auf Seite 1 (kein Bild, kurze/keine Beschreibung) → Technische Daten direkt
+        # anschließen statt einer fast leeren ersten Seite. Überlauf geht auf die Folgeseite.
+        if kompakt:
+            s.append(Spacer(1, 4))
+            for titel_abschnitt, zeilen in ((K.ALLG, allg), (K.TECH, tech), (K.SCHN, schn)):
+                if zeilen:
+                    kopf_t = K.ABSCHNITT_EN[titel_abschnitt] if sprache == "en" else titel_abschnitt
+                    s += [_section(kopf_t, W), _kv(zeilen, W, 5.0 * cm), Spacer(1, 8)]
+            for b in bilder[1:3]:
+                cap = b.en if sprache == "en" else b.de
+                s += [Spacer(1, 6), _bild(bild_dir / b.datei, W, 4.5 * cm)]
+                if cap:
+                    s.append(_p(cap, _st("cap", fontSize=7.5, textColor=GREY, alignment=TA_CENTER)))
+            doc.build(s)
+            return doc.page
+
+        s.append(PageBreak())
+        cw = (W2 - 0.6 * cm) / 2
+        col1, col2 = [], []
+        if allg:
+            col1 += [_section(K.ABSCHNITT_EN[K.ALLG] if sprache == "en" else K.ALLG, cw), _kv(allg, cw, 4.0 * cm)]
+        if tech:
+            col2 += [_section(K.ABSCHNITT_EN[K.TECH] if sprache == "en" else K.TECH, cw), _kv(tech, cw, 3.7 * cm), Spacer(1, 6)]
+        if schn:
+            col2 += [_section(K.ABSCHNITT_EN[K.SCHN] if sprache == "en" else K.SCHN, cw), _kv(schn, cw, 3.7 * cm)]
+        for b in bilder[1:3]:
+            cap = b.en if sprache == "en" else b.de
+            col2 += [Spacer(1, 10), _bild(bild_dir / b.datei, cw, 4.5 * cm)]
+            if cap:
+                col2.append(_p(cap, _st("cap", fontSize=7.5, textColor=GREY, alignment=TA_CENTER)))
+        if col1 or col2:
+            t = Table([[col1 or [Spacer(1, 1)], col2 or [Spacer(1, 1)]]], colWidths=[cw + 0.6 * cm, cw])
+            t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                   ("RIGHTPADDING", (0, 0), (0, 0), 0.6 * cm), ("RIGHTPADDING", (1, 0), (1, 0), 0)]))
+            s.append(t)
+        doc.build(s)
+        return doc.page
+
+    # Erst einseitig versuchen (technische Daten direkt unter Bild/Beschreibung). Nur wenn das nicht
+    # auf eine Seite passt, das zweispaltige Layout mit eigener Seite für die technischen Daten.
+    puffer = io.BytesIO()
+    if bauen(puffer, kompakt=True) == 1:
+        ziel.write_bytes(puffer.getvalue())
+    else:
+        bauen(str(ziel), kompakt=False)
     return ziel
 
 

@@ -536,9 +536,36 @@ def bilder_extrahieren(pfad: Path, ordner: Path, max_n: int = 3) -> list[str]:
             bild = doc[i].render(scale=skala).to_pil()
             r = 1.5                                             # kleiner Rand weg: dort liegen oft Tabellenlinien
             ausschnitt = bild.crop((int((x0 + r) * skala), int((t + r) * skala), int((x1 - r) * skala), int((bo - r) * skala)))
+            ausschnitt = _raender_trimmen(ausschnitt)
             name = f"pdf_bild_{n}.png"
             ausschnitt.save(ordner / name)
             dateien.append(name)
     finally:
         doc.close()
     return dateien
+
+
+def _raender_trimmen(bild, max_anteil: float = 0.08):
+    """Entfernt dunkle Linien und einfarbige Streifen am Bildrand (Reste von Tabellenlinien/Rahmen)."""
+    g = bild.convert("L")
+    b, h = g.size
+    px = g.load()
+
+    def zeile_ist_rand(werte):
+        werte = list(werte)
+        if not werte:
+            return False
+        dunkel = sum(1 for v in werte if v < 90) / len(werte)
+        spanne = max(werte) - min(werte)
+        return dunkel > 0.6 or spanne < 12            # Linie oder einfarbiger Streifen
+
+    o, u, l, r = 0, h, 0, b
+    while o < h * max_anteil and zeile_ist_rand(px[x, o] for x in range(l, r)):
+        o += 1
+    while h - u < h * max_anteil and u - 1 > o and zeile_ist_rand(px[x, u - 1] for x in range(l, r)):
+        u -= 1
+    while l < b * max_anteil and zeile_ist_rand(px[l, y] for y in range(o, u)):
+        l += 1
+    while b - r < b * max_anteil and r - 1 > l and zeile_ist_rand(px[r - 1, y] for y in range(o, u)):
+        r -= 1
+    return bild.crop((l, o, r, u)) if (l, o, r, u) != (0, 0, b, h) else bild

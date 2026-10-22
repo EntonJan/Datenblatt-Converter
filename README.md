@@ -13,7 +13,12 @@ Grundlage: Pflichtenheft Produktdaten-Pipeline (Stand 15.10.2026).
    das Original erscheint daneben (Feld anklicken = Fundstelle gelb markiert).
    Oder **Leeres Datenblatt** für Eingabe von Hand.
 3. In der Prüfmaske alle Werte prüfen, die **18 Kernfelder** als „geprüft“ abhaken, Bestellnummer eintragen.
-4. **Freigeben** → `ausgabe\d<Bestellnummer>.pdf` und `e<Bestellnummer>.pdf`.
+4. **Freigeben** → `ausgabe\d<Bestellnummer>.pdf` und `e<Bestellnummer>.pdf`. Fehlende Felder werden rot umrandet,
+   mögliche Herstellerspuren (Herstellername, „our plant“, Modellnummern in der Beschreibung) vorher gemeldet.
+
+Weitere Funktionen: Suche und Statusfilter in der Liste, **Duplizieren** (Vorlage für ähnliche Geräte),
+automatisches Speichern alle 2 Minuten. Tastenkürzel: Strg+S speichern, Strg+P Vorschau DE, Strg+Umschalt+P Vorschau EN,
+Strg+O PDF importieren, Strg+N leeres Datenblatt, Strg+F suchen.
 
 ## Ordner im Repo
 

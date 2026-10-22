@@ -1,6 +1,7 @@
 """Bedienoberfläche (Tkinter): Startseite, Prüfmaske, Einstellungen."""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -38,6 +39,9 @@ def oeffnen(pfad: Path):
 
 
 # ======================================================================== Hilfs-Widgets
+
+AUTOSAVE_MS = 2 * 60 * 1000          # automatisch speichern alle 2 Minuten (nur wenn sich etwas geändert hat)
+
 
 class Scrollbereich(ttk.Frame):
     """Rahmen mit senkrechter Bildlaufleiste; Inhalte kommen in self.inhalt."""
@@ -515,27 +519,35 @@ class Maske(ttk.Frame):
         self.statuszeile = tk.Label(self, text="", anchor="w", fg="#6A7380")
         self.statuszeile.pack(fill="x", padx=10, pady=(0, 6))
         self.laden()
+        self.uebernehmen()                      # Maske → Datensatz einmal angleichen, sonst meldet „ungespeichert“ falsch
+        self.geaendert = False
+        self._schnappschuss = self._stand()
+        self._auto_id = self.after(AUTOSAVE_MS, self._autosave)
 
     # ---- Aufbau
     def _kopf(self):
         k = tk.Frame(self, background=NAVY)
         k.pack(fill="x")
         ttk.Button(k, text="← Zurück", command=self.zurueck).pack(side="left", padx=8, pady=8)
-        self.titel = tk.Label(k, text="", fg="white", bg=NAVY, font=("Segoe UI", 13, "bold"))
-        self.titel.pack(side="left", padx=10)
-        self.statuslabel = tk.Label(k, text="", fg=CYAN, bg=NAVY, font=("Segoe UI", 10, "bold"))
-        self.statuslabel.pack(side="left", padx=10)
+        tf = tk.Frame(k, background=NAVY)      # Titel + Status; wird zuletzt gepackt und bei Platzmangel gekürzt
+        self.titel = tk.Label(tf, text="", fg="white", bg=NAVY, font=("Segoe UI", 13, "bold"), anchor="w", width=1)
+        self.statuslabel = tk.Label(tf, text="", fg=CYAN, bg=NAVY, font=("Segoe UI", 10, "bold"))
+        self.statuslabel.grid(row=0, column=0, padx=(10, 6), sticky="w")
+        self.titel.grid(row=0, column=1, sticky="ew")
+        tf.columnconfigure(1, weight=1)
         self.btn_frei = ttk.Button(k, text="Freigeben ✔", command=self.freigeben)
         self.btn_frei.pack(side="right", padx=8)
-        ttk.Button(k, text="PDF-Vorschau EN", command=lambda: self.vorschau("en")).pack(side="right", padx=2)
-        ttk.Button(k, text="PDF-Vorschau DE", command=lambda: self.vorschau("de")).pack(side="right", padx=2)
-        ttk.Button(k, text="Zwischenspeichern", command=self.zwischenspeichern).pack(side="right", padx=8)
+        ttk.Button(k, text="Vorschau EN", command=lambda: self.vorschau("en")).pack(side="right", padx=2)
+        ttk.Button(k, text="Vorschau DE", command=lambda: self.vorschau("de")).pack(side="right", padx=2)
+        ttk.Button(k, text="Speichern (Strg+S)", command=self.zwischenspeichern).pack(side="right", padx=8)
         if self.ds.quelle_pdf:
-            ttk.Button(k, text="Original anzeigen", command=self.original).pack(side="right", padx=2)
+            ttk.Button(k, text="Original", command=self.original).pack(side="right", padx=2)
         self.btn_alle = ttk.Button(k, text="Alle geprüft ☑", command=self.alle_geprueft)
         self.btn_alle.pack(side="right", padx=2)
         self.zaehler = tk.Label(k, text="", fg="white", bg=NAVY)
         self.zaehler.pack(side="right", padx=10)
+        # Titel zuletzt packen: bei schmalem Fenster wird der Titel gekürzt, nicht Zähler/Knöpfe
+        tf.pack(side="left", fill="x", expand=True)
 
     def _tabellenkopf(self, inhalt):
         for i, t in enumerate(["Feld", "Wert  (Deutsch | Englisch)", "Kernfeld", "Einheit"]):
@@ -642,7 +654,7 @@ class Maske(ttk.Frame):
         gesamt = len(kern) + 1
         self.zaehler.configure(text=f"Geprüft: {n}/{gesamt}", fg="white" if n < gesamt else "#9BE29B")
         if hasattr(self, "btn_alle"):
-            self.btn_alle.configure(text="Prüfhaken entfernen ☐" if n == gesamt else "Alle geprüft ☑")
+            self.btn_alle.configure(text="Haken entfernen ☐" if n == gesamt else "Alle geprüft ☑")
 
     def _opt_markieren(self, an: bool):
         f = "#D62828" if an else KERN_BG
@@ -670,6 +682,39 @@ class Maske(ttk.Frame):
             self.nb.select(self.opt_tab)
         self.statuszeile.configure(text=f"{len(art_je_feld)} Feld(er) rot markiert – Cursor steht im ersten.",
                                    fg="#D62828")
+
+    def spuren_markieren(self, spuren: list[tuple[str, str, str]]):
+        """Herstellerspuren rot hervorheben (Felder umranden, Fundstellen in der Beschreibung einfärben)."""
+        for t in (self.besch_de, self.besch_en):
+            t.tag_remove("spur", "1.0", "end")
+            t.tag_configure("spur", background="#F8C6C6", foreground="#D62828")
+            t.configure(highlightthickness=2 if spuren else 0, highlightbackground="#D62828", highlightcolor="#D62828")
+        if not spuren:
+            return
+        felder = [(fid, "wert", "") for fid, _, _ in spuren if fid in self.editoren]
+        if felder:
+            self.probleme_markieren(felder)
+        for fid, fund, _ in spuren:
+            if fid != "beschreibung":
+                continue
+            for t in (self.besch_de, self.besch_en):
+                pos = "1.0"
+                while True:
+                    pos = t.search(fund, pos, stopindex="end", nocase=True)
+                    if not pos:
+                        break
+                    ende = f"{pos}+{len(fund)}c"
+                    t.tag_add("spur", pos, ende)
+                    pos = ende
+        if not felder and any(fid in ("beschreibung", "bilder") for fid, _, _ in spuren):
+            self.nb.select(self.besch_de.master)
+            ziel = self.besch_en if self.besch_en.tag_ranges("spur") and not self.besch_de.tag_ranges("spur") else self.besch_de
+            r = ziel.tag_ranges("spur")
+            if r:
+                ziel.see(r[0])
+        elif not felder and any(fid in ("optionen", "lieferumfang") for fid, _, _ in spuren):
+            self.nb.select(self.opt_tab)
+        self.statuszeile.configure(text=f"{len(spuren)} mögliche Herstellerspur(en) rot markiert.", fg="#D62828")
 
     def alle_geprueft(self):
         """Setzt alle Prüfhaken der Kernfelder auf einmal – oder entfernt sie, wenn schon alle gesetzt sind."""
@@ -782,8 +827,41 @@ class Maske(ttk.Frame):
         self.uebernehmen()
         self.app.ablage.speichern(self.ds)
         self.geaendert = False
+        self._schnappschuss = self._stand()
         if not still:
             self.hinweis(f"Gespeichert ({jetzt()[11:16]} Uhr).")
+
+    # ---- Automatisch speichern
+    def _stand(self) -> str:
+        d = self.ds.to_dict()
+        d.pop("geaendert", None)
+        return json.dumps(d, sort_keys=True, ensure_ascii=False)
+
+    def ungespeichert(self) -> bool:
+        """Ob die Maske Änderungen enthält, die noch nicht gespeichert sind (auch Beschreibung/Listen)."""
+        self.uebernehmen()
+        return self.geaendert or self._stand() != self._schnappschuss
+
+    def _autosave(self):
+        try:
+            if self.winfo_exists() and self.ungespeichert():
+                self.zwischenspeichern(still=True)
+                if self.statuszeile.cget("fg") != "#D62828":       # rote Hinweise nicht überschreiben
+                    self.hinweis(f"Automatisch gespeichert ({jetzt()[11:16]} Uhr).")
+        except Exception:
+            pass                                                    # Autosave darf die Arbeit nie unterbrechen
+        finally:
+            try:
+                self._auto_id = self.after(AUTOSAVE_MS, self._autosave)
+            except tk.TclError:
+                pass
+
+    def destroy(self):
+        try:
+            self.after_cancel(self._auto_id)
+        except (AttributeError, tk.TclError):
+            pass
+        super().destroy()
 
     def vorschau(self, sprache):
         self.uebernehmen()
@@ -815,6 +893,18 @@ class Maske(ttk.Frame):
             return
         self.probleme_markieren([])
         self.statuszeile.configure(text="", fg="#6A7380")
+        self.spuren_markieren([])
+        spuren = [] if self.ds.regel == REGEL_HAENDLER else \
+            regeln.herstellerspuren(self.ds, self.app.kat, self.app.einst.hersteller)
+        if spuren:
+            self.spuren_markieren(spuren)
+            liste = "\n• ".join(m for _, _, m in spuren[:15]) + ("\n…" if len(spuren) > 15 else "")
+            if not messagebox.askyesno(
+                    "Mögliche Herstellerspuren",
+                    "Im Datenblatt stehen möglicherweise noch Hinweise auf den Hersteller:\n\n• " + liste +
+                    "\n\nDie Stellen sind rot markiert.\n\nTrotzdem freigeben?", icon="warning", default="no", parent=self):
+                return
+            self.spuren_markieren([])
         if self.ds.regel == REGEL_HAENDLER:
             ziel_pdfs = []
         else:
@@ -836,22 +926,54 @@ class Maske(ttk.Frame):
         self.app.ablage.speichern(self.ds)
         self.geaendert = False
         self._statuslabel()
+        self._schnappschuss = self._stand()
         if ziel_pdfs:
-            if messagebox.askyesno("Freigegeben", "Datenblatt freigegeben.\n\n" + "\n".join(p.name for p in ziel_pdfs) +
-                                   f"\n\ngespeichert in:\n{ziel_pdfs[0].parent}\n\nOrdner öffnen?"):
-                oeffnen(ziel_pdfs[0].parent)
+            FreigabeDialog(self, ziel_pdfs)
         else:
             messagebox.showinfo("Freigegeben", "Händlerware: Datensatz freigegeben. Es wird kein EPS-Datenblatt erzeugt "
                                                "(das Original-Datenblatt des Herstellers wird verwendet).")
 
     def zurueck(self):
-        if self.geaendert:
+        if self.ungespeichert():
             r = messagebox.askyesnocancel("Ungespeicherte Änderungen", "Änderungen speichern?")
             if r is None:
                 return
             if r:
                 self.zwischenspeichern(still=True)
         self.app.start_zeigen()
+
+
+class FreigabeDialog(tk.Toplevel):
+    """Nach der Freigabe: erzeugte PDFs direkt öffnen."""
+
+    def __init__(self, master, pdfs: list[Path]):
+        super().__init__(master)
+        self.title("Freigegeben")
+        self.resizable(False, False)
+        self.transient(master.winfo_toplevel())
+        fr = ttk.Frame(self, padding=16)
+        fr.pack(fill="both", expand=True)
+        ttk.Label(fr, text="Datenblatt freigegeben ✔", font=("Segoe UI", 12, "bold"), foreground=NAVY).pack(anchor="w")
+        ttk.Label(fr, text="Gespeichert in:\n" + str(pdfs[0].parent), foreground="#6A7380").pack(anchor="w", pady=(6, 12))
+        knoepfe = ttk.Frame(fr)
+        knoepfe.pack(fill="x")
+        erster = None
+        for p in pdfs:
+            sprache = "Englisches" if p.name.lower().startswith("e") else "Deutsches"
+            b = ttk.Button(knoepfe, text=f"{sprache} PDF öffnen ({p.name})", command=lambda p=p: oeffnen(p))
+            b.pack(fill="x", pady=2)
+            erster = erster or b
+        ttk.Button(knoepfe, text="Ordner öffnen", command=lambda: oeffnen(pdfs[0].parent)).pack(fill="x", pady=2)
+        ttk.Button(knoepfe, text="Schließen", command=self.destroy).pack(fill="x", pady=(10, 0))
+        self.bind("<Escape>", lambda e: self.destroy())
+        if erster:
+            erster.focus_set()
+        self.update_idletasks()
+        top = master.winfo_toplevel()
+        x = top.winfo_rootx() + (top.winfo_width() - self.winfo_reqwidth()) // 2
+        y = top.winfo_rooty() + (top.winfo_height() - self.winfo_reqheight()) // 3
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        self.grab_set()
 
 
 # ======================================================================== Startseite
@@ -870,24 +992,83 @@ class Start(ttk.Frame):
         ttk.Button(leiste, text="Hersteller-PDF importieren …", command=app.import_pdf).pack(side="left")
         ttk.Button(leiste, text="Leeres Datenblatt", command=app.neu_leer).pack(side="left", padx=6)
         ttk.Button(leiste, text="Öffnen", command=self.oeffnen).pack(side="left", padx=6)
+        ttk.Button(leiste, text="Duplizieren", command=self.duplizieren).pack(side="left", padx=6)
         ttk.Button(leiste, text="Entwurf löschen", command=self.loeschen).pack(side="left", padx=6)
         ttk.Button(leiste, text="Ausgabeordner öffnen", command=lambda: oeffnen(app.einst.ausgabe())).pack(side="right")
+
+        such = ttk.Frame(self, padding=(10, 2, 10, 0))
+        such.pack(fill="x")
+        ttk.Label(such, text="Suchen:").pack(side="left")
+        self.suche = tk.StringVar()
+        self.such_feld = ttk.Entry(such, textvariable=self.suche, width=40)
+        self.such_feld.pack(side="left", padx=6)
+        ttk.Label(such, text="Status:").pack(side="left", padx=(12, 0))
+        self.status_filter = tk.StringVar(value="Alle")
+        cb = ttk.Combobox(such, textvariable=self.status_filter, values=["Alle", ENTWURF, FREIGEGEBEN],
+                          state="readonly", width=14)
+        cb.pack(side="left", padx=6)
+        self.anzahl = ttk.Label(such, text="", foreground="#6A7380")
+        self.anzahl.pack(side="right")
+        self.suche.trace_add("write", lambda *a: self.filtern())
+        cb.bind("<<ComboboxSelected>>", lambda e: self.filtern())
+        self.such_feld.bind("<Escape>", lambda e: self.suche.set(""))
+
         sp = [("nr", "Bestellnummer", 110), ("titel", "Typbezeichnung", 260), ("hersteller", "Hersteller", 200),
               ("status", "Status", 110), ("weclapp", "Weclapp", 100), ("geaendert", "Geändert", 140)]
         self.tv = ttk.Treeview(self, columns=[s[0] for s in sp], show="headings")
+        self._sortierung = ("geaendert", True)
         for key, t, w in sp:
-            self.tv.heading(key, text=t)
+            self.tv.heading(key, text=t, command=lambda k=key: self.sortieren(k))
             self.tv.column(key, width=w)
         self.tv.pack(fill="both", expand=True, padx=10, pady=(4, 10))
         self.tv.bind("<Double-1>", lambda e: self.oeffnen())
+        self.tv.bind("<Return>", lambda e: self.oeffnen())
         self.aktualisieren()
 
     def aktualisieren(self):
-        self.tv.delete(*self.tv.get_children())
+        self._zeilen = []
         for ds in self.app.ablage.alle():
-            self.tv.insert("", "end", iid=ds.id, values=[ds.bestellnummer, ds.titel, ds.text("hersteller"), ds.status,
-                                                         ds.weclapp.get("status", "") if ds.status == FREIGEGEBEN else "",
-                                                         ds.geaendert.replace("T", " ")])
+            self._zeilen.append((ds.id, [ds.bestellnummer, ds.titel, ds.text("hersteller"), ds.status,
+                                         ds.weclapp.get("status", "") if ds.status == FREIGEGEBEN else "",
+                                         ds.geaendert.replace("T", " ")],
+                                 " ".join([ds.text("hersteller_typ"), ds.text("hersteller_bestellnummer"),
+                                           ds.text("serie"), ds.text("produkttyp")])))
+        self.filtern()
+
+    def filtern(self):
+        """Suchbegriffe (mehrere Wörter = alle müssen vorkommen) in Name, Nummern, Hersteller, Typ, Serie."""
+        worte = self.suche.get().lower().split()
+        st = self.status_filter.get()
+        spalten = ["nr", "titel", "hersteller", "status", "weclapp", "geaendert"]
+        key, absteigend = self._sortierung
+        i = spalten.index(key)
+        zeilen = sorted(self._zeilen, key=lambda z: (z[1][i] or "").lower(), reverse=absteigend)
+        self.tv.delete(*self.tv.get_children())
+        n = 0
+        for iid, werte, extra in zeilen:
+            if st != "Alle" and werte[3] != st:
+                continue
+            heu = " ".join(werte + [extra]).lower()
+            if all(w in heu for w in worte):
+                self.tv.insert("", "end", iid=iid, values=werte)
+                n += 1
+        self.anzahl.configure(text=f"{n} von {len(self._zeilen)} Datenblättern")
+
+    def sortieren(self, key):
+        alt, absteigend = self._sortierung
+        self._sortierung = (key, not absteigend if alt == key else False)
+        self.filtern()
+
+    def duplizieren(self):
+        sel = self.tv.selection()
+        if not sel:
+            messagebox.showinfo("Duplizieren", "Bitte zuerst ein Datenblatt in der Liste auswählen.")
+            return
+        neu = self.app.ablage.duplizieren(sel[0])
+        self.aktualisieren()
+        self.app.maske_zeigen(neu)
+        self.app.aktuell.hinweis("Kopie angelegt (Entwurf). Bestellnummern und Prüfhaken wurden zurückgesetzt – "
+                                 "bitte die abweichenden Werte anpassen.")
 
     def oeffnen(self):
         sel = self.tv.selection()
@@ -1028,9 +1209,39 @@ class App(tk.Tk):
         self.viewer = None
         self.start_zeigen()
         self.protocol("WM_DELETE_WINDOW", self.beenden)
+        self._kuerzel()
         if self.einst.update_pruefen:
             from . import updates
             updates.im_hintergrund(self)
+
+    def _kuerzel(self):
+        """Tastenkürzel: Strg+S speichern, Strg+P / Strg+Umschalt+P Vorschau DE/EN, Strg+O importieren,
+        Strg+N leeres Datenblatt, Strg+F suchen (Startseite)."""
+        def in_maske(fn):
+            def h(e=None):
+                if isinstance(self.aktuell, Maske):
+                    fn(self.aktuell)
+                    return "break"
+            return h
+
+        def speichern(m):
+            m.zwischenspeichern()
+        self.bind_all("<Control-s>", in_maske(speichern))
+        self.bind_all("<Control-S>", in_maske(speichern))
+        self.bind_all("<Control-p>", in_maske(lambda m: m.vorschau("de")))
+        self.bind_all("<Control-Shift-P>", in_maske(lambda m: m.vorschau("en")))
+        self.bind_all("<Control-o>", lambda e: (self.import_pdf(), "break")[1])
+        self.bind_all("<Control-n>", lambda e: (self.neu_leer(), "break")[1])
+
+        # Tk-Textfelder haben eigene Emacs-Kürzel (Strg+O fügt z. B. eine Zeile ein) – hier abschalten
+        for seq in ("<Control-o>", "<Control-p>", "<Control-n>", "<Control-f>"):
+            self.bind_class("Text", seq, lambda e: None)
+
+        def suchen(e=None):
+            if isinstance(self.aktuell, Start):
+                self.aktuell.such_feld.focus_set()
+                return "break"
+        self.bind_all("<Control-f>", suchen)
 
     def _wechseln(self, frame):
         if self.aktuell is not None:
@@ -1058,12 +1269,26 @@ class App(tk.Tk):
     def maske_zeigen(self, ds: Datensatz):
         self._wechseln(Maske(self, ds))
 
+    def maske_verlassen(self) -> bool:
+        """Vor dem Wechsel aus einer Maske: ungespeicherte Änderungen abfragen. False = abbrechen."""
+        if isinstance(self.aktuell, Maske) and self.aktuell.ungespeichert():
+            r = messagebox.askyesnocancel("Ungespeicherte Änderungen", "Änderungen am aktuellen Datenblatt speichern?")
+            if r is None:
+                return False
+            if r:
+                self.aktuell.zwischenspeichern(still=True)
+        return True
+
     def neu_leer(self):
+        if not self.maske_verlassen():
+            return
         ds = Datensatz()
         self.ablage.speichern(ds)
         self.maske_zeigen(ds)
 
     def import_pdf(self):
+        if not self.maske_verlassen():
+            return
         try:
             from . import importieren
         except ImportError:
@@ -1075,7 +1300,7 @@ class App(tk.Tk):
         EinstellungenDialog(self)
 
     def beenden(self):
-        if isinstance(self.aktuell, Maske) and self.aktuell.geaendert:
+        if isinstance(self.aktuell, Maske) and self.aktuell.ungespeichert():
             r = messagebox.askyesnocancel("Beenden", "Ungespeicherte Änderungen speichern?")
             if r is None:
                 return

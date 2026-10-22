@@ -48,7 +48,7 @@ def zeilen(ds: Datensatz, kat: K.Katalog, abschnitt: str, sprache: str) -> list[
     """Belegte Zeilen eines Abschnitts in Katalog-Reihenfolge (leere Felder werden ausgeblendet)."""
     out = []
     for f in kat.abschnitt(abschnitt):
-        if f.typ == K.LISTE or f.id == "schnittstellen":
+        if f.typ == K.LISTE or f.id in ("schnittstellen", "bestellnummer"):   # Bestellnummer steht schon in Kopf/Seitenleiste
             continue
         t = text(ds, f, kat, sprache)
         if t:

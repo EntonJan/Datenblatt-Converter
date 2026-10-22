@@ -76,6 +76,8 @@ def datensatz_aus_ergebnis(erg: auslesen.Ergebnis, kat: K.Katalog, ds: Datensatz
             w.min, w.max = regeln.parse_bereich(txt, f.einheit)
         elif f.typ in (K.AUSWAHL, K.MEHRFACH):
             w.auswahl = auswahl_vorschlag(f, txt)
+            if w.auswahl:
+                w.de = w.en = ""    # Datenblatt zeigt den sauberen Auswahlwert („Lüfter“); Originaltext über die Fundstelle
         elif f.typ == K.JA_NEIN:
             w.ja = not txt.strip().lower().startswith(NEIN_WOERTER)
             w.de = w.en = ""        # Datenblatt zeigt „Ja“/„Nein“; der Originaltext bleibt über die Fundstelle sichtbar

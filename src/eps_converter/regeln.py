@@ -214,3 +214,75 @@ def pruefe_freigabe_felder(ds: Datensatz, kat: K.Katalog) -> list[tuple[str, str
 
 def dateiname(bestellnummer: str, sprache: str) -> str:
     return f"{'e' if sprache == 'en' else 'd'}{bestellnummer}.pdf"
+
+
+# ------------------------------------------------------------------------ Herstellerspuren
+
+_ALLGEMEIN = {"power", "elektronik", "electronics", "electronic", "gmbh", "group", "systems", "system", "technik",
+              "technology", "industries", "germany", "deutschland", "international", "company", "sas", "ltd", "inc"}
+SPUR_FLOSKELN = (r"\bour\s+(?:plant|company|factory|products?|engineers?|facility|own)\b|\bwe\s+(?:offer|manufacture|produce|recommend)\b"
+                 r"|\bunser(?:e|em|en|er|es)?\b|\bwir\b|www\.|https?://|\b[\w.-]+@[\w-]+\.\w+|®|™")
+# Kürzel, die wie Modellnummern aussehen, aber Normen/Schnittstellen sind
+_KEIN_MODELL = {"EN", "UL", "IEC", "DIN", "ISO", "VDE", "IP", "RS", "CAN", "USB", "AC", "DC", "MTBF", "EMV", "EMC", "TFT",
+                "LCD", "LED", "PWM", "CSA", "GPIB", "LAN", "SCPI", "CE", "UKCA", "IEEE", "ANSI", "NEMA", "MIL", "STD", "TÜV"}
+_MODELL = re.compile(r"\b([A-ZÄÖÜ]{2,5})[ -]?(\d{3,5})[A-Z]?\b")
+
+
+def _namen_muster(namen: list[str]) -> list[re.Pattern]:
+    muster = []
+    for n in namen:
+        n = (n or "").strip()
+        if len(n) < 3:
+            continue
+        muster.append(re.compile(r"(?<!\w)" + re.escape(n) + r"(?!\w)", re.I))
+        erstes = re.split(r"[\s/,&-]+", n)[0]
+        if len(erstes) >= 4 and erstes.lower() not in _ALLGEMEIN and erstes.lower() != n.lower():
+            muster.append(re.compile(r"(?<!\w)" + re.escape(erstes) + r"(?!\w)", re.I))
+    return muster
+
+
+def herstellerspuren(ds: Datensatz, kat: K.Katalog, hersteller_namen: list[str]) -> list[tuple[str, str, str]]:
+    """Sucht in allen Texten, die ins EPS-Datenblatt gehen, nach Herstellerspuren.
+    Liefert (feld_id, gefundener Text, Meldung). Feld-IDs: Katalogfelder, "beschreibung", "optionen", "lieferumfang", "bilder"."""
+    namen = list(hersteller_namen or []) + [ds.text("hersteller")]
+    muster = _namen_muster(namen)
+    typ = ds.text("hersteller_typ").strip()
+    if len(typ) >= 4:
+        muster.append(re.compile(re.escape(typ).replace(r"\ ", r"\s*"), re.I))
+    floskel = re.compile(SPUR_FLOSKELN, re.I)
+    texte: list[tuple[str, str]] = []
+    for fid, w in ds.werte.items():
+        if not kat.hat(fid) or kat.feld(fid).abschnitt == K.INTERN or fid in ("typbezeichnung", "hersteller"):
+            continue
+        for t in (w.de, w.en):
+            if t:
+                texte.append((fid, t))
+    for o in ds.optionen:
+        texte += [("optionen", t) for t in (o.code, o.de, o.en) if t]
+    texte += [("lieferumfang", t) for e in ds.lieferumfang for t in (e.de, e.en) if t]
+    texte += [("bilder", t) for b in ds.bilder for t in (b.de, b.en) if t]
+
+    erg, gesehen = [], set()
+
+    def neu(fid, fund, meldung):
+        if (fid, fund.lower()) not in gesehen:
+            gesehen.add((fid, fund.lower()))
+            erg.append((fid, fund, meldung))
+
+    for fid, t in texte:
+        name = kat.feld(fid).de if kat.hat(fid) else {"beschreibung": "Beschreibung", "optionen": "Optionen",
+                                                        "lieferumfang": "Lieferumfang", "bilder": "Bildunterschrift"}[fid]
+        for m in muster:
+            for f in m.finditer(t):
+                neu(fid, f.group(0), f"{name}: Herstellername/-typ „{f.group(0)}“")
+        for f in floskel.finditer(t):
+            neu(fid, f.group(0), f"{name}: Herstellerformulierung „{f.group(0)}“")
+        if fid == "beschreibung":
+            eigene = " ".join([ds.titel, ds.text("serie"), ds.text("serie", "en")]).lower()
+            for f in _MODELL.finditer(t):
+                vorne = t[max(0, f.start() - 4):f.start()].upper()
+                if f.group(0).lower() in eigene or vorne.endswith(("E/", "EPS/")):
+                    continue                            # EPS-eigene Serien-/Typbezeichnung
+                if f.group(1) not in _KEIN_MODELL:
+                    neu(fid, f.group(0), f"{name}: mögliche Hersteller-Modellbezeichnung „{f.group(0)}“")
+    return erg
