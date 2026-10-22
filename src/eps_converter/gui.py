@@ -488,6 +488,8 @@ class Maske(ttk.Frame):
         ttk.Button(k, text="Zwischenspeichern", command=self.zwischenspeichern).pack(side="right", padx=8)
         if self.ds.quelle_pdf:
             ttk.Button(k, text="Original anzeigen", command=self.original).pack(side="right", padx=2)
+        self.btn_alle = ttk.Button(k, text="Alle geprüft ☑", command=self.alle_geprueft)
+        self.btn_alle.pack(side="right", padx=2)
         self.zaehler = tk.Label(k, text="", fg="white", bg=NAVY)
         self.zaehler.pack(side="right", padx=10)
 
@@ -590,7 +592,24 @@ class Maske(ttk.Frame):
         kern = [e for e in self.editoren.values() if e.f.kern]
         n = sum(1 for e in kern if e.geprueft.get()) + (1 if self.opt_geprueft.get() else 0)
         gesamt = len(kern) + 1
-        self.zaehler.configure(text=f"Kernfelder geprüft: {n}/{gesamt}", fg="white" if n < gesamt else "#9BE29B")
+        self.zaehler.configure(text=f"Geprüft: {n}/{gesamt}", fg="white" if n < gesamt else "#9BE29B")
+        if hasattr(self, "btn_alle"):
+            self.btn_alle.configure(text="Prüfhaken entfernen ☐" if n == gesamt else "Alle geprüft ☑")
+
+    def alle_geprueft(self):
+        """Setzt alle Prüfhaken der Kernfelder auf einmal – oder entfernt sie, wenn schon alle gesetzt sind."""
+        kern = [e for e in self.editoren.values() if e.f.kern]
+        alle = all(e.geprueft.get() for e in kern) and self.opt_geprueft.get()
+        if not alle and not messagebox.askyesno(
+                "Alle Kernfelder geprüft?",
+                "Damit werden alle Kernfelder als geprüft markiert.\n\n"
+                "Hast du die Werte mit dem Original-Datenblatt verglichen?", parent=self):
+            return
+        for e in kern:
+            e.geprueft.set(not alle)
+        self.opt_geprueft.set(not alle)
+        self.geaendert = True
+        self.zaehler_aktualisieren()
 
     def eps_name_setzen(self):
         ed_typ = self.editoren["typbezeichnung"]
