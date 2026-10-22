@@ -1,0 +1,46 @@
+name: EXE bauen
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller==6.22.3 pytest
+      - name: Tests
+        run: python -m pytest -q
+      - name: EXE bauen
+        run: pyinstaller --noconfirm --clean packaging/datenblatt-converter.spec
+      - name: Selbsttest der fertigen EXE
+        shell: pwsh
+        run: |
+          $env:EPS_CONVERTER_HOME = "$env:RUNNER_TEMP\eps"
+          $ziel = "$env:RUNNER_TEMP\selbsttest"
+          $p = Start-Process -FilePath "dist\Datenblatt-Converter.exe" -ArgumentList "--selbsttest", $ziel -Wait -PassThru
+          Get-Content "$ziel\selbsttest.txt"
+          if ($p.ExitCode -ne 0) { exit 1 }
+          if (-not (Test-Path "$ziel\d999999.pdf")) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Datenblatt-Converter
+          path: dist/Datenblatt-Converter.exe
+      - name: Release (nur bei Versions-Tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Datenblatt-Converter.exe
+          generate_release_notes: true

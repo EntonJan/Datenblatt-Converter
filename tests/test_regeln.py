@@ -53,3 +53,9 @@ def test_obergrenze(wunsch, grenze):
 def test_dateiname():
     assert R.dateiname("200034", "de") == "d200034.pdf"
     assert R.dateiname("200034", "en") == "e200034.pdf"
+
+
+def test_versionsvergleich():
+    from eps_converter.updates import _tupel
+    assert _tupel("v0.3.1") > _tupel("0.3.0")
+    assert not _tupel("v0.3.0") > _tupel("0.3.0")

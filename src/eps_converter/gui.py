@@ -914,6 +914,9 @@ class App(tk.Tk):
         self.viewer = None
         self.start_zeigen()
         self.protocol("WM_DELETE_WINDOW", self.beenden)
+        if self.einst.update_pruefen:
+            from . import updates
+            updates.im_hintergrund(self)
 
     def _wechseln(self, frame):
         if self.aktuell is not None:
