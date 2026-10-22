@@ -66,6 +66,7 @@ class Katalog:
     woerterbuch: dict[str, str]          # de -> en
     schnittstellen_werte: list[tuple[str, str]]
     quelle: Path
+    synonyme: dict[str, str] = field(default_factory=dict)   # normalisierte Bezeichnung -> Feld-ID
 
     def __post_init__(self):
         self._by_id = {f.id: f for f in self.felder}
@@ -82,6 +83,16 @@ class Katalog:
     @property
     def kernfelder(self) -> list[Feld]:
         return [f for f in self.felder if f.kern]
+
+    def uebersetze_rueck(self, text_en: str) -> str | None:
+        """Feste Übersetzung Englisch → Deutsch (Wörterbuch rückwärts)."""
+        if not text_en:
+            return ""
+        key = text_en.strip().lower()
+        for de, en in self.woerterbuch.items():
+            if en.strip().lower() == key:
+                return de
+        return None
 
     def uebersetze(self, text_de: str) -> str | None:
         """Feste Übersetzung aus dem Wörterbuch (exakt, ohne Groß-/Kleinschreibung)."""
@@ -173,5 +184,24 @@ def laden(pfad: Path | None = None) -> Katalog:
             woerter.setdefault(de, en)
     for de, en in schnittstellen_werte:
         woerter.setdefault(de, en)
+    synonyme: dict[str, str] = {}
+    if "Synonyme" in wb.sheetnames:
+        for r in list(wb["Synonyme"].iter_rows(values_only=True))[1:]:
+            fid, begriff = _text(r[0]), _text(r[1] if len(r) > 1 else "")
+            if fid and begriff and (fid in by_id):
+                synonyme[normalisieren(begriff)] = fid
+    for f in felder:                      # Feldnamen selbst gelten immer als Synonyme
+        if f.abschnitt != INTERN:
+            synonyme.setdefault(normalisieren(f.de), f.id)
+            synonyme.setdefault(normalisieren(f.en), f.id)
     wb.close()
-    return Katalog(felder=felder, woerterbuch=woerter, schnittstellen_werte=schnittstellen_werte, quelle=pfad)
+    return Katalog(felder=felder, woerterbuch=woerter, schnittstellen_werte=schnittstellen_werte, quelle=pfad,
+                   synonyme=synonyme)
+
+
+def normalisieren(s: str) -> str:
+    s = (s or "").lower().strip()
+    for z in ("■", "•", "–", "—"):
+        s = s.replace(z, " ")
+    s = s.strip(" -:.\t")
+    return " ".join(s.split())

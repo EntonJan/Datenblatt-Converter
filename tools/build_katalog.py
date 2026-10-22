@@ -254,6 +254,54 @@ for de, en, q, b in [
 ]:
     w(de, en, q, b)
 
+
+# ---------------- Synonyme: Bezeichnungen in Hersteller-Datenblättern → Feld-ID (für das Auslesen ohne KI)
+S = []
+def s(fid, *begriffe):
+    for b in begriffe:
+        S.append((fid, b))
+
+s("ausgangsspannung", "Ausgangsspannung", "Output voltage", "Output Voltage Range", "Nennspannung & Bereich", "Nennspannung",
+  "DC Ausgang Spannung", "DC-Ausgangsspannung", "Ausgangsspannungsbereich", "Gleichspannung", "Voltage output", "Rated output voltage")
+s("ausgangsstrom", "Ausgangsstrom", "Output current", "Nennstrom & Bereich", "Nennstrom", "DC Ausgang Strom", "Rated output current")
+s("ausgangsleistung", "Ausgangsleistung", "Output power", "Nennleistung & Bereich", "Nennleistung", "Dauerausgangsleistung",
+  "Rated power", "Continuous output power", "Output rating")
+s("eingangsspannung", "AC Eingangsspannung", "DC Eingangsspannung", "Eingangsspannung", "Input voltage", "Netzspannung", "Spannung / Phasen / Frequenz", "Mains voltage", "AC input voltage")
+s("eingangsstrom", "Eingangsstrom", "Input current")
+s("eingangsfrequenz", "Eingangsfrequenz", "Input frequency")
+s("netzanschluss", "Netzanschluss", "Mains", "AC-Anschluss", "AC input")
+s("leistungsfaktor", "Leistungsfaktor", "Power factor")
+s("wirkungsgrad", "Wirkungsgrad", "Efficiency", "Effizienz", "Effizienz max.")
+s("betriebstemperatur", "Betriebstemperatur", "Operating temperature", "Operating temperature range", "Operation temperature",
+  "Umgebungstemperatur", "Arbeitstemperatur")
+s("lagertemperatur", "Lagertemperatur", "Storage temperature")
+s("luftfeuchtigkeit", "Luftfeuchtigkeit", "Humidity", "Relative humidity", "Rel. Luftfeuchte")
+s("betriebshoehe", "Betriebshöhe", "Altitude", "Aufstellhöhe")
+s("kuehlung", "Kühlung", "Cooling", "Kühlart")
+s("abmessungen", "Abmessungen", "Abmessungen (BxHxT)", "Abmessungen (B x H x T)", "Dimensions", "Package Dimensions (W x H x L)",
+  "Dimensions (WxHxD)", "Maße")
+s("gewicht", "Gewicht", "Weight", "Net weight")
+s("normen", "Normen", "Standards", "Sicherheitszertifikate", "Zertifizierungen")
+s("schutzklasse", "Schutzklasse", "Protection class")
+s("ueberspannungskategorie", "Überspannungskategorie", "Overvoltage category")
+s("spannungsfestigkeit_ein_aus", "Isolation Eingang/Ausgang", "Isolation In-/Output", "Isolation input/output")
+s("anzeige", "Anzeige", "Display", "Anzeige und Bedieneinheit")
+s("betriebsarten", "Betriebsarten", "Operation modes", "Operating modes", "Regelart")
+s("klirrfaktor", "Klirrfaktor", "THD", "Total Harmonic Distortion")
+s("scheitelfaktor", "Scheitelfaktor", "Crest factor", "Load Crest Factor")
+s("ausgangsfrequenz", "Ausgangsfrequenz", "Output frequency")
+s("restwelligkeit_i", "Restwelligkeit Strom", "Ripple current")
+s("restwelligkeit_u", "Restwelligkeit Spannung", "Restwelligkeit", "Restwelligkeit U", "Ripple", "Output Noise")
+s("spannungsstabilitaet_last", "Spannungsstabilität Last", "Load regulation", "Line/Load Regulation", "Stabilität bei 0-100% Last")
+s("spannungsstabilitaet_netz", "Spannungsstabilität Netz", "Line regulation", "Stabilität bei ±10% ∆ UAC")
+s("spannungsausregelung_last", "Spannungsausregelung Last", "Ausregelung 10-100% Last", "Transient response")
+s("anstiegszeit_spannung", "Anstiegszeit Spannung", "Anstiegszeit 10-90% UNenn", "Rise time voltage")
+s("parallelschaltung", "Parallelschaltung", "Parallel operation", "Parallelbetrieb")
+s("funktionsgenerator", "Funktionsgenerator", "Function generator")
+s("netzrueckspeisung", "Netzrückspeisung", "Energy recovery", "Energierückspeisung")
+s("hersteller_bestellnummer", "Artikelnummer", "Part number", "Bestellnummer", "Order code", "Best.-Nr.", "Art.-Nr.")
+s("hersteller_typ", "Model", "Modell", "Typ", "Type", "MODEL")
+
 # ---------------- Excel schreiben
 ARIAL = "Arial"
 HEAD_FILL = PatternFill("solid", fgColor="35528C")
@@ -303,6 +351,7 @@ lines = [
     ("• Spalten „Feld (DE)“, „Feld (EN)“, „Bemerkung“ und die Reihenfolge der Zeilen (= Reihenfolge auf dem Datenblatt).", False),
     ("• Blatt „Auswahlwerte“: Werte ergänzen, umbenennen, löschen. Danach Status auf „bestätigt“ setzen.", False),
     ("• Blatt „Wörterbuch“: Übersetzungen ergänzen oder korrigieren.", False),
+    ("• Blatt „Synonyme“: wie ein Feld in Hersteller-Datenblättern heißen kann (hilft beim Auslesen ohne KI).", False),
     ("• Spalte „ID“ bitte NICHT ändern – darüber werden die Daten gespeichert.", False),
     ("", False),
     ("Farben", True),
@@ -338,10 +387,14 @@ sheet(ws2, ["Feld-ID", "Wert (DE)", "Wert (EN)", "Status", "Beleg"], A, [28, 34,
 dv_st2 = DataValidation(type="list", formula1=f'"{OK},{VOR}"', allow_blank=True)
 ws2.add_data_validation(dv_st2); dv_st2.add(f"D2:D{ws2.max_row + 200}")
 
+ws4 = None
 ws3 = wb.create_sheet("Wörterbuch")
 sheet(ws3, ["Deutsch", "Englisch", "Quelle (EPS-Artikel)", "Bemerkung"], W, [50, 50, 20, 45])
+
+ws4 = wb.create_sheet("Synonyme")
+sheet(ws4, ["Feld-ID", "Bezeichnung im Hersteller-Datenblatt"], S, [28, 50])
 
 OUT.parent.mkdir(parents=True, exist_ok=True)
 wb.save(OUT)
 kern = sum(1 for r in F if r[6] == "ja")
-print(f"{OUT}: {len(F)} Felder, davon {kern} Kernfelder; {len(A)} Auswahlwerte; {len(W)} Wörterbuch-Einträge")
+print(f"{OUT}: {len(F)} Felder, davon {kern} Kernfelder; {len(A)} Auswahlwerte; {len(W)} Wörterbuch-Einträge; {len(S)} Synonyme")

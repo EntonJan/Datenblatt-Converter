@@ -137,6 +137,8 @@ class FeldEditor:
         tk.Label(self.box, text="EN", fg="#6A7380", bg=self.bg, font=("Segoe UI", 7)).grid(row=1, column=1, sticky="w")
         self.de.bind("<KeyRelease>", lambda e: self._de_geaendert())
         self.en.bind("<KeyRelease>", lambda e: self._en_geaendert())
+        for w in (self.de, self.en):
+            w.bind("<FocusIn>", lambda e: self.m.fundstelle_zeigen(self.f.id), add="+")
 
     def _de_geaendert(self):
         if self._lade:
@@ -166,10 +168,20 @@ class FeldEditor:
     # -- Laden / Speichern
     def laden(self, w: Wert):
         self._lade = True
+        self.fundstelle = w.fundstelle
+        if w.fundstelle:
+            seite = w.fundstelle.split("|")[0]
+            self.info.configure(text=f"{self.f.einheit}  PDF S.{seite}".strip(), foreground=NAVY, cursor="hand2")
+            self.info.bind("<Button-1>", lambda e: self.m.fundstelle_zeigen(self.f.id))
         self.en_manuell = w.en_manuell
         if hasattr(self, "de"):
             self.de.delete(0, "end"); self.de.insert(0, w.de)
             self.en.delete(0, "end"); self.en.insert(0, w.en)
+            if isinstance(self.en, tk.Entry):
+                ungeprueft = (not w.en_manuell and w.de and w.en == w.de and self.kat.uebersetze(w.de) is None
+                              and self.kat.uebersetze_rueck(w.en) is None
+                              and any(len(x) > 3 and x.isalpha() for x in w.de.replace("-", " ").split()))
+                self.en.configure(background=WARN_BG if ungeprueft else "white")
         self.geprueft.set(w.geprueft)
         self._lade = False
 
@@ -474,6 +486,8 @@ class Maske(ttk.Frame):
         ttk.Button(k, text="PDF-Vorschau EN", command=lambda: self.vorschau("en")).pack(side="right", padx=2)
         ttk.Button(k, text="PDF-Vorschau DE", command=lambda: self.vorschau("de")).pack(side="right", padx=2)
         ttk.Button(k, text="Zwischenspeichern", command=self.zwischenspeichern).pack(side="right", padx=8)
+        if self.ds.quelle_pdf:
+            ttk.Button(k, text="Original anzeigen", command=self.original).pack(side="right", padx=2)
         self.zaehler = tk.Label(k, text="", fg="white", bg=NAVY)
         self.zaehler.pack(side="right", padx=10)
 
@@ -557,6 +571,18 @@ class Maske(ttk.Frame):
         fr.columnconfigure(0, weight=1); fr.columnconfigure(1, weight=1); fr.rowconfigure(2, weight=1)
 
     # ---- Aktionen
+    def original(self):
+        p = self.app.ablage.ordner(self.ds.id) / "quelle.pdf"
+        if p.exists():
+            self.app.original_zeigen(p)
+
+    def fundstelle_zeigen(self, fid):
+        ed = self.editoren.get(fid)
+        fs = getattr(ed, "fundstelle", "") if ed else ""
+        v = self.app.viewer
+        if fs and v is not None and v.winfo_exists():
+            v.zeige(fs, ed.f.de)
+
     def hinweis(self, text):
         self.statuszeile.configure(text=text, fg="#6A7380")
 
@@ -885,6 +911,7 @@ class App(tk.Tk):
             raise SystemExit(1)
         self.ablage = LokaleAblage()
         self.aktuell = None
+        self.viewer = None
         self.start_zeigen()
         self.protocol("WM_DELETE_WINDOW", self.beenden)
 
@@ -895,7 +922,21 @@ class App(tk.Tk):
         frame.pack(fill="both", expand=True)
 
     def start_zeigen(self):
+        if self.viewer is not None and self.viewer.winfo_exists():
+            self.viewer.schliessen()
+        self.viewer = None
         self._wechseln(Start(self))
+
+    def original_zeigen(self, pfad: Path):
+        from .importieren import OriginalViewer
+        if self.viewer is not None and self.viewer.winfo_exists():
+            self.viewer.schliessen()
+        try:
+            self.viewer = OriginalViewer(self, pfad)
+            x = self.winfo_rootx() + self.winfo_width() - 40
+            self.viewer.geometry(f"720x{max(600, self.winfo_height())}+{min(x, self.winfo_screenwidth() - 720)}+{self.winfo_rooty()}")
+        except Exception as e:
+            messagebox.showwarning("Original", f"Vorschau nicht möglich: {e}")
 
     def maske_zeigen(self, ds: Datensatz):
         self._wechseln(Maske(self, ds))
