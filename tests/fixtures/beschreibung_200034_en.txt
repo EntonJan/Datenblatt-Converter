@@ -1,0 +1,15 @@
+The programmable laboratory power supply units in the "E/PS 10000 2U" series from EPS Power Supplies are particularly suitable for test systems and industrial control systems as well as for laboratories and workshops thanks to their very compact 19" rack-mount housing with 2 height units (2U). The devices are available with DC output voltages between 0-60V (SELV) and 0-1500V, currents between 0-6A and 0-120A and power ratings of 0-1500/3000W.
+
+All models are microprocessor-controlled. This enables accurate and fast measurement and display of the actual values. Set and actual values, status displays and messages are also clearly shown on an intuitive 5" TFT touch display. The "graph" is a visual representation of the progression of voltage, current and power, which can be called up on the HMI display during operation.
+
+For remote control, the device has an Ethernet interface on the rear, a USB-B interface and an isolated analogue interface as standard. Other digital interfaces such as Profibus, ProfiNet, ModBus TCP, CAN, CANopen, EtherCAT or RS232 can be added using optional, pluggable and retrofittable interface modules. This means that the devices can be connected to common industrial buses by simply changing or adding a small module. Configuration is simple and, if at all necessary, is carried out on the device. This means that the power supply units can be operated via the digital interface in combination with other loads or other types of device or controlled by a PC or PLC.
+
+The data can be recorded on a USB stick (logging). All interfaces are galvanically isolated from the device up to 1000V DC (up to 360V output) and up to 2000V (from 500V output).
+
+The devices also offer the option of parallel connection in share bus mode as standard for constant current distribution as well as a genuine master-slave connection with totalling of the slave devices. In this operating mode, up to 64 devices can be connected to form a system that offers an increased total output of up to 192 kW.
+
+The power supply units are CE, UL and CSA certified.
+
+Further options are the calibration with protocol, warranty extension and 19" racks.
+
+Energy efficiency: Auto-ranging, high efficiency, temperature-controlled fans, SEMI F47

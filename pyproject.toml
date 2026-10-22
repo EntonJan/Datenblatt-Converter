@@ -1,0 +1,9 @@
+[project]
+name = "eps-datenblatt-converter"
+version = "0.2.0"
+requires-python = ">=3.12"
+dependencies = ["reportlab>=4", "openpyxl>=3.1", "pdfplumber>=0.11", "pypdfium2>=4", "pillow>=10"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]

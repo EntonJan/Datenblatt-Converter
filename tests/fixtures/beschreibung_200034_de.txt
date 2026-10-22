@@ -1,0 +1,15 @@
+Die programmierbaren Labornetzgeräte der Serie »E/PS 10000 2U« von EPS Stromversorgung sind durch ihre recht kompakten 19"-Einschubgehäuse mit 2 Höheneinheiten (2U) besonders für Prüfsysteme und Industriesteuerungen, aber auch Labore und Werkstätten geeignet. Zur Verfügung stehen Geräte mit DC-Ausgangsspannungen zwischen 0-60V (SELV) und 0-1500V, Strömen zwischen 0-6A und 0-120A und Leistungen von 0-1500/3000W.
+
+Alle Modelle sind mikroprozessorgesteuert. Dies erlaubt eine genaue und schnelle Messung und Anzeige von Istwerte. Soll- und Istwerte, Zustandsanzeigen und Meldungen werden auch auf einem intuitiven 5" TFT Touch-Display übersichtlich dargestellt. Der "Graph" ist eine bei Bedienung am HMI Display aufrufbare, visuelle Darstellung des Verlaufs von Spannung, Strom und Leistung.
+
+Für die Fernsteuerung verfügt das Gerät serienmäßig über eine rückwärtiges Ethernet, eine USB-B-Schnittstelle, sowie eine galvanisch getrennte Analogschnittstelle. Mittels optionalen, steck- und nachrüstbaren Schnittstellenmodulen können weitere digitale Schnittstellen wie Profibus, ProfiNet, ModBus TCP, CAN, CANopen, EtherCAT oder RS232 hinzugefügt werden. Dies ermöglicht die Anbindung der Geräte an gängige industrielle Busse allein durch Wechsel oder Hinzufügen eines kleinen Moduls. Die Konfiguration ist einfach und wird am Gerät erledigt, sofern überhaupt nötig. Die Netzgeräte können so z.B. über die digitale Schnittstelle im Verbund mit anderen Lasten oder gar anderen Gerätetypen betrieben bzw. von einem PC oder einer SPS gesteuert werden.
+
+Die Datenaufzeichnung kann auf USB stick erfolgen (Logging). Alle Schnittstellen sind zum Gerät bis 1000V DC (bis 360V Ausgang) und bis 2000V (ab 500V Ausgang) galvanisch getrennt.
+
+Die Geräte bieten außerdem standardmäßig die Möglichkeit der Parallelschaltung im Share-Bus-Betrieb zur gleichmäßigen Stromaufteilung, sowie eine echte Master-Slave-Verbindung mit Aufsummierung der Slave-Geräte. Über diese Betriebsart lassen sich bis zu 64 Geräte zu einem System verbinden, das eine erhöhte Gesamtleistung von bis zu 192 kW bietet.
+
+Die Netzgeräte sind nach CE, UL sowie CSA zertifiziert.
+
+Weitere Optionen sind Kalibrierung mit Protokoll, verlängerte Garantie und 19" Schränke.
+
+Energieeffizienz: Autoranging, hoher Wirkungsgrad, temperaturgeregelte Lüfter, SEMI F47
