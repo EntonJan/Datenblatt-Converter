@@ -24,12 +24,12 @@ Grundlage: Pflichtenheft Produktdaten-Pipeline (Stand 15.10.2026).
 | `assets/` | Logo, Banner, Schrift (Carlito, OFL-Lizenz) |
 | `tests/` | automatische Tests (`python -m pytest`) |
 | `packaging/` | PyInstaller-Bauplan für die EXE |
-| `.github/workflows/build.yml` | baut bei jedem Push die EXE (Artefakt); bei Tag `v*` als Release |
+| `.github/workflows/build.yml` | baut bei jedem Push die EXE (Artefakt); bei neuer Versionsnummer als Release |
 
 ## Neue Version veröffentlichen
 
-Versionsnummer in `src/eps_converter/__init__.py` erhöhen, committen, Tag setzen (`git tag v0.3.1 && git push --tags`).
-GitHub baut die EXE und hängt sie an das Release. Das Programm meldet beim Start, wenn eine neuere Version vorliegt.
+Versionsnummer in `src/eps_converter/__init__.py` erhöhen und auf `main` pushen. GitHub baut die EXE und legt
+automatisch ein Release `v<Version>` mit der EXE an (nur wenn es die Version noch nicht gibt). Das Programm meldet beim Start, wenn eine neuere Version vorliegt.
 
 ## Stand
 
