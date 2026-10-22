@@ -185,25 +185,30 @@ def hat_wert(w, f: K.Feld) -> bool:
 
 def pruefe_freigabe(ds: Datensatz, kat: K.Katalog) -> list[str]:
     """Liefert eine Liste von Problemen. Leer = Freigabe möglich."""
+    return [t for _, _, t in pruefe_freigabe_felder(ds, kat)]
+
+
+def pruefe_freigabe_felder(ds: Datensatz, kat: K.Katalog) -> list[tuple[str, str, str]]:
+    """Wie pruefe_freigabe, aber mit Feld-ID und Art: (feld_id, "wert" | "geprueft", Meldung)."""
     p = []
     for f in kat.felder:
         w = ds.werte.get(f.id)
         if f.pflicht and f.typ != K.LISTE and not hat_wert(w, f):
-            p.append(f"Pflichtfeld fehlt: {f.de}")
+            p.append((f.id, "wert", f"Pflichtfeld fehlt: {f.de}"))
         if f.kern and f.typ != K.LISTE and not (w and w.geprueft):
-            p.append(f"Kernfeld nicht als geprüft markiert: {f.de}")
+            p.append((f.id, "geprueft", f"Kernfeld nicht als geprüft markiert: {f.de}"))
         if w and f.typ == K.BEREICH and w.min is not None and w.max is not None and w.min > w.max:
-            p.append(f"{f.de}: „von“ ist größer als „bis“")
+            p.append((f.id, "wert", f"{f.de}: „von“ ist größer als „bis“"))
     opt = ds.werte.get("optionen")
     if kat.hat("optionen") and kat.feld("optionen").kern and not (opt and opt.geprueft):
-        p.append("Kernfeld nicht als geprüft markiert: Optionen")
+        p.append(("optionen", "geprueft", "Kernfeld nicht als geprüft markiert: Optionen"))
     nr = ds.bestellnummer
     if nr and not re.fullmatch(r"[A-Za-z0-9._-]+", nr):
-        p.append("Bestellnummer enthält unzulässige Zeichen (erlaubt: Buchstaben, Ziffern, . _ -)")
+        p.append(("bestellnummer", "wert", "Bestellnummer enthält unzulässige Zeichen (erlaubt: Buchstaben, Ziffern, . _ -)"))
     if ds.regel != REGEL_HAENDLER:
         name = ds.titel
         if name and not name.upper().startswith(("EPS/", "E/")):
-            p.append("Typbezeichnung ist keine EPS-Bezeichnung (beginnt nicht mit „EPS/“ bzw. „E/“)")
+            p.append(("typbezeichnung", "wert", "Typbezeichnung ist keine EPS-Bezeichnung (beginnt nicht mit „EPS/“ bzw. „E/“)"))
     return p
 
 

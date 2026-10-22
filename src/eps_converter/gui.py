@@ -114,18 +114,62 @@ class FeldEditor:
         if feld.bemerkung:
             lab.bind("<Enter>", lambda e: maske.hinweis(f"{feld.de}: {feld.bemerkung}"))
             lab.bind("<Leave>", lambda e: maske.hinweis(""))
-        self.box = tk.Frame(parent, background=bg)
+        self.lab = lab
+        self.sb = None                                  # Scrollbereich des Reiters (für „hinspringen“)
+        self.box = tk.Frame(parent, background=bg, highlightthickness=2, highlightbackground=bg, highlightcolor=bg)
         self.box.grid(row=zeile, column=1, sticky="we", pady=2)
         self.pruef = None
         if feld.kern:
             self.pruef = tk.Checkbutton(parent, text="geprüft", variable=self.geprueft, background=bg,
-                                        command=maske.zaehler_aktualisieren)
+                                        highlightthickness=2, highlightbackground=bg, highlightcolor=bg,
+                                        command=lambda: (self.markieren(None), maske.zaehler_aktualisieren()))
             self.pruef.grid(row=zeile, column=2, sticky="nw", padx=6)
         else:
             tk.Label(parent, text="", background=bg).grid(row=zeile, column=2)
         self.info = tk.Label(parent, text=feld.einheit, anchor="w", background=bg, foreground="#6A7380")
         self.info.grid(row=zeile, column=3, sticky="nw", padx=4)
         self.bauen()
+        self._markierung_loesen_binden(self.box)
+
+    # ---- Rote Markierung bei Freigabe-Problemen
+    def markieren(self, art: str | None):
+        """art = "wert" (Wertefeld rot umrandet), "geprueft" (Prüfhaken rot umrandet) oder None (zurücksetzen)."""
+        rot = "#D62828"
+        self.box.configure(highlightbackground=rot if art == "wert" else self.bg,
+                           highlightcolor=rot if art == "wert" else self.bg)
+        if self.pruef is not None:
+            self.pruef.configure(highlightbackground=rot if art == "geprueft" else self.bg,
+                                 highlightcolor=rot if art == "geprueft" else self.bg)
+        self.lab.configure(foreground=rot if art else "black")
+
+    def _markierung_loesen_binden(self, w):
+        for ev in ("<KeyRelease>", "<<ComboboxSelected>>", "<ButtonRelease-1>"):
+            w.bind(ev, lambda e: self._wert_markierung_loesen(), add="+")
+        for c in w.winfo_children():
+            self._markierung_loesen_binden(c)
+
+    def _wert_markierung_loesen(self):
+        if self.box.cget("highlightbackground") != self.bg:
+            self.markieren(None)
+
+    def fokus(self):
+        """Zum Feld springen: Reiter wählen, hinscrollen, Cursor ins erste Eingabefeld."""
+        if self.sb is not None:
+            self.m.nb.select(self.sb)
+            self.m.update_idletasks()
+            hoehe = max(self.sb.inhalt.winfo_height(), 1)
+            self.sb.canvas.yview_moveto(max(0.0, (self.box.winfo_y() - 60) / hoehe))
+        ziel = self._erstes_eingabefeld(self.box)
+        (ziel or self.box).focus_set()
+
+    def _erstes_eingabefeld(self, w):
+        for c in w.winfo_children():
+            if isinstance(c, (tk.Entry, ttk.Entry, ttk.Combobox, tk.Text)) and str(c.cget("state")) != "disabled":
+                return c
+            t = self._erstes_eingabefeld(c)
+            if t is not None:
+                return t
+        return None
 
     # -- Bausteine
     def _de_en(self, breite=34):
@@ -521,6 +565,7 @@ class Maske(ttk.Frame):
             else:
                 cls = EDITOREN.get(f.typ, FeldEditor)
             self.editoren[f.id] = cls(self, inh, z, f)
+            self.editoren[f.id].sb = sb
         if abschnitt == K.INTERN:
             self._intern_extras(inh, len(felder) + 1)
 
@@ -539,8 +584,11 @@ class Maske(ttk.Frame):
         kopf.pack(fill="x")
         ttk.Label(kopf, text="Optionen", font=("Segoe UI", 11, "bold"), foreground=NAVY).pack(side="left")
         self.opt_geprueft = tk.BooleanVar()
-        tk.Checkbutton(kopf, text="Kernfeld „Optionen“ geprüft", variable=self.opt_geprueft, bg=KERN_BG,
-                       command=self.zaehler_aktualisieren).pack(side="left", padx=12)
+        self.opt_tab = fr
+        self.opt_check = tk.Checkbutton(kopf, text="Kernfeld „Optionen“ geprüft", variable=self.opt_geprueft, bg=KERN_BG,
+                                        highlightthickness=2, highlightbackground=KERN_BG, highlightcolor=KERN_BG,
+                                        command=lambda: (self._opt_markieren(False), self.zaehler_aktualisieren()))
+        self.opt_check.pack(side="left", padx=12)
         ttk.Label(fr, text="Optionsnummer bleibt leer, bis die einheitliche Stammliste in Weclapp existiert.",
                   foreground="#6A7380").pack(anchor="w")
         self.optionen = ListenEditor(fr, [("nr", "Opt.-Nr.", 70), ("code", "EPS-Code", 160),
@@ -596,6 +644,33 @@ class Maske(ttk.Frame):
         if hasattr(self, "btn_alle"):
             self.btn_alle.configure(text="Prüfhaken entfernen ☐" if n == gesamt else "Alle geprüft ☑")
 
+    def _opt_markieren(self, an: bool):
+        f = "#D62828" if an else KERN_BG
+        self.opt_check.configure(highlightbackground=f, highlightcolor=f, fg="#D62828" if an else "black")
+
+    def probleme_markieren(self, felder: list[tuple[str, str, str]]):
+        """Alle Problemfelder rot umranden und zum ersten springen (Reihenfolge der Reiter)."""
+        for e in self.editoren.values():
+            e.markieren(None)
+        self._opt_markieren(False)
+        art_je_feld: dict[str, str] = {}
+        for fid, art, _ in felder:
+            if art_je_feld.get(fid) != "wert":          # fehlender Wert ist wichtiger als fehlender Haken
+                art_je_feld[fid] = art
+        for fid, art in art_je_feld.items():
+            if fid == "optionen":
+                self._opt_markieren(True)
+            elif fid in self.editoren:
+                self.editoren[fid].markieren(art)
+        reihenfolge = list(self.editoren)               # Editoren wurden in Reiter-Reihenfolge angelegt
+        erste = sorted((reihenfolge.index(f) for f in art_je_feld if f in self.editoren))
+        if erste:
+            self.editoren[reihenfolge[erste[0]]].fokus()
+        elif "optionen" in art_je_feld:
+            self.nb.select(self.opt_tab)
+        self.statuszeile.configure(text=f"{len(art_je_feld)} Feld(er) rot markiert – Cursor steht im ersten.",
+                                   fg="#D62828")
+
     def alle_geprueft(self):
         """Setzt alle Prüfhaken der Kernfelder auf einmal – oder entfernt sie, wenn schon alle gesetzt sind."""
         kern = [e for e in self.editoren.values() if e.f.kern]
@@ -607,7 +682,10 @@ class Maske(ttk.Frame):
             return
         for e in kern:
             e.geprueft.set(not alle)
+            if e.pruef is not None and e.pruef.cget("highlightbackground") != e.bg:
+                e.markieren(None)
         self.opt_geprueft.set(not alle)
+        self._opt_markieren(False)
         self.geaendert = True
         self.zaehler_aktualisieren()
 
@@ -722,16 +800,21 @@ class Maske(ttk.Frame):
     def freigeben(self):
         self.uebernehmen()
         nr = self.ds.bestellnummer
-        probleme = regeln.pruefe_freigabe(self.ds, self.app.kat)
+        felder = regeln.pruefe_freigabe_felder(self.ds, self.app.kat)
         dopp = self.app.ablage.finde_bestellnummer(nr, ausser_id=self.ds.id) if nr else None
         if dopp:
-            probleme.append(f"Bestellnummer {nr} ist bereits vergeben ({dopp.titel or 'ohne Namen'}).")
+            felder.append(("bestellnummer", "wert", f"Bestellnummer {nr} ist bereits vergeben ({dopp.titel or 'ohne Namen'})."))
+        probleme = [t for _, _, t in felder]
         if probleme:
             self.app.ablage.speichern(self.ds)
             messagebox.showwarning("Freigabe noch nicht möglich",
                                    "Bitte zuerst erledigen:\n\n• " + "\n• ".join(probleme[:25]) +
-                                   ("\n…" if len(probleme) > 25 else ""))
+                                   ("\n…" if len(probleme) > 25 else "") +
+                                   "\n\nDie betroffenen Felder sind rot umrandet, das Programm springt zum ersten.")
+            self.probleme_markieren(felder)
             return
+        self.probleme_markieren([])
+        self.statuszeile.configure(text="", fg="#6A7380")
         if self.ds.regel == REGEL_HAENDLER:
             ziel_pdfs = []
         else:
