@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -129,11 +130,80 @@ class FeldEditor:
                                         command=lambda: (self.markieren(None), maske.zaehler_aktualisieren()))
             self.pruef.grid(row=zeile, column=2, sticky="nw", padx=6)
         else:
-            tk.Label(parent, text="", background=bg).grid(row=zeile, column=2)
+            self._platzhalter = tk.Label(parent, text="", background=bg)
+            self._platzhalter.grid(row=zeile, column=2)
         self.info = tk.Label(parent, text=feld.einheit, anchor="w", background=bg, foreground="#6A7380")
         self.info.grid(row=zeile, column=3, sticky="nw", padx=4)
         self.bauen()
         self._markierung_loesen_binden(self.box)
+        self.zeile_widgets = [lab, self.box, self.pruef if self.pruef is not None else self._platzhalter, self.info]
+        for w in (lab, self.info):
+            w.bind("<Button-3>", self.kontextmenue, add="+")
+        self._rechtsklick_binden(self.box)
+
+    # ---- Rechtsklick-Menü
+    def _rechtsklick_binden(self, w):
+        w.bind("<Button-3>", self.kontextmenue, add="+")
+        for c in w.winfo_children():
+            self._rechtsklick_binden(c)
+
+    def kontextmenue(self, e):
+        m = tk.Menu(self.box, tearoff=0)
+        m.add_command(label=f"{self.f.de}", state="disabled")
+        m.add_separator()
+        m.add_command(label="Fundstelle im Original zeigen", command=lambda: self.m.fundstelle_zeigen(self.f.id),
+                      state="normal" if getattr(self, "fundstelle", "") else "disabled")
+        hat_de_en = hasattr(self, "de") and hasattr(self, "en") and isinstance(self.en, tk.Entry)
+        m.add_command(label="Deutsch → Englisch kopieren", command=self.de_nach_en,
+                      state="normal" if hat_de_en else "disabled")
+        orig = self.m.ds.import_werte.get(self.f.id)
+        m.add_command(label="Originalwert aus dem PDF wiederherstellen", command=self.original_wiederherstellen,
+                      state="normal" if orig else "disabled")
+        m.add_command(label="Feld leeren", command=self.leeren)
+        if self.pruef is not None:
+            m.add_separator()
+            m.add_command(label="Als geprüft markieren" if not self.geprueft.get() else "Prüfhaken entfernen",
+                          command=lambda: (self.geprueft.set(not self.geprueft.get()), self.markieren(None),
+                                           self.m.zaehler_aktualisieren()))
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
+        return "break"
+
+    def de_nach_en(self):
+        self.en.delete(0, "end")
+        self.en.insert(0, self.de.get())
+        self.en_manuell = True
+        self.en.configure(background="white")
+        self.nach_aenderung()
+
+    def _neu_laden(self, w: Wert):
+        w.geprueft = False
+        self.laden(w)
+        if not w.fundstelle:
+            self.info.configure(text=self.f.einheit, foreground="#6A7380", cursor="")
+            self.info.unbind("<Button-1>")
+        self.markieren(None)
+        self.nach_aenderung()
+        self.m.zaehler_aktualisieren()
+
+    def original_wiederherstellen(self):
+        d = self.m.ds.import_werte.get(self.f.id)
+        if d:
+            self._neu_laden(Wert.aus_dict(dict(d)))
+            self.m.hinweis(f"{self.f.de}: Originalwert aus dem PDF wiederhergestellt.")
+
+    def leeren(self):
+        self._neu_laden(Wert())
+        self.m.hinweis(f"{self.f.de}: geleert.")
+
+    def sichtbar(self, an: bool):
+        for w in self.zeile_widgets:
+            if an:
+                w.grid()
+            else:
+                w.grid_remove()
 
     # ---- Rote Markierung bei Freigabe-Problemen
     def markieren(self, art: str | None):
@@ -158,6 +228,7 @@ class FeldEditor:
 
     def fokus(self):
         """Zum Feld springen: Reiter wählen, hinscrollen, Cursor ins erste Eingabefeld."""
+        self.sichtbar(True)
         if self.sb is not None:
             self.m.nb.select(self.sb)
             self.m.update_idletasks()
@@ -209,6 +280,7 @@ class FeldEditor:
 
     def nach_aenderung(self):
         self.m.geaendert = True
+        self.m.reiter_spaeter_aktualisieren()
 
     def bauen(self):
         self._de_en()
@@ -507,6 +579,15 @@ class Maske(ttk.Frame):
         self.geaendert = False
         self.editoren: dict[str, FeldEditor] = {}
         self._kopf()
+        self._reiter_titel: dict[str, str] = {}
+        self._reiter_job = None
+        leiste = tk.Frame(self)
+        leiste.pack(fill="x", padx=8, pady=(4, 0))
+        self.leere_aus = tk.BooleanVar(value=app.einst.leere_ausblenden)
+        ttk.Checkbutton(leiste, text="Leere Felder ausblenden (Kern- und Pflichtfelder bleiben sichtbar)",
+                        variable=self.leere_aus, command=self.leere_umschalten).pack(side="left")
+        ttk.Label(leiste, text="Rechtsklick auf ein Feld: Fundstelle, DE→EN, Original wiederherstellen, leeren",
+                  foreground="#6A7380").pack(side="right")
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=8, pady=(0, 4))
         for titel, art in self.TABS:
@@ -523,6 +604,9 @@ class Maske(ttk.Frame):
         self.geaendert = False
         self._schnappschuss = self._stand()
         self._auto_id = self.after(AUTOSAVE_MS, self._autosave)
+        self.reiter_aktualisieren()
+        if self.leere_aus.get():
+            self.leere_anwenden()
 
     # ---- Aufbau
     def _kopf(self):
@@ -558,6 +642,7 @@ class Maske(ttk.Frame):
     def _tab_felder(self, titel, abschnitt):
         sb = Scrollbereich(self.nb)
         self.nb.add(sb, text=titel)
+        self._reiter_titel[str(sb)] = titel
         inh = sb.inhalt
         self._tabellenkopf(inh)
         kat = self.app.kat
@@ -592,6 +677,7 @@ class Maske(ttk.Frame):
     def _tab_listen(self, titel):
         fr = ttk.Frame(self.nb, padding=10)
         self.nb.add(fr, text=titel)
+        self._reiter_titel[str(fr)] = titel
         kopf = ttk.Frame(fr)
         kopf.pack(fill="x")
         ttk.Label(kopf, text="Optionen", font=("Segoe UI", 11, "bold"), foreground=NAVY).pack(side="left")
@@ -614,6 +700,7 @@ class Maske(ttk.Frame):
     def _tab_text(self, titel):
         fr = ttk.Frame(self.nb, padding=10)
         self.nb.add(fr, text=titel)
+        self._reiter_titel[str(fr)] = titel
         ttk.Label(fr, text="Beschreibung (Absätze durch Leerzeile trennen)", font=("Segoe UI", 11, "bold"),
                   foreground=NAVY).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(fr, text="Deutsch").grid(row=1, column=0, sticky="w")
@@ -653,6 +740,7 @@ class Maske(ttk.Frame):
         n = sum(1 for e in kern if e.geprueft.get()) + (1 if self.opt_geprueft.get() else 0)
         gesamt = len(kern) + 1
         self.zaehler.configure(text=f"Geprüft: {n}/{gesamt}", fg="white" if n < gesamt else "#9BE29B")
+        self.reiter_spaeter_aktualisieren()
         if hasattr(self, "btn_alle"):
             self.btn_alle.configure(text="Haken entfernen ☐" if n == gesamt else "Alle geprüft ☑")
 
@@ -673,6 +761,7 @@ class Maske(ttk.Frame):
             if fid == "optionen":
                 self._opt_markieren(True)
             elif fid in self.editoren:
+                self.editoren[fid].sichtbar(True)
                 self.editoren[fid].markieren(art)
         reihenfolge = list(self.editoren)               # Editoren wurden in Reiter-Reihenfolge angelegt
         erste = sorted((reihenfolge.index(f) for f in art_je_feld if f in self.editoren))
@@ -715,6 +804,61 @@ class Maske(ttk.Frame):
         elif not felder and any(fid in ("optionen", "lieferumfang") for fid, _, _ in spuren):
             self.nb.select(self.opt_tab)
         self.statuszeile.configure(text=f"{len(spuren)} mögliche Herstellerspur(en) rot markiert.", fg="#D62828")
+
+    # ---- Offene Punkte je Reiter
+    def reiter_spaeter_aktualisieren(self):
+        if not hasattr(self, "nb"):
+            return
+        if self._reiter_job is not None:
+            try:
+                self.after_cancel(self._reiter_job)
+            except tk.TclError:
+                pass
+        self._reiter_job = self.after(400, self.reiter_aktualisieren)
+
+    def reiter_aktualisieren(self):
+        """Reitertitel mit Anzahl offener Punkte (fehlende Pflichtwerte, fehlende Prüfhaken), z. B. „Technische Daten (2 offen)“."""
+        self._reiter_job = None
+        try:
+            self.uebernehmen()
+        except Exception:
+            return
+        offen: dict[str, set] = {}
+        for fid, _, _ in regeln.pruefe_freigabe_felder(self.ds, self.app.kat):
+            if fid == "optionen":
+                reiter = str(self.opt_tab)
+            elif fid in self.editoren and self.editoren[fid].sb is not None:
+                reiter = str(self.editoren[fid].sb)
+            else:
+                continue
+            offen.setdefault(reiter, set()).add(fid)
+        for reiter, titel in self._reiter_titel.items():
+            n = len(offen.get(reiter, ()))
+            try:
+                self.nb.tab(reiter, text=f"{titel} ({n} offen)" if n else titel)
+            except tk.TclError:
+                pass
+
+    # ---- Leere Felder ausblenden
+    def leere_umschalten(self):
+        self.app.einst.leere_ausblenden = self.leere_aus.get()
+        try:
+            E.speichern(self.app.einst)
+        except OSError:
+            pass
+        self.leere_anwenden()
+
+    def leere_anwenden(self):
+        self.uebernehmen()
+        aus = self.leere_aus.get()
+        n = 0
+        for fid, e in self.editoren.items():
+            zeigen = (not aus or e.f.kern or e.f.pflicht or fid in ("typbezeichnung", "hersteller", "hersteller_typ")
+                      or regeln.hat_wert(self.ds.werte.get(fid), e.f))
+            e.sichtbar(zeigen)
+            n += 0 if zeigen else 1
+        if aus:
+            self.hinweis(f"{n} leere Felder ausgeblendet. Haken entfernen, um alle zu zeigen.")
 
     def alle_geprueft(self):
         """Setzt alle Prüfhaken der Kernfelder auf einmal – oder entfernt sie, wenn schon alle gesetzt sind."""
@@ -948,7 +1092,8 @@ TASTENKUERZEL = [
     ("Startliste", [("Strg+F", "Suchen"), ("Esc", "Suche leeren (im Suchfeld)"), ("Enter", "Auswahl öffnen"),
                     ("Doppelklick", "Öffnen"), ("Klick auf Spalte", "Sortieren")]),
     ("Datenblatt", [("Strg+S", "Speichern"), ("Strg+P", "PDF-Vorschau DE"), ("Strg+Umschalt+P", "PDF-Vorschau EN"),
-                    ("Feld anklicken", "Fundstelle im Original")]),
+                    ("Feld anklicken", "Fundstelle im Original"),
+                    ("Rechtsklick auf Feld", "Fundstelle, DE → EN kopieren, Originalwert wiederherstellen, leeren")]),
 ]
 
 
@@ -1041,20 +1186,23 @@ class Start(ttk.Frame):
         self.such_feld = ttk.Entry(such, textvariable=self.suche, width=40)
         self.such_feld.pack(side="left", padx=6)
         ttk.Label(such, text="Status:").pack(side="left", padx=(12, 0))
-        self.status_filter = tk.StringVar(value="Alle")
+        self.status_filter = tk.StringVar(value=app.einst.start_status if app.einst.start_status in ("Alle", ENTWURF, FREIGEGEBEN) else "Alle")
         cb = ttk.Combobox(such, textvariable=self.status_filter, values=["Alle", ENTWURF, FREIGEGEBEN],
                           state="readonly", width=14)
         cb.pack(side="left", padx=6)
         self.anzahl = ttk.Label(such, text="", foreground="#6A7380")
         self.anzahl.pack(side="right")
         self.suche.trace_add("write", lambda *a: self.filtern())
-        cb.bind("<<ComboboxSelected>>", lambda e: self.filtern())
+        cb.bind("<<ComboboxSelected>>", lambda e: (self.filtern(), self._merken()))
         self.such_feld.bind("<Escape>", lambda e: self.suche.set(""))
 
         sp = [("nr", "Bestellnummer", 110), ("titel", "Typbezeichnung", 260), ("hersteller", "Hersteller", 200),
               ("status", "Status", 110), ("weclapp", "Weclapp", 100), ("geaendert", "Geändert", 140)]
         self.tv = ttk.Treeview(self, columns=[s[0] for s in sp], show="headings")
-        self._sortierung = ("geaendert", True)
+        try:
+            self._sortierung = (str(app.einst.start_sortierung[0]), bool(app.einst.start_sortierung[1]))
+        except (IndexError, TypeError):
+            self._sortierung = ("geaendert", True)
         for key, t, w in sp:
             self.tv.heading(key, text=t, command=lambda k=key: self.sortieren(k))
             self.tv.column(key, width=w)
@@ -1079,6 +1227,8 @@ class Start(ttk.Frame):
         st = self.status_filter.get()
         spalten = ["nr", "titel", "hersteller", "status", "weclapp", "geaendert"]
         key, absteigend = self._sortierung
+        if key not in spalten:
+            key, absteigend = self._sortierung = ("geaendert", True)
         i = spalten.index(key)
         zeilen = sorted(self._zeilen, key=lambda z: (z[1][i] or "").lower(), reverse=absteigend)
         self.tv.delete(*self.tv.get_children())
@@ -1096,6 +1246,17 @@ class Start(ttk.Frame):
         alt, absteigend = self._sortierung
         self._sortierung = (key, not absteigend if alt == key else False)
         self.filtern()
+        self._merken()
+
+    def _merken(self):
+        """Sortierung und Statusfilter für den nächsten Start merken."""
+        e = self.app.einst
+        e.start_sortierung = list(self._sortierung)
+        e.start_status = self.status_filter.get()
+        try:
+            E.speichern(e)
+        except OSError:
+            pass
 
     def duplizieren(self):
         sel = self.tv.selection()
@@ -1236,6 +1397,7 @@ class App(tk.Tk):
         for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.bind_class("TCombobox", seq, _rad_umleiten)
         self.einst = E.laden()
+        self._fenster_wiederherstellen()
         try:
             self.kat = K.laden()
         except K.KatalogFehler as e:
@@ -1284,6 +1446,31 @@ class App(tk.Tk):
                 self.aktuell.such_feld.focus_set()
                 return "break"
         self.bind_all("<Control-f>", suchen)
+
+    def _fenster_wiederherstellen(self):
+        g = self.einst.fenster
+        m = re.fullmatch(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", g or "")
+        if m:
+            b, h, x, y = map(int, m.groups())
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            b, h = max(min(b, sw), 1000), max(min(h, sh), 640)
+            x, y = min(max(x, 0), max(sw - 200, 0)), min(max(y, 0), max(sh - 200, 0))   # nie außerhalb des Bildschirms
+            self.geometry(f"{b}x{h}+{x}+{y}")
+        if self.einst.fenster_maximiert:
+            try:
+                self.state("zoomed")
+            except tk.TclError:
+                pass
+
+    def _fenster_merken(self):
+        try:
+            maximiert = self.state() == "zoomed"
+            self.einst.fenster_maximiert = maximiert
+            if not maximiert:
+                self.einst.fenster = self.wm_geometry()
+            E.speichern(self.einst)
+        except (tk.TclError, OSError):
+            pass
 
     def legende_umschalten(self, e=None):
         an = not self.einst.legende_anzeigen
@@ -1363,6 +1550,7 @@ class App(tk.Tk):
                 return
             if r:
                 self.aktuell.zwischenspeichern(still=True)
+        self._fenster_merken()
         self.destroy()
 
 

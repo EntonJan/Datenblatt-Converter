@@ -26,6 +26,11 @@ class Einstellungen:
         "Gustav Klein", "Schäfer Elektronik", "SHT-Power SAS"])
     update_pruefen: bool = True
     legende_anzeigen: bool = True     # Tastenkürzel-Leiste rechts (F1)
+    leere_ausblenden: bool = False    # in den Reitern leere Nicht-Kernfelder ausblenden
+    fenster: str = ""                 # letzte Fenstergröße/-position, z. B. "1280x820+100+50"
+    fenster_maximiert: bool = False
+    start_sortierung: list = field(default_factory=lambda: ["geaendert", True])
+    start_status: str = "Alle"
 
     def ausgabe(self) -> Path:
         return Path(self.ausgabe_ordner) if self.ausgabe_ordner else pfade.AUSGABE_DIR

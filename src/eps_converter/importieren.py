@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import asdict
 import shutil
 import tkinter as tk
 from pathlib import Path
@@ -264,6 +265,7 @@ def dialog(app):
         erg = auslesen.auslesen(pfad, app.kat, modell)
         app.configure(cursor="")
         datensatz_aus_ergebnis(erg, app.kat, ds, modell.label if modell else "")
+        ds.import_werte = {fid: asdict(w) for fid, w in ds.werte.items()}
         try:                                            # Produktfotos aus dem PDF als Vorschlag übernehmen
             ds.bilder = [Bild(datei=d) for d in auslesen.bilder_extrahieren(pfad, ordner)]
         except Exception:

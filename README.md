@@ -17,7 +17,9 @@ Grundlage: Pflichtenheft Produktdaten-Pipeline (Stand 15.10.2026).
    mögliche Herstellerspuren (Herstellername, „our plant“, Modellnummern in der Beschreibung) vorher gemeldet.
 
 Weitere Funktionen: Suche und Statusfilter in der Liste, **Duplizieren** (Vorlage für ähnliche Geräte),
-automatisches Speichern alle 2 Minuten. Tastenkürzel: Strg+S speichern, Strg+P Vorschau DE, Strg+Umschalt+P Vorschau EN,
+automatisches Speichern alle 2 Minuten, offene Punkte je Reiter („Technische Daten (2 offen)“), Schalter „Leere Felder
+ausblenden“, Rechtsklick-Menü am Feld (Fundstelle, DE → EN, Originalwert wiederherstellen, leeren). Fenstergröße,
+Sortierung und Filter werden gemerkt. Tastenkürzel: Strg+S speichern, Strg+P Vorschau DE, Strg+Umschalt+P Vorschau EN,
 Strg+O PDF importieren, Strg+N leeres Datenblatt, Strg+F suchen, F1 Tastenkürzel-Leiste ein/aus.
 
 ## Ordner im Repo
