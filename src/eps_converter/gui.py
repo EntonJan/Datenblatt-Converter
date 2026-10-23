@@ -12,7 +12,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 
-from . import __version__, katalog as K, regeln, pdf_export, einstellungen as E, pfade, darstellung
+from . import __version__, katalog as K, regeln, pdf_export, einstellungen as E, pfade, darstellung, formatierer
 from .ablage import LokaleAblage
 from .modell import Datensatz, Wert, Option, Eintrag, Bild, ENTWURF, FREIGEGEBEN, REGEL_EPS, REGEL_HAENDLER, jetzt
 
@@ -586,8 +586,10 @@ class Maske(ttk.Frame):
         self.leere_aus = tk.BooleanVar(value=app.einst.leere_ausblenden)
         ttk.Checkbutton(leiste, text="Leere Felder ausblenden (Kern- und Pflichtfelder bleiben sichtbar)",
                         variable=self.leere_aus, command=self.leere_umschalten).pack(side="left")
-        ttk.Label(leiste, text="Rechtsklick auf ein Feld: Fundstelle, DE→EN, Original wiederherstellen, leeren",
-                  foreground="#6A7380").pack(side="right")
+        ttk.Button(leiste, text="Einheiten vereinheitlichen … (Strg+E)",
+                   command=self.einheiten_vereinheitlichen).pack(side="right")
+        ttk.Label(leiste, text="Rechtsklick auf ein Feld: Fundstelle, DE → EN, Original, leeren",
+                  foreground="#6A7380").pack(side="right", padx=10)
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=8, pady=(0, 4))
         for titel, art in self.TABS:
@@ -804,6 +806,52 @@ class Maske(ttk.Frame):
         elif not felder and any(fid in ("optionen", "lieferumfang") for fid, _, _ in spuren):
             self.nb.select(self.opt_tab)
         self.statuszeile.configure(text=f"{len(spuren)} mögliche Herstellerspur(en) rot markiert.", fg="#D62828")
+
+    # ---- Einheiten-Formatierer
+    def einheiten_vereinheitlichen(self):
+        """Schlägt einheitliche Schreibweisen vor (EPS-Hausregel) und übernimmt nur, was bestätigt wird."""
+        self.uebernehmen()
+        kat, ds = self.app.kat, self.ds
+        vorschlaege = []          # (ziel, sprache, feldname, alt, neu, vorausgewählt)
+        for fid, w in ds.werte.items():
+            if not kat.hat(fid) or kat.feld(fid).abschnitt == K.INTERN or fid == "typbezeichnung":
+                continue
+            name = kat.feld(fid).de
+            for sp in ("de", "en"):
+                alt = getattr(w, sp)
+                neu = formatierer.formatieren(alt, sp, fid)
+                if alt and neu != alt:
+                    vorschlaege.append((("wert", fid), sp, name, alt, neu, not w.geprueft))
+        for i, o in enumerate(ds.optionen):
+            for sp in ("de", "en"):
+                alt = getattr(o, sp); neu = formatierer.formatieren(alt, sp)
+                if alt and neu != alt:
+                    vorschlaege.append((("option", i), sp, f"Option {o.code or i + 1}", alt, neu, True))
+        for i, e in enumerate(ds.lieferumfang):
+            for sp in ("de", "en"):
+                alt = getattr(e, sp); neu = formatierer.formatieren(alt, sp)
+                if alt and neu != alt:
+                    vorschlaege.append((("liefer", i), sp, "Lieferumfang", alt, neu, True))
+        if not vorschlaege:
+            messagebox.showinfo("Einheiten vereinheitlichen", "Alle Schreibweisen entsprechen bereits der EPS-Regel.", parent=self)
+            return
+        FormatierDialog(self, vorschlaege, self._formatierung_uebernehmen)
+
+    def _formatierung_uebernehmen(self, gewaehlt):
+        ds = self.ds
+        for (art, schluessel), sp, _, _, neu, _ in gewaehlt:
+            if art == "wert":
+                setattr(ds.werte[schluessel], sp, neu)
+            elif art == "option":
+                setattr(ds.optionen[schluessel], sp, neu)
+            elif art == "liefer":
+                setattr(ds.lieferumfang[schluessel], sp, neu)
+        self.laden()
+        self.geaendert = True
+        self.zaehler_aktualisieren()
+        if self.leere_aus.get():
+            self.leere_anwenden()
+        self.hinweis(f"{len(gewaehlt)} Schreibweise(n) vereinheitlicht. Prüfhaken bleiben erhalten.")
 
     # ---- Offene Punkte je Reiter
     def reiter_spaeter_aktualisieren(self):
@@ -1092,6 +1140,7 @@ TASTENKUERZEL = [
     ("Startliste", [("Strg+F", "Suchen"), ("Esc", "Suche leeren (im Suchfeld)"), ("Enter", "Auswahl öffnen"),
                     ("Doppelklick", "Öffnen"), ("Klick auf Spalte", "Sortieren")]),
     ("Datenblatt", [("Strg+S", "Speichern"), ("Strg+P", "PDF-Vorschau DE"), ("Strg+Umschalt+P", "PDF-Vorschau EN"),
+                    ("Strg+E", "Einheiten vereinheitlichen"),
                     ("Feld anklicken", "Fundstelle im Original"),
                     ("Rechtsklick auf Feld", "Fundstelle, DE → EN kopieren, Originalwert wiederherstellen, leeren")]),
 ]
@@ -1124,6 +1173,75 @@ class Legende(tk.Frame):
         tk.Label(self, text="F1 blendet diese Leiste aus.", bg=self.BG, fg="#8A94A3", font=("Segoe UI", 8),
                  anchor="w").pack(side="bottom", fill="x", padx=10, pady=8)
         self.pack_propagate(False)
+
+
+class FormatierDialog(tk.Toplevel):
+    """Vorher/Nachher-Liste des Einheiten-Formatierers. Klick oder Leertaste schaltet eine Zeile an/aus."""
+
+    def __init__(self, maske, vorschlaege, uebernehmen):
+        super().__init__(maske)
+        self.title("Einheiten vereinheitlichen")
+        self.geometry("1100x520")
+        self.transient(maske.winfo_toplevel())
+        self.v = vorschlaege
+        self.an = [v[5] for v in vorschlaege]
+        self.cb = uebernehmen
+        fr = ttk.Frame(self, padding=10)
+        fr.pack(fill="both", expand=True)
+        ttk.Label(fr, text="Vorgeschlagene Schreibweisen nach EPS-Regel", font=("Segoe UI", 11, "bold"),
+                  foreground=NAVY).pack(anchor="w")
+        ttk.Label(fr, text="✔ = wird übernommen. Zeile anklicken oder Leertaste zum Umschalten. "
+                           "Bereits geprüfte Felder sind zunächst abgewählt.", foreground="#6A7380").pack(anchor="w", pady=(2, 6))
+        sp = [("an", "Übern.", 54), ("feld", "Feld", 190), ("spr", "", 34), ("alt", "Vorher", 400), ("neu", "Nachher", 400)]
+        self.tv = ttk.Treeview(fr, columns=[x[0] for x in sp], show="headings", selectmode="browse")
+        for k, t, b in sp:
+            self.tv.heading(k, text=t)
+            self.tv.column(k, width=b, stretch=k in ("alt", "neu"), anchor="center" if k in ("an", "spr") else "w")
+        sb = ttk.Scrollbar(fr, orient="vertical", command=self.tv.yview)
+        self.tv.configure(yscrollcommand=sb.set)
+        self.tv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+        for i, (_, spr, name, alt, neu, _) in enumerate(vorschlaege):
+            self.tv.insert("", "end", iid=str(i), values=["", name, spr.upper(), alt, neu])
+        self._zeigen()
+        self.tv.bind("<ButtonRelease-1>", self._klick)
+        self.tv.bind("<space>", lambda e: self._umschalten(self.tv.focus()))
+        unten = ttk.Frame(self, padding=(10, 0, 10, 10))
+        unten.pack(fill="x")
+        ttk.Button(unten, text="Alle", command=lambda: self._alle(True)).pack(side="left")
+        ttk.Button(unten, text="Keine", command=lambda: self._alle(False)).pack(side="left", padx=6)
+        self.anzahl = ttk.Label(unten, text="", foreground="#6A7380")
+        self.anzahl.pack(side="left", padx=10)
+        ttk.Button(unten, text="Abbrechen", command=self.destroy).pack(side="right")
+        ttk.Button(unten, text="Übernehmen", command=self._ok).pack(side="right", padx=6)
+        self.bind("<Escape>", lambda e: self.destroy())
+        self._zeigen()
+        self.grab_set()
+
+    def _zeigen(self):
+        for i, an in enumerate(self.an):
+            self.tv.set(str(i), "an", "✔" if an else "")
+        if hasattr(self, "anzahl"):
+            self.anzahl.configure(text=f"{sum(self.an)} von {len(self.an)} ausgewählt")
+
+    def _umschalten(self, iid):
+        if iid:
+            self.an[int(iid)] = not self.an[int(iid)]
+            self._zeigen()
+
+    def _klick(self, e):
+        if self.tv.identify_region(e.x, e.y) == "cell":
+            self._umschalten(self.tv.identify_row(e.y))
+
+    def _alle(self, an):
+        self.an = [an] * len(self.an)
+        self._zeigen()
+
+    def _ok(self):
+        gewaehlt = [v for v, an in zip(self.v, self.an) if an]
+        self.destroy()
+        if gewaehlt:
+            self.cb(gewaehlt)
 
 
 class FreigabeDialog(tk.Toplevel):
@@ -1436,9 +1554,10 @@ class App(tk.Tk):
         self.bind_all("<Control-o>", lambda e: (self.import_pdf(), "break")[1])
         self.bind_all("<Control-n>", lambda e: (self.neu_leer(), "break")[1])
         self.bind_all("<F1>", self.legende_umschalten)
+        self.bind_all("<Control-e>", in_maske(lambda m: m.einheiten_vereinheitlichen()))
 
         # Tk-Textfelder haben eigene Emacs-Kürzel (Strg+O fügt z. B. eine Zeile ein) – hier abschalten
-        for seq in ("<Control-o>", "<Control-p>", "<Control-n>", "<Control-f>"):
+        for seq in ("<Control-o>", "<Control-p>", "<Control-n>", "<Control-f>", "<Control-e>"):
             self.bind_class("Text", seq, lambda e: None)
 
         def suchen(e=None):

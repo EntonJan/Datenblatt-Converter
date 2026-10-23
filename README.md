@@ -19,7 +19,12 @@ Grundlage: Pflichtenheft Produktdaten-Pipeline (Stand 15.10.2026).
 Weitere Funktionen: Suche und Statusfilter in der Liste, **Duplizieren** (Vorlage für ähnliche Geräte),
 automatisches Speichern alle 2 Minuten, offene Punkte je Reiter („Technische Daten (2 offen)“), Schalter „Leere Felder
 ausblenden“, Rechtsklick-Menü am Feld (Fundstelle, DE → EN, Originalwert wiederherstellen, leeren). Fenstergröße,
-Sortierung und Filter werden gemerkt. Tastenkürzel: Strg+S speichern, Strg+P Vorschau DE, Strg+Umschalt+P Vorschau EN,
+Sortierung und Filter werden gemerkt.
+
+**Einheiten vereinheitlichen (Strg+E):** schlägt die EPS-Schreibweise vor (z. B. `230Vac` → `230 VAC`, `8.7Arms` →
+`8,7 Arms` / EN `8.7 Arms`, `0-50°C` → `0–50 °C`, `432 x 132 x 483mm (17" …)` → `432 × 132 × 483 mm`, `12kg (26 lbs.)` →
+`12 kg`, `Ohm` → `Ω`, `3ph.` → `3-phasig`). Übernommen wird nur, was in der Vorher/Nachher-Liste angehakt ist; Normen
+und Typbezeichnungen bleiben unberührt. Regeln: `src/eps_converter/formatierer.py`. Tastenkürzel: Strg+S speichern, Strg+P Vorschau DE, Strg+Umschalt+P Vorschau EN,
 Strg+O PDF importieren, Strg+N leeres Datenblatt, Strg+F suchen, F1 Tastenkürzel-Leiste ein/aus.
 
 ## Ordner im Repo
