@@ -21,8 +21,19 @@ def selbsttest(ordner: Path) -> int:
             ds.werte[fid] = Wert(de=de, en=en)
         ds.werte["kuehlung"] = Wert(auswahl=["Lüfter"])
         pdfs = pdf_export.beide(ds, k, ordner)
+        from eps_converter import formatierer, protokoll, importieren, gui  # noqa: F401  (alles mitgebaut?)
+        assert formatierer.formatieren("230Vac", "de") == "230 VAC"
+        dnd = "DnD fehlt"
+        try:
+            import tkinter
+            from tkinterdnd2 import TkinterDnD
+            root = tkinter.Tk(); root.withdraw()
+            dnd = f"DnD OK {TkinterDnD._require(root)}"
+            root.destroy()
+        except Exception as e:  # noqa: BLE001
+            dnd = f"DnD fehlt: {e}"
         bericht.write_text(f"OK {__version__}: {len(k.felder)} Felder, {len(k.kernfelder)} Kernfelder; "
-                           + ", ".join(p.name for p in pdfs), encoding="utf-8")
+                           + ", ".join(p.name for p in pdfs) + f"; {dnd}", encoding="utf-8")
         return 0
     except Exception as e:  # noqa: BLE001
         import traceback

@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 
-from . import __version__, katalog as K, regeln, pdf_export, einstellungen as E, pfade, darstellung, formatierer
+from . import __version__, katalog as K, regeln, pdf_export, einstellungen as E, pfade, darstellung, formatierer, protokoll
 from .ablage import LokaleAblage
 from .modell import Datensatz, Wert, Option, Eintrag, Bild, ENTWURF, FREIGEGEBEN, REGEL_EPS, REGEL_HAENDLER, jetzt
 
@@ -127,7 +129,8 @@ class FeldEditor:
         if feld.kern:
             self.pruef = tk.Checkbutton(parent, text="geprüft", variable=self.geprueft, background=bg,
                                         highlightthickness=2, highlightbackground=bg, highlightcolor=bg,
-                                        command=lambda: (self.markieren(None), maske.zaehler_aktualisieren()))
+                                        command=lambda: (self.markieren(None), self.pruefstand_merken(),
+                                                         maske.zaehler_aktualisieren()))
             self.pruef.grid(row=zeile, column=2, sticky="nw", padx=6)
         else:
             self._platzhalter = tk.Label(parent, text="", background=bg)
@@ -164,7 +167,7 @@ class FeldEditor:
             m.add_separator()
             m.add_command(label="Als geprüft markieren" if not self.geprueft.get() else "Prüfhaken entfernen",
                           command=lambda: (self.geprueft.set(not self.geprueft.get()), self.markieren(None),
-                                           self.m.zaehler_aktualisieren()))
+                                           self.pruefstand_merken(), self.m.zaehler_aktualisieren()))
         try:
             m.tk_popup(e.x_root, e.y_root)
         finally:
@@ -277,10 +280,32 @@ class FeldEditor:
             return
         self.en_manuell = True
         self.en.configure(background="white")
+        self.nach_aenderung()
 
     def nach_aenderung(self):
         self.m.geaendert = True
         self.m.reiter_spaeter_aktualisieren()
+        # Prüfhaken gilt für den geprüften Wert: wird der Wert danach geändert, ist er wieder ungeprüft
+        if (self.pruef is not None and not self._lade and self.geprueft.get()
+                and getattr(self, "_pruefstand", None) is not None and self._aktueller_stand() != self._pruefstand):
+            self.geprueft.set(False)
+            self._pruefstand = None
+            self.m.zaehler_aktualisieren()
+            self.m.hinweis(f"{self.f.de}: Wert geändert – Prüfhaken entfernt, bitte erneut prüfen.")
+
+    def _aktueller_stand(self) -> dict:
+        w = Wert()
+        try:
+            self.speichern(w)
+        except Exception:
+            return {}
+        d = asdict(w)
+        for k in ("geprueft", "en_manuell", "herkunft", "fundstelle"):
+            d.pop(k, None)
+        return d
+
+    def pruefstand_merken(self):
+        self._pruefstand = self._aktueller_stand() if self.geprueft.get() else None
 
     def bauen(self):
         self._de_en()
@@ -586,10 +611,11 @@ class Maske(ttk.Frame):
         self.leere_aus = tk.BooleanVar(value=app.einst.leere_ausblenden)
         ttk.Checkbutton(leiste, text="Leere Felder ausblenden (Kern- und Pflichtfelder bleiben sichtbar)",
                         variable=self.leere_aus, command=self.leere_umschalten).pack(side="left")
+        ttk.Button(leiste, text="Verlauf …", command=self.verlauf).pack(side="right", padx=(6, 0))
+        ttk.Button(leiste, text="Nächstes offenes Feld (F3)", command=self.naechstes_offenes).pack(side="right", padx=(6, 0))
         ttk.Button(leiste, text="Einheiten vereinheitlichen … (Strg+E)",
                    command=self.einheiten_vereinheitlichen).pack(side="right")
-        ttk.Label(leiste, text="Rechtsklick auf ein Feld: Fundstelle, DE → EN, Original, leeren",
-                  foreground="#6A7380").pack(side="right", padx=10)
+
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=8, pady=(0, 4))
         for titel, art in self.TABS:
@@ -623,8 +649,7 @@ class Maske(ttk.Frame):
         tf.columnconfigure(1, weight=1)
         self.btn_frei = ttk.Button(k, text="Freigeben ✔", command=self.freigeben)
         self.btn_frei.pack(side="right", padx=8)
-        ttk.Button(k, text="Vorschau EN", command=lambda: self.vorschau("en")).pack(side="right", padx=2)
-        ttk.Button(k, text="Vorschau DE", command=lambda: self.vorschau("de")).pack(side="right", padx=2)
+        ttk.Button(k, text="Vorschau", command=lambda: self.vorschau("de")).pack(side="right", padx=2)
         ttk.Button(k, text="Speichern (Strg+S)", command=self.zwischenspeichern).pack(side="right", padx=8)
         if self.ds.quelle_pdf:
             ttk.Button(k, text="Original", command=self.original).pack(side="right", padx=2)
@@ -807,6 +832,35 @@ class Maske(ttk.Frame):
             self.nb.select(self.opt_tab)
         self.statuszeile.configure(text=f"{len(spuren)} mögliche Herstellerspur(en) rot markiert.", fg="#D62828")
 
+    # ---- Nächstes offenes Feld (F3)
+    def naechstes_offenes(self):
+        self.uebernehmen()
+        offen = {}
+        for fid, art, text in regeln.pruefe_freigabe_felder(self.ds, self.app.kat):
+            offen.setdefault(fid, text)
+        reihe = [fid for fid in self.editoren if fid in offen]
+        if "optionen" in offen:
+            reihe.append("optionen")
+        if not reihe:
+            self.hinweis("Keine offenen Punkte – das Datenblatt kann freigegeben werden.")
+            return
+        fokus = str(self.focus_get() or "")
+        aktuell = next((i for i, fid in enumerate(reihe)
+                        if fid in self.editoren and fokus.startswith(str(self.editoren[fid].box))), -1)
+        fid = reihe[(aktuell + 1) % len(reihe)]
+        if fid == "optionen":
+            self.nb.select(self.opt_tab)
+            self.opt_check.focus_set()
+        else:
+            self.editoren[fid].fokus()
+        self.statuszeile.configure(text=f"Offen ({reihe.index(fid) + 1} von {len(reihe)}): {offen[fid]}  –  F3 = nächstes",
+                                   fg="#D62828")
+
+    # ---- Verlauf (Änderungsprotokoll)
+    def verlauf(self):
+        self.uebernehmen()
+        VerlaufDialog(self, self.ds)
+
     # ---- Einheiten-Formatierer
     def einheiten_vereinheitlichen(self):
         """Schlägt einheitliche Schreibweisen vor (EPS-Hausregel) und übernimmt nur, was bestätigt wird."""
@@ -919,6 +973,7 @@ class Maske(ttk.Frame):
             return
         for e in kern:
             e.geprueft.set(not alle)
+            e.pruefstand_merken()
             if e.pruef is not None and e.pruef.cget("highlightbackground") != e.bg:
                 e.markieren(None)
         self.opt_geprueft.set(not alle)
@@ -983,6 +1038,7 @@ class Maske(ttk.Frame):
         ds = self.ds
         for fid, ed in self.editoren.items():
             ed.laden(ds.werte.get(fid, Wert()))
+            ed.pruefstand_merken()              # erst nach dem vollständigen Laden (Unterklassen füllen eigene Felder)
         self.opt_geprueft.set(bool(ds.werte.get("optionen") and ds.werte["optionen"].geprueft))
         self.optionen.setzen([[o.nr, o.code, o.de, o.en] for o in ds.optionen])
         self.lieferumfang.setzen([[e.de, e.en] for e in ds.lieferumfang])
@@ -1015,11 +1071,23 @@ class Maske(ttk.Frame):
         self._abgeleitet()
         self._statuslabel()
 
+    def _protokollieren(self):
+        try:
+            alt = json.loads(self._schnappschuss)
+        except (AttributeError, ValueError):
+            return
+        protokoll.eintragen(self.ds, self.app.einst, "Geändert",
+                            protokoll.unterschiede(alt, self.ds.to_dict(), self.app.kat))
+
     def zwischenspeichern(self, still=False):
         self.uebernehmen()
+        self._protokollieren()
         self.app.ablage.speichern(self.ds)
         self.geaendert = False
         self._schnappschuss = self._stand()
+        vf = self.app.vorschau_fenster
+        if vf is not None and vf.winfo_exists():                  # offene Vorschau mitziehen
+            self.vorschau(vf.sprache.get(), still=True)
         if not still:
             self.hinweis(f"Gespeichert ({jetzt()[11:16]} Uhr).")
 
@@ -1027,6 +1095,7 @@ class Maske(ttk.Frame):
     def _stand(self) -> str:
         d = self.ds.to_dict()
         d.pop("geaendert", None)
+        d.pop("protokoll", None)
         return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
     def ungespeichert(self) -> bool:
@@ -1055,17 +1124,25 @@ class Maske(ttk.Frame):
             pass
         super().destroy()
 
-    def vorschau(self, sprache):
+    def vorschau(self, sprache, still=False):
+        """PDF-Vorschau im eigenen Fenster. Das PDF wird im Speicher gehalten (keine gesperrte Datei)."""
         self.uebernehmen()
         tmp = Path(tempfile.gettempdir()) / "eps-converter-vorschau"
         tmp.mkdir(exist_ok=True)
+        datei = tmp / f"vorschau_{sprache}_{self.ds.id}_{os.getpid()}_{int(time.time() * 1000)}.pdf"
         try:
-            p = pdf_export.erzeugen(self.ds, self.app.kat, tmp / f"vorschau_{sprache}_{self.ds.id}.pdf", sprache,
-                                    self.app.ablage.ordner(self.ds.id))
-        except PermissionError:
-            messagebox.showerror("Vorschau", "Die Vorschau-Datei ist noch geöffnet. Bitte schließen und erneut versuchen.")
+            pdf_export.erzeugen(self.ds, self.app.kat, datei, sprache, self.app.ablage.ordner(self.ds.id))
+            daten = datei.read_bytes()
+        except Exception as e:
+            if not still:
+                messagebox.showerror("Vorschau", f"Vorschau konnte nicht erzeugt werden:\n{e}")
             return
-        oeffnen(p)
+        finally:
+            try:
+                datei.unlink()
+            except OSError:
+                pass
+        self.app.vorschau_zeigen(daten, sprache, self.ds)
 
     def freigeben(self):
         self.uebernehmen()
@@ -1097,6 +1174,19 @@ class Maske(ttk.Frame):
                     "\n\nDie Stellen sind rot markiert.\n\nTrotzdem freigeben?", icon="warning", default="no", parent=self):
                 return
             self.spuren_markieren([])
+        doppelt = []
+        t = self.app.ablage.finde_typbezeichnung(self.ds.titel, ausser_id=self.ds.id)
+        if t:
+            doppelt.append(f"Typbezeichnung „{self.ds.titel}“ gibt es schon: Bestellnummer {t.bestellnummer or '–'} ({t.status})")
+        hn = self.ds.text("hersteller_bestellnummer")
+        h = self.app.ablage.finde_hersteller_nr(hn, ausser_id=self.ds.id)
+        if h:
+            doppelt.append(f"Hersteller-Bestellnummer „{hn}“ gibt es schon: {h.titel or '(ohne Namen)'} – "
+                           f"Bestellnummer {h.bestellnummer or '–'} ({h.status})")
+        if doppelt and not messagebox.askyesno(
+                "Möglicherweise doppelt", "• " + "\n• ".join(doppelt) + "\n\nTrotzdem freigeben?",
+                icon="warning", default="no", parent=self):
+            return
         if self.ds.regel == REGEL_HAENDLER:
             ziel_pdfs = []
         else:
@@ -1112,6 +1202,9 @@ class Maske(ttk.Frame):
                         shutil.copy2(p, a / p.name)
                 except OSError as e:
                     messagebox.showwarning("Archiv", f"PDFs erzeugt, aber Kopie ins Archiv fehlgeschlagen:\n{e}")
+        self._protokollieren()
+        protokoll.eintragen(self.ds, self.app.einst, "Freigegeben",
+                            [["Status", self.ds.status, FREIGEGEBEN]] + [["PDF", "", p.name] for p in ziel_pdfs])
         self.ds.status = FREIGEGEBEN
         self.ds.freigegeben_am = jetzt()
         self.ds.weclapp["status"] = "ausstehend"
@@ -1136,11 +1229,12 @@ class Maske(ttk.Frame):
 
 
 TASTENKUERZEL = [
-    ("Überall", [("Strg+O", "Hersteller-PDF importieren"), ("Strg+N", "Leeres Datenblatt"), ("F1", "Diese Legende ein/aus")]),
+    ("Überall", [("PDF ins Fenster ziehen", "Importieren (mehrere = Stapel)"), ("Strg+O", "Hersteller-PDF importieren"), ("Strg+N", "Leeres Datenblatt"), ("F1", "Diese Legende ein/aus")]),
     ("Startliste", [("Strg+F", "Suchen"), ("Esc", "Suche leeren (im Suchfeld)"), ("Enter", "Auswahl öffnen"),
                     ("Doppelklick", "Öffnen"), ("Klick auf Spalte", "Sortieren")]),
-    ("Datenblatt", [("Strg+S", "Speichern"), ("Strg+P", "PDF-Vorschau DE"), ("Strg+Umschalt+P", "PDF-Vorschau EN"),
+    ("Datenblatt", [("Strg+S", "Speichern"), ("Strg+P", "Vorschau DE (im Programm)"), ("Strg+Umschalt+P", "Vorschau EN"),
                     ("Strg+E", "Einheiten vereinheitlichen"),
+                    ("F3", "Nächstes offenes Feld"),
                     ("Feld anklicken", "Fundstelle im Original"),
                     ("Rechtsklick auf Feld", "Fundstelle, DE → EN kopieren, Originalwert wiederherstellen, leeren")]),
 ]
@@ -1173,6 +1267,178 @@ class Legende(tk.Frame):
         tk.Label(self, text="F1 blendet diese Leiste aus.", bg=self.BG, fg="#8A94A3", font=("Segoe UI", 8),
                  anchor="w").pack(side="bottom", fill="x", padx=10, pady=8)
         self.pack_propagate(False)
+
+
+class VorschauFenster(tk.Toplevel):
+    """PDF-Vorschau im Programm: alle Seiten untereinander, DE/EN umschaltbar, aktualisiert sich beim Speichern."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+        self.title("Vorschau")
+        self.daten = b""
+        self.skala = 1.15
+        self._bilder = []
+        leiste = ttk.Frame(self, padding=4)
+        leiste.pack(fill="x")
+        self.sprache = tk.StringVar(value="de")
+        for t, v in (("Deutsch", "de"), ("Englisch", "en")):
+            ttk.Radiobutton(leiste, text=t, value=v, variable=self.sprache, command=self.neu_erzeugen).pack(side="left", padx=2)
+        ttk.Button(leiste, text="Aktualisieren", command=self.neu_erzeugen).pack(side="left", padx=8)
+        ttk.Button(leiste, text="Im PDF-Programm öffnen", command=self.extern).pack(side="left")
+        ttk.Button(leiste, text="−", width=3, command=lambda: self.zoom(0.85)).pack(side="right")
+        ttk.Button(leiste, text="+", width=3, command=lambda: self.zoom(1.18)).pack(side="right")
+        self.info = ttk.Label(self, text="", foreground="#6A7380", padding=(6, 0))
+        self.info.pack(fill="x")
+        fr = ttk.Frame(self)
+        fr.pack(fill="both", expand=True)
+        self.cv = tk.Canvas(fr, background="#7A8494", highlightthickness=0)
+        ys = ttk.Scrollbar(fr, orient="vertical", command=self.cv.yview)
+        self.cv.configure(yscrollcommand=ys.set)
+        ys.pack(side="right", fill="y")
+        self.cv.pack(fill="both", expand=True)
+        self.cv.bind("<MouseWheel>", lambda e: self.cv.yview_scroll(int(-e.delta / 120) * 3, "units"))
+        self.cv.bind("<Button-4>", lambda e: self.cv.yview_scroll(-3, "units"))
+        self.cv.bind("<Button-5>", lambda e: self.cv.yview_scroll(3, "units"))
+        self.bind("<Escape>", lambda e: self.destroy())
+        x = app.winfo_rootx() + app.winfo_width() - 60
+        self.geometry(f"760x{max(640, app.winfo_height())}+{min(x, app.winfo_screenwidth() - 760)}+{app.winfo_rooty()}")
+
+    def zeigen(self, daten: bytes, sprache: str, ds: Datensatz):
+        import pypdfium2 as pdfium
+        from PIL import ImageTk
+        self.daten = daten
+        self.sprache.set(sprache)
+        self.title(f"Vorschau {'DE' if sprache == 'de' else 'EN'} – {ds.titel or 'ohne Namen'}")
+        pos = self.cv.yview()[0] if self._bilder else 0.0
+        doc = pdfium.PdfDocument(daten)
+        try:
+            self._bilder = [ImageTk.PhotoImage(doc[i].render(scale=self.skala).to_pil()) for i in range(len(doc))]
+            n = len(doc)
+        finally:
+            doc.close()
+        self.cv.delete("all")
+        y, breite = 10, max((b.width() for b in self._bilder), default=600)
+        for b in self._bilder:
+            self.cv.create_image(10, y, image=b, anchor="nw")
+            y += b.height() + 12
+        self.cv.configure(scrollregion=(0, 0, breite + 20, y))
+        self.cv.yview_moveto(pos)
+        self.info.configure(text=f"{n} Seite(n) · Stand {jetzt()[11:19]} · aktualisiert sich beim Speichern (Strg+S)")
+        self.lift()
+
+    def neu_erzeugen(self):
+        m = self.app.aktuell
+        if isinstance(m, Maske):
+            m.vorschau(self.sprache.get())
+
+    def zoom(self, f):
+        self.skala = max(0.6, min(2.5, self.skala * f))
+        self.neu_erzeugen()
+
+    def extern(self):
+        if not self.daten:
+            return
+        tmp = Path(tempfile.gettempdir()) / "eps-converter-vorschau"
+        tmp.mkdir(exist_ok=True)
+        p = tmp / f"vorschau_{self.sprache.get()}_{int(time.time() * 1000)}.pdf"
+        p.write_bytes(self.daten)
+        oeffnen(p)
+
+
+class PapierkorbDialog(tk.Toplevel):
+    """Gelöschte Entwürfe ansehen, wiederherstellen oder endgültig löschen."""
+
+    def __init__(self, start):
+        super().__init__(start)
+        self.start = start
+        self.ablage = start.app.ablage
+        self.title("Papierkorb")
+        self.geometry("820x420")
+        self.transient(start.winfo_toplevel())
+        fr = ttk.Frame(self, padding=10)
+        fr.pack(fill="both", expand=True)
+        sp = [("titel", "Typbezeichnung", 280), ("hersteller", "Hersteller", 180), ("quelle", "Quelle", 200),
+              ("geloescht", "Gelöscht am", 140)]
+        self.tv = ttk.Treeview(fr, columns=[x[0] for x in sp], show="headings")
+        for k, t, b in sp:
+            self.tv.heading(k, text=t)
+            self.tv.column(k, width=b)
+        self.tv.pack(fill="both", expand=True)
+        unten = ttk.Frame(self, padding=(10, 0, 10, 10))
+        unten.pack(fill="x")
+        ttk.Button(unten, text="Wiederherstellen", command=self.wiederherstellen).pack(side="left")
+        ttk.Button(unten, text="Endgültig löschen", command=self.loeschen).pack(side="left", padx=6)
+        ttk.Button(unten, text="Papierkorb leeren", command=self.leeren).pack(side="left", padx=6)
+        ttk.Button(unten, text="Schließen", command=self.destroy).pack(side="right")
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.fuellen()
+
+    def fuellen(self):
+        self.tv.delete(*self.tv.get_children())
+        for ds, wann in self.ablage.papierkorb():
+            self.tv.insert("", "end", iid=ds.id, values=[ds.titel or "(ohne Namen)", ds.text("hersteller"),
+                                                         ds.quelle_pdf, wann.replace("T", " ")])
+
+    def wiederherstellen(self):
+        for iid in self.tv.selection():
+            self.ablage.wiederherstellen(iid)
+        self.fuellen()
+        self.start.aktualisieren()
+
+    def loeschen(self):
+        sel = self.tv.selection()
+        if sel and messagebox.askyesno("Endgültig löschen", f"{len(sel)} Entwurf/Entwürfe endgültig löschen?\n"
+                                                           "Das kann nicht rückgängig gemacht werden.", parent=self):
+            for iid in sel:
+                self.ablage.endgueltig_loeschen(iid)
+            self.fuellen()
+
+    def leeren(self):
+        if self.tv.get_children() and messagebox.askyesno("Papierkorb leeren", "Alle Entwürfe im Papierkorb endgültig löschen?",
+                                                         parent=self):
+            self.ablage.papierkorb_leeren()
+            self.fuellen()
+
+
+class VerlaufDialog(tk.Toplevel):
+    """Änderungsprotokoll eines Datenblatts (neueste zuerst)."""
+
+    def __init__(self, maske, ds: Datensatz):
+        super().__init__(maske)
+        self.title(f"Verlauf – {ds.titel or 'ohne Namen'}")
+        self.geometry("1100x560")
+        self.transient(maske.winfo_toplevel())
+        fr = ttk.Frame(self, padding=10)
+        fr.pack(fill="both", expand=True)
+        ttk.Label(fr, text="Verlauf (neueste Einträge oben)", font=("Segoe UI", 11, "bold"), foreground=NAVY).pack(anchor="w")
+        ttk.Label(fr, text="Benutzer = Anzeigename aus den Einstellungen bzw. Windows-Anmeldename. "
+                           "Orange = Änderung nach der Freigabe. Ungespeicherte Änderungen erscheinen erst nach dem Speichern.",
+                  foreground="#6A7380").pack(anchor="w", pady=(2, 6))
+        sp = [("zeit", "Zeit", 130), ("wer", "Benutzer", 120), ("aktion", "Aktion", 110), ("feld", "Feld", 190),
+              ("alt", "Vorher", 260), ("neu", "Nachher", 260)]
+        tv = ttk.Treeview(fr, columns=[x[0] for x in sp], show="headings")
+        for k, t, b in sp:
+            tv.heading(k, text=t)
+            tv.column(k, width=b, stretch=k in ("alt", "neu"))
+        tv.tag_configure("kopf", background="#EEF2F7")
+        tv.tag_configure("nach", background="#FFE8CC")
+        sb = ttk.Scrollbar(fr, orient="vertical", command=tv.yview)
+        tv.configure(yscrollcommand=sb.set)
+        tv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+        if not ds.protokoll:
+            tv.insert("", "end", values=["", "", "", "Noch keine Einträge", "", ""])
+        for e in reversed(ds.protokoll):
+            tag = ("nach",) if e.get("nach_freigabe") else ("kopf",)
+            aktion = e.get("aktion", "") + (" (nach Freigabe)" if e.get("nach_freigabe") else "")
+            aend = e.get("aenderungen") or [["", "", ""]]
+            for i, (feld, alt, neu) in enumerate(aend):
+                tv.insert("", "end", values=[e.get("zeit", "").replace("T", " ") if i == 0 else "",
+                                             e.get("benutzer", "") if i == 0 else "", aktion if i == 0 else "",
+                                             feld, alt, neu], tags=tag if i == 0 else ())
+        ttk.Button(self, text="Schließen", command=self.destroy).pack(anchor="e", padx=10, pady=(0, 10))
+        self.bind("<Escape>", lambda e: self.destroy())
 
 
 class FormatierDialog(tk.Toplevel):
@@ -1291,10 +1557,12 @@ class Start(ttk.Frame):
         leiste = ttk.Frame(self, padding=(10, 10, 10, 4))
         leiste.pack(fill="x")
         ttk.Button(leiste, text="Hersteller-PDF importieren …", command=app.import_pdf).pack(side="left")
+        ttk.Button(leiste, text="Mehrere PDFs …", command=app.stapel_import).pack(side="left", padx=(6, 0))
         ttk.Button(leiste, text="Leeres Datenblatt", command=app.neu_leer).pack(side="left", padx=6)
         ttk.Button(leiste, text="Öffnen", command=self.oeffnen).pack(side="left", padx=6)
         ttk.Button(leiste, text="Duplizieren", command=self.duplizieren).pack(side="left", padx=6)
         ttk.Button(leiste, text="Entwurf löschen", command=self.loeschen).pack(side="left", padx=6)
+        ttk.Button(leiste, text="Papierkorb …", command=self.papierkorb).pack(side="left", padx=6)
         ttk.Button(leiste, text="Ausgabeordner öffnen", command=lambda: oeffnen(app.einst.ausgabe())).pack(side="right")
 
         such = ttk.Frame(self, padding=(10, 2, 10, 0))
@@ -1382,6 +1650,10 @@ class Start(ttk.Frame):
             messagebox.showinfo("Duplizieren", "Bitte zuerst ein Datenblatt in der Liste auswählen.")
             return
         neu = self.app.ablage.duplizieren(sel[0])
+        vorlage = self.app.ablage.laden(sel[0])
+        protokoll.eintragen(neu, self.app.einst, "Dupliziert",
+                            [["Vorlage", "", f"{vorlage.titel or vorlage.id} (Bestellnummer {vorlage.bestellnummer or '–'})"]])
+        self.app.ablage.speichern(neu)
         self.aktualisieren()
         self.app.maske_zeigen(neu)
         self.app.aktuell.hinweis("Kopie angelegt (Entwurf). Bestellnummern und Prüfhaken wurden zurückgesetzt – "
@@ -1400,9 +1672,13 @@ class Start(ttk.Frame):
         if ds.status != ENTWURF:
             messagebox.showinfo("Löschen", "Freigegebene Datenblätter können nicht gelöscht werden.")
             return
-        if messagebox.askyesno("Löschen", f"Entwurf „{ds.titel or ds.id}“ endgültig löschen?"):
+        if messagebox.askyesno("Löschen", f"Entwurf „{ds.titel or ds.id}“ in den Papierkorb verschieben?\n\n"
+                                          "Er lässt sich über „Papierkorb …“ wiederherstellen."):
             self.app.ablage.loeschen(ds.id)
             self.aktualisieren()
+
+    def papierkorb(self):
+        PapierkorbDialog(self)
 
 
 # ======================================================================== Einstellungen
@@ -1431,7 +1707,7 @@ class EinstellungenDialog(tk.Toplevel):
         self.api = Eingabe(fr, 52, show="•"); self.api.insert(0, e.anthropic_api_key)
         zeile("Claude-API-Schlüssel", self.api, "Nur nötig für die KI-Auswertung (nach Kostenfreigabe). Bleibt auf diesem Rechner.")
         self.benutzer = Eingabe(fr, 52); self.benutzer.insert(0, e.benutzer)
-        zeile("Benutzername", self.benutzer)
+        zeile("Anzeigename im Verlauf", self.benutzer, f"Leer = Windows-Anmeldename ({protokoll.benutzer(None)})")
         self.ausgabe = self._ordnerfeld(fr, e.ausgabe_ordner)
         zeile("Ausgabeordner PDFs", self.ausgabe.master, f"Leer = {pfade.AUSGABE_DIR}")
         self.archiv = self._ordnerfeld(fr, e.archiv_ordner)
@@ -1525,9 +1801,12 @@ class App(tk.Tk):
         self.ablage = LokaleAblage()
         self.aktuell = None
         self.viewer = None
+        self.vorschau_fenster = None
         self.legende = Legende(self)
         if self.einst.legende_anzeigen:
             self.legende.pack(side="right", fill="y")
+        self._dnd = None
+        self._dnd_einrichten()
         self.start_zeigen()
         self.protocol("WM_DELETE_WINDOW", self.beenden)
         self._kuerzel()
@@ -1555,6 +1834,7 @@ class App(tk.Tk):
         self.bind_all("<Control-n>", lambda e: (self.neu_leer(), "break")[1])
         self.bind_all("<F1>", self.legende_umschalten)
         self.bind_all("<Control-e>", in_maske(lambda m: m.einheiten_vereinheitlichen()))
+        self.bind_all("<F3>", in_maske(lambda m: m.naechstes_offenes()))
 
         # Tk-Textfelder haben eigene Emacs-Kürzel (Strg+O fügt z. B. eine Zeile ein) – hier abschalten
         for seq in ("<Control-o>", "<Control-p>", "<Control-n>", "<Control-f>", "<Control-e>"):
@@ -1611,11 +1891,42 @@ class App(tk.Tk):
             self.aktuell.destroy()
         self.aktuell = frame
         frame.pack(fill="both", expand=True)
+        self._dnd_registrieren(frame)
+
+    # ---- Drag & Drop (tkinterdnd2; fehlt die Bibliothek, läuft alles ohne)
+    def _dnd_einrichten(self):
+        try:
+            from tkinterdnd2 import TkinterDnD, DND_FILES
+            TkinterDnD._require(self)
+            self._dnd = DND_FILES
+            self._dnd_registrieren(self.legende)
+        except Exception:
+            self._dnd = None
+
+    def _dnd_registrieren(self, w):
+        if not self._dnd:
+            return
+        try:
+            w.drop_target_register(self._dnd)
+            w.dnd_bind("<<Drop>>", self._dnd_drop)
+        except Exception:
+            return
+        for c in w.winfo_children():
+            if not isinstance(c, (tk.Toplevel, tk.Menu)):
+                self._dnd_registrieren(c)
+
+    def _dnd_drop(self, e):
+        pfade = list(self.tk.splitlist(e.data))
+        self.after(50, lambda: self.pdfs_abgelegt(pfade))
+        return getattr(e, "action", "copy")
 
     def start_zeigen(self):
         if self.viewer is not None and self.viewer.winfo_exists():
             self.viewer.schliessen()
         self.viewer = None
+        if self.vorschau_fenster is not None and self.vorschau_fenster.winfo_exists():
+            self.vorschau_fenster.destroy()
+        self.vorschau_fenster = None
         self._wechseln(Start(self))
 
     def original_zeigen(self, pfad: Path):
@@ -1632,6 +1943,11 @@ class App(tk.Tk):
     def maske_zeigen(self, ds: Datensatz):
         self._wechseln(Maske(self, ds))
 
+    def vorschau_zeigen(self, daten: bytes, sprache: str, ds: Datensatz):
+        if self.vorschau_fenster is None or not self.vorschau_fenster.winfo_exists():
+            self.vorschau_fenster = VorschauFenster(self)
+        self.vorschau_fenster.zeigen(daten, sprache, ds)
+
     def maske_verlassen(self) -> bool:
         """Vor dem Wechsel aus einer Maske: ungespeicherte Änderungen abfragen. False = abbrechen."""
         if isinstance(self.aktuell, Maske) and self.aktuell.ungespeichert():
@@ -1646,6 +1962,7 @@ class App(tk.Tk):
         if not self.maske_verlassen():
             return
         ds = Datensatz()
+        protokoll.eintragen(ds, self.einst, "Angelegt", [["", "", "leeres Datenblatt"]])
         self.ablage.speichern(ds)
         self.maske_zeigen(ds)
 
@@ -1658,6 +1975,29 @@ class App(tk.Tk):
             messagebox.showinfo("Import", "Der PDF-Import folgt in Etappe 3. Bitte vorerst „Leeres Datenblatt“ verwenden.")
             return
         importieren.dialog(self)
+
+    def stapel_import(self, pfade=None):
+        if not self.maske_verlassen():
+            return
+        from . import importieren
+        if pfade:
+            importieren.stapel(self, pfade)
+        else:
+            importieren.stapel_dialog(self)
+
+    def pdfs_abgelegt(self, pfade):
+        """Drag & Drop: ein PDF → normaler Import, mehrere → Stapel-Import."""
+        pdfs = [Path(p) for p in pfade if str(p).lower().endswith(".pdf") and Path(p).is_file()]
+        if not pdfs:
+            messagebox.showinfo("Import", "Bitte PDF-Dateien hineinziehen.")
+            return
+        if not self.maske_verlassen():
+            return
+        from . import importieren
+        if len(pdfs) == 1:
+            importieren.importieren_datei(self, pdfs[0])
+        else:
+            importieren.stapel(self, pdfs)
 
     def einstellungen_zeigen(self):
         EinstellungenDialog(self)

@@ -33,6 +33,7 @@ jobs:
           Get-Content "$ziel\selbsttest.txt"
           if ($p.ExitCode -ne 0) { exit 1 }
           if (-not (Test-Path "$ziel\d999999.pdf")) { exit 1 }
+          if (-not (Select-String -Path "$ziel\selbsttest.txt" -Pattern "DnD OK" -Quiet)) { Write-Error "Drag & Drop fehlt in der EXE"; exit 1 }
       - uses: actions/upload-artifact@v4
         with:
           name: Datenblatt-Converter

@@ -29,8 +29,13 @@ class LokaleAblage:
         return self.basis / ds_id / "datensatz.json"
 
     def alle(self) -> list[Datensatz]:
+        return self._lesen(self.basis)
+
+    def _lesen(self, ordner: Path) -> list[Datensatz]:
         out = []
-        for d in sorted(self.basis.iterdir()) if self.basis.exists() else []:
+        for d in sorted(ordner.iterdir()) if ordner.exists() else []:
+            if d.name.startswith("_"):
+                continue                                # z. B. _papierkorb
             f = d / "datensatz.json"
             if f.exists():
                 try:
@@ -66,6 +71,7 @@ class LokaleAblage:
             neu.werte.pop(fid, None)
         for w in neu.werte.values():
             w.geprueft = False
+        neu.protokoll = []
         quelle, ziel = self.basis / ds_id, self.ordner(neu.id)
         for f in quelle.iterdir():
             if f.is_file() and f.name != "datensatz.json":
@@ -73,10 +79,54 @@ class LokaleAblage:
         self.speichern(neu)
         return neu
 
-    def loeschen(self, ds_id: str) -> None:
+    # ---- Papierkorb: gelöschte Entwürfe werden verschoben, nicht sofort gelöscht
+    @property
+    def papierkorb_dir(self) -> Path:
+        return self.basis / "_papierkorb"
+
+    def loeschen(self, ds_id: str, endgueltig: bool = False) -> None:
         p = self.basis / ds_id
-        if p.exists():
+        if not p.exists():
+            return
+        if endgueltig:
             shutil.rmtree(p)
+            return
+        self.papierkorb_dir.mkdir(parents=True, exist_ok=True)
+        ziel = self.papierkorb_dir / ds_id
+        if ziel.exists():
+            shutil.rmtree(ziel)
+        shutil.move(str(p), str(ziel))
+        (ziel / "geloescht_am.txt").write_text(jetzt(), encoding="utf-8")
+
+    def papierkorb(self) -> list[tuple[Datensatz, str]]:
+        """Inhalt des Papierkorbs: (Datensatz, gelöscht am)."""
+        out = []
+        for ds in self._lesen(self.papierkorb_dir):
+            f = self.papierkorb_dir / ds.id / "geloescht_am.txt"
+            out.append((ds, f.read_text(encoding="utf-8").strip() if f.exists() else ""))
+        return sorted(out, key=lambda x: x[1], reverse=True)
+
+    def wiederherstellen(self, ds_id: str) -> None:
+        q = self.papierkorb_dir / ds_id
+        if not q.exists():
+            return
+        (q / "geloescht_am.txt").unlink(missing_ok=True)
+        ziel = self.basis / ds_id
+        if ziel.exists():
+            shutil.rmtree(ziel)
+        shutil.move(str(q), str(ziel))
+
+    def endgueltig_loeschen(self, ds_id: str) -> None:
+        q = self.papierkorb_dir / ds_id
+        if q.exists():
+            shutil.rmtree(q)
+
+    def papierkorb_leeren(self) -> int:
+        n = 0
+        for ds, _ in self.papierkorb():
+            self.endgueltig_loeschen(ds.id)
+            n += 1
+        return n
 
     def finde_hersteller_nr(self, hersteller_nr: str, ausser_id: str = "") -> Datensatz | None:
         key = (hersteller_nr or "").strip().lower()
@@ -84,6 +134,15 @@ class LokaleAblage:
             return None
         for ds in self.alle():
             if ds.id != ausser_id and ds.text("hersteller_bestellnummer").strip().lower() == key:
+                return ds
+        return None
+
+    def finde_typbezeichnung(self, name: str, ausser_id: str = "") -> Datensatz | None:
+        key = " ".join((name or "").lower().split())
+        if not key:
+            return None
+        for ds in self.alle():
+            if ds.id != ausser_id and " ".join(ds.titel.lower().split()) == key:
                 return ds
         return None
 

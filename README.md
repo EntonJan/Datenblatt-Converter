@@ -21,6 +21,12 @@ automatisches Speichern alle 2 Minuten, offene Punkte je Reiter („Technische D
 ausblenden“, Rechtsklick-Menü am Feld (Fundstelle, DE → EN, Originalwert wiederherstellen, leeren). Fenstergröße,
 Sortierung und Filter werden gemerkt.
 
+**Seit v0.6.0:** PDFs ins Fenster ziehen (mehrere = Stapel-Import) oder „Mehrere PDFs …“; Vorschau im Programm
+(DE/EN, aktualisiert sich beim Speichern); F3 springt zum nächsten offenen Feld; ein geprüfter Wert verliert den
+Prüfhaken, sobald er geändert wird; Warnung bei doppelter Typbezeichnung/Hersteller-Bestellnummer; Papierkorb für
+gelöschte Entwürfe; **Verlauf** je Datenblatt (wer/wann/was – Benutzer = Anzeigename oder Windows-Anmeldename,
+nicht fälschungssicher).
+
 **Einheiten vereinheitlichen (Strg+E):** schlägt die EPS-Schreibweise vor (z. B. `230Vac` → `230 VAC`, `8.7Arms` →
 `8,7 Arms` / EN `8.7 Arms`, `0-50°C` → `0–50 °C`, `432 x 132 x 483mm (17" …)` → `432 × 132 × 483 mm`, `12kg (26 lbs.)` →
 `12 kg`, `Ohm` → `Ω`, `3ph.` → `3-phasig`). Übernommen wird nur, was in der Vorher/Nachher-Liste angehakt ist; Normen

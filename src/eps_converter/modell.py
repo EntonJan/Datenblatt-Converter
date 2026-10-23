@@ -81,6 +81,7 @@ class Datensatz:
     bilder: list[Bild] = field(default_factory=list)
     weclapp: dict = field(default_factory=lambda: {"status": "ausstehend"})
     import_werte: dict = field(default_factory=dict)   # Werte direkt nach dem PDF-Import (für „Originalwert wiederherstellen“)
+    protokoll: list = field(default_factory=list)      # Änderungsprotokoll, siehe protokoll.py
     format_version: int = 1
 
     def wert(self, fid: str) -> Wert:

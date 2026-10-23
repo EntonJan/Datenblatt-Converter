@@ -7,7 +7,7 @@ a = Analysis(
     [str(ROOT / "src" / "main.py")],
     pathex=[str(ROOT / "src")],
     datas=[(str(ROOT / "assets"), "assets"), (str(ROOT / "katalog" / "feldkatalog.xlsx"), "katalog")],
-    hiddenimports=["eps_converter.importieren", "PIL._tkinter_finder"],
+    hiddenimports=["eps_converter.importieren", "PIL._tkinter_finder", "tkinterdnd2"],
     excludes=["pytest"],
 )
 pyz = PYZ(a.pure)
