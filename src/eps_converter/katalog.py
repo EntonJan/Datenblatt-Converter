@@ -68,6 +68,7 @@ class Katalog:
     schnittstellen_werte: list[tuple[str, str]]
     quelle: Path
     synonyme: dict[str, str] = field(default_factory=dict)   # normalisierte Bezeichnung -> Feld-ID
+    formulierungen: list = field(default_factory=list)        # [(englisch, deutsch)] – Textbausteine in Werten
 
     def __post_init__(self):
         self._by_id = {f.id: f for f in self.felder}
@@ -94,6 +95,28 @@ class Katalog:
             if en.strip().lower() == key:
                 return de
         return None
+
+    def teilweise(self, text: str, ziel: str) -> str:
+        """Ersetzt bekannte Textbausteine („at full load“ ↔ „bei Volllast“). ziel = "de" oder "en".
+        Zahlen und unbekannte Wörter bleiben stehen; das Ergebnis ist ein Vorschlag (gelb markieren)."""
+        if not text or not self.formulierungen:
+            return text
+        paare = [(en, de) if ziel == "de" else (de, en) for en, de in self.formulierungen]
+        paare = [(q, z) for q, z in paare if q and z and q.lower() != z.lower()]
+        paare.sort(key=lambda p: len(p[0]), reverse=True)
+        ersatz: list[str] = []
+        t = text
+        for quelle, zielwort in paare:
+            muster = re.compile(r"(?<![\w])" + r"\s+".join(re.escape(w) for w in quelle.split()) + r"(?![\w])", re.I)
+
+            def _sub(m, zielwort=zielwort):
+                z = zielwort
+                if m.group(0)[:1].isupper() and z[:1].islower():
+                    z = z[:1].upper() + z[1:]
+                ersatz.append(z)
+                return f"\x00{len(ersatz) - 1}\x00"
+            t = muster.sub(_sub, t)
+        return re.sub(r"\x00(\d+)\x00", lambda m: ersatz[int(m.group(1))], t)
 
     def uebersetze(self, text_de: str) -> str | None:
         """Feste Übersetzung aus dem Wörterbuch (exakt, ohne Groß-/Kleinschreibung)."""
@@ -201,8 +224,37 @@ def laden(pfad: Path | None = None) -> Katalog:
             synonyme.setdefault(normalisieren(f.de), f.id)
             synonyme.setdefault(normalisieren(f.en), f.id)
     wb.close()
+    formulierungen = _formulierungen(pfad)
     return Katalog(felder=felder, woerterbuch=woerter, schnittstellen_werte=schnittstellen_werte, quelle=pfad,
-                   synonyme=synonyme)
+                   synonyme=synonyme, formulierungen=formulierungen)
+
+
+def _formulierungen_aus(pfad: Path) -> list[tuple[str, str]]:
+    try:
+        wb = load_workbook(pfad, read_only=True, data_only=True)
+    except Exception:
+        return []
+    out = []
+    if "Formulierungen" in wb.sheetnames:
+        for r in list(wb["Formulierungen"].iter_rows(values_only=True))[1:]:
+            en, de = _text(r[0] if r else ""), _text(r[1] if r and len(r) > 1 else "")
+            if en and de:
+                out.append((en, de))
+    wb.close()
+    return out
+
+
+def _formulierungen(pfad: Path) -> list[tuple[str, str]]:
+    """Eigene Einträge aus dem Katalog im Programmordner + neue aus dem mitgelieferten Katalog."""
+    eigene = _formulierungen_aus(pfad)
+    bekannt = {en.lower() for en, _ in eigene}
+    m = pfade.KATALOG_MITGELIEFERT
+    try:
+        if m.exists() and m.resolve() != Path(pfad).resolve():
+            eigene += [(en, de) for en, de in _formulierungen_aus(m) if en.lower() not in bekannt]
+    except OSError:
+        pass
+    return eigene
 
 
 def _mitgelieferte_synonyme(pfad: Path) -> dict[str, str]:

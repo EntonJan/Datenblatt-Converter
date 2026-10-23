@@ -66,13 +66,22 @@ def datensatz_aus_ergebnis(erg: auslesen.Ergebnis, kat: K.Katalog, ds: Datensatz
             continue
         f = kat.feld(fid)
         txt = fund.text
+        teil = ""
         if erg.sprache == "en":
-            en, de = txt, kat.uebersetze_rueck(txt) or txt
+            en, de = txt, kat.uebersetze_rueck(txt)
+            if de is None:
+                de = txt if fid == "beschreibung" else kat.teilweise(txt, "de")
+                teil = "de" if de != txt else ""
         else:
-            de, en = txt, kat.uebersetze(txt) or txt
+            de, en = txt, kat.uebersetze(txt)
+            if en is None:
+                en = txt if fid == "beschreibung" else kat.teilweise(txt, "en")
+                teil = "en" if en != txt else ""
         if fid == "beschreibung" and erg.sprache == "en":
             de = ""             # englischer Fließtext gehört nicht ins deutsche Feld – Übersetzung folgt (KI/von Hand)
-        w = Wert(de=de, en=en, herkunft=HERKUNFT_PDF, geprueft=False, fundstelle=fund.fundstelle())
+        w = Wert(de=de, en=en, herkunft=HERKUNFT_PDF, geprueft=False, fundstelle=fund.fundstelle(), teiluebersetzt=teil)
+        if erg.sprache == "en":
+            w.en_manuell = True     # Englisch ist hier das Original – Tippen im deutschen Feld überschreibt es nicht
         if f.typ in (K.BEREICH, K.ZAHL) and f.einheit:
             w.min, w.max = regeln.parse_bereich(txt, f.einheit)
         elif f.typ in (K.AUSWAHL, K.MEHRFACH):

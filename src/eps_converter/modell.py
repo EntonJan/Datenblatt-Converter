@@ -34,6 +34,7 @@ class Wert:
     geprueft: bool = False
     en_manuell: bool = False     # True, wenn der englische Text von Hand geändert wurde
     fundstelle: str = ""         # z. B. „Seite 2: Output Voltage 0-750 V“
+    teiluebersetzt: str = ""     # "de"/"en": diese Seite wurde per Formulierungs-Wörterbuch vorübersetzt (gelb, bitte prüfen)
 
     def leer(self) -> bool:
         return not (self.de or self.en or self.min is not None or self.max is not None or self.ja is not None

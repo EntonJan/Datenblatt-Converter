@@ -255,6 +255,96 @@ for de, en, q, b in [
     w(de, en, q, b)
 
 
+
+# ---------------- Formulierungen: Textbausteine innerhalb eines Werts (beide Richtungen, längste zuerst)
+# Gesammelt aus den englischen Werten der Hersteller-Beispiele (178 Werte → 56 Bausteine). Zahlen bleiben stehen.
+FO = [
+    # Last / Betrieb
+    ("from no load to full load", "von Leerlauf bis Volllast", ""),
+    ("at full load", "bei Volllast", "10× in den Beispielen"),
+    ("at 90% load", "bei 90% Last", ""),
+    ("at no load", "im Leerlauf", ""),
+    ("full load", "Volllast", ""),
+    ("no load", "Leerlauf", ""),
+    ("operating range", "Betriebsbereich", ""),
+    ("continuous", "dauerhaft", "z. B. 3000 W continuous"),
+    ("max per phase", "max. pro Phase", ""),
+    ("per phase", "pro Phase", ""),
+    ("for full specifications", "bei voller Spezifikation", ""),
+    ("for full specification", "bei voller Spezifikation", ""),
+    ("baseplate temperature", "Grundplattentemperatur", ""),
+    # Vergleich / Mengen
+    ("less than", "kleiner als", ""),
+    ("better than", "besser als", ""),
+    ("greater than", "größer als", ""),
+    ("more than", "mehr als", ""),
+    ("approximately", "ca.", ""),
+    ("approx.", "ca.", ""),
+    ("approx", "ca.", ""),
+    ("maximum", "maximal", ""),
+    ("minimum", "minimal", ""),
+    ("typical", "typisch", ""),
+    ("nominal", "nominal", "bleibt gleich (deutsch korrekt)"),
+    # Umgebung
+    ("non-condensing", "nicht kondensierend", ""),
+    ("non condensing", "nicht kondensierend", ""),
+    # Schutz
+    ("current limiting with short circuit protection", "Strombegrenzung mit Kurzschlussschutz", ""),
+    ("thermal shutdown with automatic recovery", "thermische Abschaltung mit automatischem Wiederanlauf", ""),
+    ("thermal shutdown", "thermische Abschaltung", ""),
+    ("automatic recovery", "automatischer Wiederanlauf", ""),
+    ("inrush current limiting", "Einschaltstrombegrenzung", ""),
+    ("current limiting", "Strombegrenzung", ""),
+    ("short circuit protection", "Kurzschlussschutz", ""),
+    ("short circuit proof", "kurzschlussfest", ""),
+    ("overvoltage protection", "Überspannungsschutz", ""),
+    ("overtemperature protection", "Übertemperaturschutz", ""),
+    ("not installed", "nicht vorhanden", ""),
+    ("none", "keine", ""),
+    # Kühlung
+    ("air forced circulation with automatic fan speed regulation", "forcierte Luftkühlung mit automatischer Lüfterdrehzahlregelung", ""),
+    ("air forced circulation", "forcierte Luftkühlung", ""),
+    ("by built-in high quality internal fans", "durch eingebaute hochwertige Lüfter", ""),
+    ("by built-in high quality fans", "durch eingebaute hochwertige Lüfter", ""),
+    ("temperature controlled fans", "temperaturgeregelte Lüfter", ""),
+    ("natural convection", "natürliche Konvektion", ""),
+    ("water cooling", "Wasserkühlung", ""),
+    ("cooling slots", "Lüftungsschlitze", ""),
+    # Restwelligkeit / Normen
+    ("high frequency ripple is less than", "HF-Restwelligkeit kleiner als", ""),
+    ("high frequency ripple is better than", "HF-Restwelligkeit besser als", ""),
+    ("BW", "Bandbreite", "z. B. (20 MHz BW)"),
+    ("designed to meet", "ausgelegt nach", ""),
+    ("and corresponding standards", "und entsprechenden Normen", ""),
+    # Aufbau / Ausführung
+    ("conformal coating", "Schutzlackierung", ""),
+    ("ruggedized", "robuste Ausführung", ""),
+    ("ruggedizing", "robuste Ausführung", ""),
+    ("chassis mount", "Chassismontage", ""),
+    ("rackmount", "Rack-Einbau", ""),
+    ("rack mount", "Rack-Einbau", ""),
+    ("output is floating", "Ausgang potentialfrei", ""),
+    ("floating", "potentialfrei", ""),
+    ("galvanically isolated", "galvanisch getrennt", ""),
+    ("adjustable", "einstellbar", ""),
+    ("programmable", "programmierbar", ""),
+    ("remote sensing", "Fernfühlung", ""),
+    ("output to chassis", "Ausgang zu Gehäuse", ""),
+    ("input to chassis", "Eingang zu Gehäuse", ""),
+    ("input to output", "Eingang zu Ausgang", ""),
+    # Gerätearten
+    ("industrial quality sine wave inverter", "Sinus-Wechselrichter in Industriequalität", ""),
+    ("industrial quality frequency converter", "Frequenzumformer in Industriequalität", ""),
+    ("sine wave inverter", "Sinus-Wechselrichter", ""),
+    ("frequency converter", "Frequenzumformer", ""),
+    ("DC/DC converter", "DC/DC-Wandler", ""),
+    ("industrial quality", "Industriequalität", ""),
+    # Verbindungswörter (nur in Werten, nicht in der Beschreibung)
+    ("in case of insufficient cooling", "bei unzureichender Kühlung", ""),
+    ("up to", "bis zu", ""),
+    ("and", "und", "z. B. „UL 458 and EN 60950-1“"),
+]
+
 # ---------------- Synonyme: Bezeichnungen in Hersteller-Datenblättern → Feld-ID (für das Auslesen ohne KI)
 S = []
 def s(fid, *begriffe):
@@ -358,7 +448,8 @@ lines = [
     ("Was darfst du ändern?", True),
     ("• Spalten „Feld (DE)“, „Feld (EN)“, „Bemerkung“ und die Reihenfolge der Zeilen (= Reihenfolge auf dem Datenblatt).", False),
     ("• Blatt „Auswahlwerte“: Werte ergänzen, umbenennen, löschen. Danach Status auf „bestätigt“ setzen.", False),
-    ("• Blatt „Wörterbuch“: Übersetzungen ergänzen oder korrigieren.", False),
+    ("• Blatt „Wörterbuch“: Übersetzungen ganzer Werte ergänzen oder korrigieren.", False),
+    ("• Blatt „Formulierungen“: Textbausteine innerhalb eines Werts (z. B. „at full load“ = „bei Volllast“). Gilt in beide Richtungen.", False),
     ("• Blatt „Synonyme“: wie ein Feld in Hersteller-Datenblättern heißen kann (hilft beim Auslesen ohne KI).", False),
     ("• Spalte „ID“ bitte NICHT ändern – darüber werden die Daten gespeichert.", False),
     ("", False),
@@ -399,10 +490,13 @@ ws4 = None
 ws3 = wb.create_sheet("Wörterbuch")
 sheet(ws3, ["Deutsch", "Englisch", "Quelle (EPS-Artikel)", "Bemerkung"], W, [50, 50, 20, 45])
 
+wsf = wb.create_sheet("Formulierungen")
+sheet(wsf, ["Englisch", "Deutsch", "Bemerkung"], FO, [55, 60, 40])
+
 ws4 = wb.create_sheet("Synonyme")
 sheet(ws4, ["Feld-ID", "Bezeichnung im Hersteller-Datenblatt"], S, [28, 50])
 
 OUT.parent.mkdir(parents=True, exist_ok=True)
 wb.save(OUT)
 kern = sum(1 for r in F if r[6] == "ja")
-print(f"{OUT}: {len(F)} Felder, davon {kern} Kernfelder; {len(A)} Auswahlwerte; {len(W)} Wörterbuch-Einträge; {len(S)} Synonyme")
+print(f"{OUT}: {len(F)} Felder, davon {kern} Kernfelder; {len(A)} Auswahlwerte; {len(W)} Wörterbuch-Einträge; {len(S)} Synonyme; {len(FO)} Formulierungen")

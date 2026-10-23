@@ -54,3 +54,18 @@ def test_idempotent(text):
     for sp in ("de", "en"):
         einmal = f(text, sp, "abmessungen")
         assert f(einmal, sp, "abmessungen") == einmal
+
+
+def test_formulierungen_beide_richtungen():
+    from pathlib import Path
+    from eps_converter import katalog
+    k = katalog.laden(Path(__file__).resolve().parents[1] / "katalog" / "feldkatalog.xlsx")
+    assert k.teilweise("Less than 5% at full load", "de") == "Kleiner als 5% bei Volllast"
+    assert k.teilweise("± 6% from no load to full load", "de") == "± 6% von Leerlauf bis Volllast"
+    assert k.teilweise("5 – 95% non-condensing", "de") == "5 – 95% nicht kondensierend"
+    assert k.teilweise("Designed to meet UL 458 and EN 60950-1", "de") == "Ausgelegt nach UL 458 und EN 60950-1"
+    assert k.teilweise("Temperaturgeregelte Lüfter", "en") == "Temperature controlled fans"
+    assert k.teilweise("5-800VDC einstellbar", "en") == "5-800VDC adjustable"
+    assert k.teilweise("Standard text without phrases", "de") == "Standard text without phrases"
+    # erst übersetzen, dann EPS-Schreibweise
+    assert f(k.teilweise("Approx 7 kg (15 lbs)", "de"), "de") == "Ca. 7 kg"

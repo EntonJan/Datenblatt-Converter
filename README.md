@@ -27,7 +27,11 @@ Prüfhaken, sobald er geändert wird; Warnung bei doppelter Typbezeichnung/Herst
 gelöschte Entwürfe; **Verlauf** je Datenblatt (wer/wann/was – Benutzer = Anzeigename oder Windows-Anmeldename,
 nicht fälschungssicher).
 
-**Einheiten vereinheitlichen (Strg+E):** schlägt die EPS-Schreibweise vor (z. B. `230Vac` → `230 VAC`, `8.7Arms` →
+**Formulierungen (seit v0.7.0):** Blatt „Formulierungen“ im Feldkatalog übersetzt Textbausteine innerhalb eines Werts
+in beide Richtungen („at full load“ ↔ „bei Volllast“). Beim Import automatisch (vorübersetzte Felder gelb), außerdem
+über „Werte vereinheitlichen“. Eigene Einträge einfach in Excel ergänzen.
+
+**Werte vereinheitlichen (Strg+E), früher „Einheiten vereinheitlichen“:** schlägt die EPS-Schreibweise vor (z. B. `230Vac` → `230 VAC`, `8.7Arms` →
 `8,7 Arms` / EN `8.7 Arms`, `0-50°C` → `0–50 °C`, `432 x 132 x 483mm (17" …)` → `432 × 132 × 483 mm`, `12kg (26 lbs.)` →
 `12 kg`, `Ohm` → `Ω`, `3ph.` → `3-phasig`). Übernommen wird nur, was in der Vorher/Nachher-Liste angehakt ist; Normen
 und Typbezeichnungen bleiben unberührt. Regeln: `src/eps_converter/formatierer.py`. Tastenkürzel: Strg+S speichern, Strg+P Vorschau DE, Strg+Umschalt+P Vorschau EN,

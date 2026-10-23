@@ -265,11 +265,16 @@ class FeldEditor:
     def _de_geaendert(self):
         if self._lade:
             return
+        if self.de.get() == getattr(self, "_de_letzt", None):
+            return                                      # z. B. Tab/Pfeiltaste: nichts geändert
+        self._de_letzt = self.de.get()
+        if isinstance(self.de, tk.Entry):
+            self.de.configure(background="white")
         if not self.en_manuell:
             de = self.de.get()
             ue = self.kat.uebersetze(de)
             self.en.delete(0, "end")
-            self.en.insert(0, ue if ue is not None else de)
+            self.en.insert(0, ue if ue is not None else self.kat.teilweise(de, "en"))
             # Gelb = Text wurde nur kopiert, nicht übersetzt (bitte prüfen)
             braucht = ue is None and any(len(w) > 3 and w.isalpha() for w in de.replace("-", " ").split())
             self.en.configure(background=WARN_BG if braucht else "white")
@@ -322,11 +327,17 @@ class FeldEditor:
         if hasattr(self, "de"):
             self.de.delete(0, "end"); self.de.insert(0, w.de)
             self.en.delete(0, "end"); self.en.insert(0, w.en)
+            self._de_letzt = w.de
             if isinstance(self.en, tk.Entry):
                 ungeprueft = (not w.en_manuell and w.de and w.en == w.de and self.kat.uebersetze(w.de) is None
                               and self.kat.uebersetze_rueck(w.en) is None
                               and any(len(x) > 3 and x.isalpha() for x in w.de.replace("-", " ").split()))
                 self.en.configure(background=WARN_BG if ungeprueft else "white")
+            if isinstance(self.de, tk.Entry):
+                self.de.configure(background="white")
+            seite = getattr(self, w.teiluebersetzt, None) if w.teiluebersetzt in ("de", "en") else None
+            if isinstance(seite, tk.Entry):
+                seite.configure(background=WARN_BG)       # per Formulierungs-Wörterbuch vorübersetzt → prüfen
         self.geprueft.set(w.geprueft)
         self._lade = False
 
@@ -334,6 +345,14 @@ class FeldEditor:
         if hasattr(self, "de"):
             w.de = self.de.get().strip()
             w.en = self.en.get().strip()
+            w.teiluebersetzt = ""
+            for seite in ("de", "en"):
+                e = getattr(self, seite)
+                if seite != "en" and isinstance(e, tk.Entry) and str(e.cget("background")) == WARN_BG:
+                    w.teiluebersetzt = seite
+            if not w.teiluebersetzt and isinstance(self.en, tk.Entry) and str(self.en.cget("background")) == WARN_BG \
+                    and w.en != w.de:
+                w.teiluebersetzt = "en"
         w.en_manuell = self.en_manuell
         w.geprueft = self.geprueft.get()
 
@@ -613,7 +632,7 @@ class Maske(ttk.Frame):
                         variable=self.leere_aus, command=self.leere_umschalten).pack(side="left")
         ttk.Button(leiste, text="Verlauf …", command=self.verlauf).pack(side="right", padx=(6, 0))
         ttk.Button(leiste, text="Nächstes offenes Feld (F3)", command=self.naechstes_offenes).pack(side="right", padx=(6, 0))
-        ttk.Button(leiste, text="Einheiten vereinheitlichen … (Strg+E)",
+        ttk.Button(leiste, text="Werte vereinheitlichen … (Strg+E)",
                    command=self.einheiten_vereinheitlichen).pack(side="right")
 
         self.nb = ttk.Notebook(self)
@@ -873,29 +892,34 @@ class Maske(ttk.Frame):
             name = kat.feld(fid).de
             for sp in ("de", "en"):
                 alt = getattr(w, sp)
-                neu = formatierer.formatieren(alt, sp, fid)
+                uebersetzt = alt if fid == "beschreibung" else kat.teilweise(alt, sp)   # Formulierungen
+                neu = formatierer.formatieren(uebersetzt, sp, fid)
                 if alt and neu != alt:
-                    vorschlaege.append((("wert", fid), sp, name, alt, neu, not w.geprueft))
+                    vorschlaege.append((("wert", fid), sp, name, alt, neu, not w.geprueft, uebersetzt != alt))
         for i, o in enumerate(ds.optionen):
             for sp in ("de", "en"):
                 alt = getattr(o, sp); neu = formatierer.formatieren(alt, sp)
                 if alt and neu != alt:
-                    vorschlaege.append((("option", i), sp, f"Option {o.code or i + 1}", alt, neu, True))
+                    vorschlaege.append((("option", i), sp, f"Option {o.code or i + 1}", alt, neu, True, False))
         for i, e in enumerate(ds.lieferumfang):
             for sp in ("de", "en"):
-                alt = getattr(e, sp); neu = formatierer.formatieren(alt, sp)
+                alt = getattr(e, sp); neu = formatierer.formatieren(kat.teilweise(alt, sp), sp)
                 if alt and neu != alt:
-                    vorschlaege.append((("liefer", i), sp, "Lieferumfang", alt, neu, True))
+                    vorschlaege.append((("liefer", i), sp, "Lieferumfang", alt, neu, True, False))
         if not vorschlaege:
-            messagebox.showinfo("Einheiten vereinheitlichen", "Alle Schreibweisen entsprechen bereits der EPS-Regel.", parent=self)
+            messagebox.showinfo("Werte vereinheitlichen", "Alle Schreibweisen entsprechen bereits der EPS-Regel.", parent=self)
             return
         FormatierDialog(self, vorschlaege, self._formatierung_uebernehmen)
 
     def _formatierung_uebernehmen(self, gewaehlt):
         ds = self.ds
-        for (art, schluessel), sp, _, _, neu, _ in gewaehlt:
+        for (art, schluessel), sp, _, _, neu, _, uebersetzt in gewaehlt:
             if art == "wert":
                 setattr(ds.werte[schluessel], sp, neu)
+                if uebersetzt:
+                    ds.werte[schluessel].teiluebersetzt = sp       # vorübersetzt → gelb, bitte prüfen
+                    if sp == "en":
+                        ds.werte[schluessel].en_manuell = True
             elif art == "option":
                 setattr(ds.optionen[schluessel], sp, neu)
             elif art == "liefer":
@@ -905,7 +929,9 @@ class Maske(ttk.Frame):
         self.zaehler_aktualisieren()
         if self.leere_aus.get():
             self.leere_anwenden()
-        self.hinweis(f"{len(gewaehlt)} Schreibweise(n) vereinheitlicht. Prüfhaken bleiben erhalten.")
+        n_ue = sum(1 for g in gewaehlt if g[6])
+        self.hinweis(f"{len(gewaehlt)} Wert(e) vereinheitlicht" + (f", davon {n_ue} vorübersetzt (gelb – bitte prüfen)" if n_ue else "")
+                     + ". Prüfhaken bleiben erhalten.")
 
     # ---- Offene Punkte je Reiter
     def reiter_spaeter_aktualisieren(self):
@@ -1233,7 +1259,7 @@ TASTENKUERZEL = [
     ("Startliste", [("Strg+F", "Suchen"), ("Esc", "Suche leeren (im Suchfeld)"), ("Enter", "Auswahl öffnen"),
                     ("Doppelklick", "Öffnen"), ("Klick auf Spalte", "Sortieren")]),
     ("Datenblatt", [("Strg+S", "Speichern"), ("Strg+P", "Vorschau DE (im Programm)"), ("Strg+Umschalt+P", "Vorschau EN"),
-                    ("Strg+E", "Einheiten vereinheitlichen"),
+                    ("Strg+E", "Werte vereinheitlichen (Einheiten + Formulierungen)"),
                     ("F3", "Nächstes offenes Feld"),
                     ("Feld anklicken", "Fundstelle im Original"),
                     ("Rechtsklick auf Feld", "Fundstelle, DE → EN kopieren, Originalwert wiederherstellen, leeren")]),
@@ -1446,7 +1472,7 @@ class FormatierDialog(tk.Toplevel):
 
     def __init__(self, maske, vorschlaege, uebernehmen):
         super().__init__(maske)
-        self.title("Einheiten vereinheitlichen")
+        self.title("Werte vereinheitlichen")
         self.geometry("1100x520")
         self.transient(maske.winfo_toplevel())
         self.v = vorschlaege
@@ -1454,7 +1480,7 @@ class FormatierDialog(tk.Toplevel):
         self.cb = uebernehmen
         fr = ttk.Frame(self, padding=10)
         fr.pack(fill="both", expand=True)
-        ttk.Label(fr, text="Vorgeschlagene Schreibweisen nach EPS-Regel", font=("Segoe UI", 11, "bold"),
+        ttk.Label(fr, text="Vorschläge: EPS-Schreibweise und Übersetzung bekannter Formulierungen", font=("Segoe UI", 11, "bold"),
                   foreground=NAVY).pack(anchor="w")
         ttk.Label(fr, text="✔ = wird übernommen. Zeile anklicken oder Leertaste zum Umschalten. "
                            "Bereits geprüfte Felder sind zunächst abgewählt.", foreground="#6A7380").pack(anchor="w", pady=(2, 6))
@@ -1467,7 +1493,7 @@ class FormatierDialog(tk.Toplevel):
         self.tv.configure(yscrollcommand=sb.set)
         self.tv.pack(side="left", fill="both", expand=True)
         sb.pack(side="left", fill="y")
-        for i, (_, spr, name, alt, neu, _) in enumerate(vorschlaege):
+        for i, (_, spr, name, alt, neu, *_r) in enumerate(vorschlaege):
             self.tv.insert("", "end", iid=str(i), values=["", name, spr.upper(), alt, neu])
         self._zeigen()
         self.tv.bind("<ButtonRelease-1>", self._klick)
