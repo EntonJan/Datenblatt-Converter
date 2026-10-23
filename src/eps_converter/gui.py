@@ -943,6 +943,44 @@ class Maske(ttk.Frame):
         self.app.start_zeigen()
 
 
+TASTENKUERZEL = [
+    ("Überall", [("Strg+O", "Hersteller-PDF importieren"), ("Strg+N", "Leeres Datenblatt"), ("F1", "Diese Legende ein/aus")]),
+    ("Startliste", [("Strg+F", "Suchen"), ("Esc", "Suche leeren (im Suchfeld)"), ("Enter", "Auswahl öffnen"),
+                    ("Doppelklick", "Öffnen"), ("Klick auf Spalte", "Sortieren")]),
+    ("Datenblatt", [("Strg+S", "Speichern"), ("Strg+P", "PDF-Vorschau DE"), ("Strg+Umschalt+P", "PDF-Vorschau EN"),
+                    ("Feld anklicken", "Fundstelle im Original")]),
+]
+
+
+class Legende(tk.Frame):
+    """Leiste rechts mit den Tastenkürzeln (F1 blendet ein/aus)."""
+
+    BG = "#EEF2F7"
+
+    def __init__(self, app: "App"):
+        super().__init__(app, background=self.BG, width=210, highlightthickness=1, highlightbackground="#C9D3E0")
+        self.app = app
+        kopf = tk.Frame(self, background=NAVY)
+        kopf.pack(fill="x")
+        tk.Label(kopf, text="Tastenkürzel", fg="white", bg=NAVY, font=("Segoe UI", 10, "bold")).pack(side="left", padx=8, pady=6)
+        x = tk.Label(kopf, text="✕", fg="white", bg=NAVY, cursor="hand2", font=("Segoe UI", 10))
+        x.pack(side="right", padx=8)
+        x.bind("<Button-1>", lambda e: app.legende_umschalten())
+        for gruppe, eintraege in TASTENKUERZEL:
+            tk.Label(self, text=gruppe, fg=NAVY, bg=self.BG, font=("Segoe UI", 9, "bold"), anchor="w").pack(
+                fill="x", padx=10, pady=(10, 2))
+            for taste, was in eintraege:
+                z = tk.Frame(self, background=self.BG)
+                z.pack(fill="x", padx=10, pady=1)
+                tk.Label(z, text=taste, bg="white", fg="#1F2A37", font=("Consolas", 8), relief="solid", borderwidth=1,
+                         padx=3).pack(anchor="w")
+                tk.Label(z, text=was, bg=self.BG, fg="#4A5563", font=("Segoe UI", 8), anchor="w",
+                         wraplength=185, justify="left").pack(anchor="w", padx=(2, 0))
+        tk.Label(self, text="F1 blendet diese Leiste aus.", bg=self.BG, fg="#8A94A3", font=("Segoe UI", 8),
+                 anchor="w").pack(side="bottom", fill="x", padx=10, pady=8)
+        self.pack_propagate(False)
+
+
 class FreigabeDialog(tk.Toplevel):
     """Nach der Freigabe: erzeugte PDFs direkt öffnen."""
 
@@ -1207,6 +1245,9 @@ class App(tk.Tk):
         self.ablage = LokaleAblage()
         self.aktuell = None
         self.viewer = None
+        self.legende = Legende(self)
+        if self.einst.legende_anzeigen:
+            self.legende.pack(side="right", fill="y")
         self.start_zeigen()
         self.protocol("WM_DELETE_WINDOW", self.beenden)
         self._kuerzel()
@@ -1232,6 +1273,7 @@ class App(tk.Tk):
         self.bind_all("<Control-Shift-P>", in_maske(lambda m: m.vorschau("en")))
         self.bind_all("<Control-o>", lambda e: (self.import_pdf(), "break")[1])
         self.bind_all("<Control-n>", lambda e: (self.neu_leer(), "break")[1])
+        self.bind_all("<F1>", self.legende_umschalten)
 
         # Tk-Textfelder haben eigene Emacs-Kürzel (Strg+O fügt z. B. eine Zeile ein) – hier abschalten
         for seq in ("<Control-o>", "<Control-p>", "<Control-n>", "<Control-f>"):
@@ -1242,6 +1284,21 @@ class App(tk.Tk):
                 self.aktuell.such_feld.focus_set()
                 return "break"
         self.bind_all("<Control-f>", suchen)
+
+    def legende_umschalten(self, e=None):
+        an = not self.einst.legende_anzeigen
+        if not an:
+            self.legende.pack_forget()
+        elif self.aktuell is not None:
+            self.legende.pack(side="right", fill="y", before=self.aktuell)
+        else:
+            self.legende.pack(side="right", fill="y")
+        self.einst.legende_anzeigen = an
+        try:
+            E.speichern(self.einst)
+        except OSError:
+            pass
+        return "break"
 
     def _wechseln(self, frame):
         if self.aktuell is not None:

@@ -25,6 +25,7 @@ class Einstellungen:
         "Absopulse", "EA Elektro-Automatik / Tektronix", "M.C.B", "Trustec", "Plating Electronics",
         "Gustav Klein", "Schäfer Elektronik", "SHT-Power SAS"])
     update_pruefen: bool = True
+    legende_anzeigen: bool = True     # Tastenkürzel-Leiste rechts (F1)
 
     def ausgabe(self) -> Path:
         return Path(self.ausgabe_ordner) if self.ausgabe_ordner else pfade.AUSGABE_DIR
