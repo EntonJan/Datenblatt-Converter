@@ -27,6 +27,11 @@ Prüfhaken, sobald er geändert wird; Warnung bei doppelter Typbezeichnung/Herst
 gelöschte Entwürfe; **Verlauf** je Datenblatt (wer/wann/was – Benutzer = Anzeigename oder Windows-Anmeldename,
 nicht fälschungssicher).
 
+**EPS-Altbestand (seit v0.8.0):** Alte EPS-Datenblätter („EPS - Datenblatt“ im Kopf) werden erkannt und vollständig
+übernommen: Serie, Typbezeichnung, Produkttyp, Beschreibung, Lieferumfang, alle Tabellenwerte, Schnittstellen
+(Standard/Option + Code), Optionen, Bestellnummer, Bild; Herkunft = Altbestand, Hersteller bleibt leer. Liegt neben
+`d<Nr>.pdf` auch `e<Nr>.pdf`, kommen die englischen Texte von dort. „Netzanschluss“ füllt auch die Eingangsspannung.
+
 **Formulierungen (seit v0.7.0):** Blatt „Formulierungen“ im Feldkatalog übersetzt Textbausteine innerhalb eines Werts
 in beide Richtungen („at full load“ ↔ „bei Volllast“). Beim Import automatisch (vorübersetzte Felder gelb), außerdem
 über „Werte vereinheitlichen“. Eigene Einträge einfach in Excel ergänzen.

@@ -500,16 +500,19 @@ def bilder_finden(pfad: Path, max_seiten: int = 2) -> list[tuple[int, tuple[floa
         alle = []
         for i, p in enumerate(pdf.pages):
             for im in p.images:
-                alle.append((i, float(p.width), (float(im["x0"]), float(im["top"]), float(im["x1"]), float(im["bottom"]))))
+                alle.append((i, float(p.width), (float(im["x0"]), float(im["top"]), float(im["x1"]), float(im["bottom"])),
+                             tuple(im.get("srcsize") or ())))
     pos = {}
-    for i, _, b in alle:
+    for i, _, b, src in alle:
         pos.setdefault(tuple(round(v) for v in b), set()).add(i)
     kand = []
-    for i, pw, b in alle:
+    for i, pw, b, src in alle:
         x0, t, x1, bo = b
         w, h = x1 - x0, bo - t
-        if i >= max_seiten or w * h < 8000 or max(w / h, h / w) > 3 or w > pw * 0.8 or x0 < 0 or t < 0:
-            continue
+        seiten = max(w / h, h / w)
+        if i >= max_seiten or w * h < 8000 or seiten > 4.5 or (seiten > 3 and w * h < 25000) or w > pw * 0.8 \
+                or x0 < 0 or t < 0:
+            continue                                            # zu klein, Banner/Streifen, Hintergrund
         if len(pos[tuple(round(v) for v in b)]) > 1:
             continue                                            # wiederkehrend → Logo/Kopfgrafik
         kand.append((w * h, i, b))

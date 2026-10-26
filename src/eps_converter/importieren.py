@@ -8,9 +8,9 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 
-from . import protokoll, auslesen, regeln
+from . import protokoll, auslesen, regeln, eps_altbestand
 from . import katalog as K
-from .modell import Datensatz, Wert, Bild, HERKUNFT_PDF, REGEL_HAENDLER, REGEL_EPS
+from .modell import Datensatz, Wert, Bild, Option, Eintrag, HERKUNFT_PDF, REGEL_HAENDLER, REGEL_EPS
 
 QUELLE = "quelle.pdf"
 
@@ -31,7 +31,8 @@ AUSWAHL_HINWEISE = {
     "kuehlung": [("wasser", "Wasser"), ("water", "Wasser"), ("konvektion", "Konvektion"), ("convection", "Konvektion"),
                  ("natürlich", "Konvektion"), ("lüfter", "Lüfter"), ("fan", "Lüfter"), ("luft", "Lüfter"), ("air", "Lüfter")],
     "bauform": [("19", "19 Zoll"), ("rack", "19 Zoll"), ("desktop", "Desktop"), ("tisch", "Desktop"),
-                ("tower", "Tower"), ("schrank", "Schrank"), ("cabinet", "Schrank")],
+                ("tower", "Tower"), ("schrank", "Schrank"), ("cabinet", "Schrank"), ("einbau", "Einbaumodul"),
+                ("built-in", "Einbaumodul"), ("module", "Einbaumodul")],
     "anzeige": [("touch", "TFT-Touch-Display"), ("tft", "TFT-Display"), ("lcd", "LCD"), ("led", "LED"), ("none", "ohne Anzeige (nur Fernsteuerung)")],
     "parallelschaltung": [("master", "Master-Slave"), ("nein", "Nein"), ("no", "Nein"), ("ja", "Ja"), ("yes", "Ja"), ("standard", "Ja")],
     "ausgangsfrequenz": [("400", "400 Hz"), ("50/60", "50/60 Hz"), ("einstell", "einstellbar"), ("adjust", "einstellbar"),
@@ -84,6 +85,15 @@ def datensatz_aus_ergebnis(erg: auslesen.Ergebnis, kat: K.Katalog, ds: Datensatz
             w.en_manuell = True     # Englisch ist hier das Original – Tippen im deutschen Feld überschreibt es nicht
         if f.typ in (K.BEREICH, K.ZAHL) and f.einheit:
             w.min, w.max = regeln.parse_bereich(txt, f.einheit)
+        elif f.typ == K.MEHRFACH and fid == "betriebsarten":
+            erlaubt = {a.lower(): a for a, _ in f.auswahl}
+            w.auswahl = [erlaubt[x.lower()] for x in re.split(r"[\s.,;/+]+", txt) if x.lower() in erlaubt]
+            if w.auswahl:
+                w.de = w.en = ""
+        elif f.typ == K.SCHNITTSTELLE:
+            w.if_status, w.if_code = _schnittstelle(txt)
+            if w.if_status:
+                w.de = w.en = ""
         elif f.typ in (K.AUSWAHL, K.MEHRFACH):
             w.auswahl = auswahl_vorschlag(f, txt)
             if w.auswahl:
@@ -92,6 +102,11 @@ def datensatz_aus_ergebnis(erg: auslesen.Ergebnis, kat: K.Katalog, ds: Datensatz
             w.ja = not txt.strip().lower().startswith(NEIN_WOERTER)
             w.de = w.en = ""        # Datenblatt zeigt „Ja“/„Nein“; der Originaltext bleibt über die Fundstelle sichtbar
         ds.werte[fid] = w
+    if "netzanschluss" in ds.werte and "eingangsspannung" not in ds.werte and kat.hat("eingangsspannung"):
+        n = ds.werte["netzanschluss"]                 # „Netzanschluss“ = Eingangsspannung (EPS- und Hersteller-Blätter)
+        e = Wert(de=n.de, en=n.en, herkunft=HERKUNFT_PDF, fundstelle=n.fundstelle, teiluebersetzt=n.teiluebersetzt)
+        e.min, e.max = regeln.parse_bereich(n.de, kat.feld("eingangsspannung").einheit or "V")
+        ds.werte["eingangsspannung"] = e
     if modell_label:
         ds.werte["hersteller_typ"] = Wert(de=modell_label, en=modell_label, herkunft=HERKUNFT_PDF)
         ds.modell_auswahl = modell_label
@@ -250,6 +265,8 @@ def stapel_dialog(app):
 def importieren_datei(app, pfad: Path, einzeln: bool = True) -> tuple[Datensatz | None, str]:
     """Liest ein Hersteller-PDF ein und legt einen Entwurf an.
     einzeln=True: danach Maske + Original öffnen. Rückgabe (Datensatz oder None, Hinweis)."""
+    if eps_altbestand.ist_eps_datenblatt(pfad):
+        return altbestand_importieren(app, pfad, einzeln)
     app.configure(cursor="watch"); app.update()
     try:
         erg, zeilen, _ = auslesen.analysieren(pfad, app.kat)
@@ -342,3 +359,165 @@ def stapel(app, pfade: list[Path]):
     messagebox.showinfo("Stapel-Import", f"{len(ok)} von {len(pfade)} PDFs als Entwurf angelegt.\n\n" + "\n".join(zeilen[:30])
                         + ("\n…" if len(zeilen) > 30 else ""))
     app.start_zeigen()
+
+
+# ------------------------------------------------------------------------ EPS-Altbestand
+
+JA_TEXTE = ("standard", "ja", "yes", "vorhanden", "included")
+NEIN_TEXTE = ("nein", "no", "none", "keine", "–", "-", "—", "nicht", "not")
+
+
+def _schnittstelle(text: str) -> tuple[str, str]:
+    """„Option EPS/IF-AB R“ → (Option, EPS/IF-AB R); „Standard, Opt.IF-ETH1P/2P“ → (Standard, IF-ETH1P/2P)."""
+    t = text.strip()
+    tl = t.lower()
+    status = "Standard" if tl.startswith("standard") else "Option" if tl.startswith("opt") else ""
+    m = re.search(r"((?:EPS/|E/|IF-)[\w/\-.]+(?:\s+[A-Z0-9][A-Z0-9/\-.]*)?)", t)
+    return status, (m.group(1).strip() if m else "")
+
+
+def _wert_altbestand(f: K.Feld, kat: K.Katalog, de: str, en: str, fundstelle: str) -> Wert:
+    w = Wert(de=de, en=en, herkunft=HERKUNFT_PDF, geprueft=False, fundstelle=fundstelle, en_manuell=bool(en))
+    if f.typ in (K.BEREICH, K.ZAHL) and f.einheit:
+        w.min, w.max = regeln.parse_bereich(de, f.einheit)
+    elif f.typ == K.AUSWAHL:
+        erlaubt = {a.lower(): a for a, _ in f.auswahl}
+        treffer = erlaubt.get(de.strip().lower()) or (auswahl_vorschlag(f, de) or [None])[0]
+        if treffer:
+            w.auswahl = [treffer]
+            if de.strip().lower() == treffer.lower():
+                w.de = w.en = ""                              # sauberer Auswahlwert, kein Zusatztext nötig
+    elif f.typ == K.MEHRFACH:
+        erlaubt = {a.lower(): a for a, _ in f.auswahl}
+        w.auswahl = [erlaubt[x.lower()] for x in re.split(r"[\s.,;/+]+", de) if x.lower() in erlaubt]
+        if w.auswahl:
+            w.de = w.en = ""
+    elif f.typ == K.JA_NEIN:
+        tl = de.strip().lower()
+        w.ja = True if tl.startswith(JA_TEXTE) else False if tl.startswith(NEIN_TEXTE) else None
+    elif f.typ == K.SCHNITTSTELLE:
+        w.if_status, w.if_code = _schnittstelle(de)
+        w.de = w.en = ""
+    return w
+
+
+def altbestand_importieren(app, pfad: Path, einzeln: bool = True) -> tuple[Datensatz | None, str]:
+    """Altes EPS-Datenblatt (d…pdf, optional mit e…pdf daneben) in einen Entwurf übernehmen."""
+    kat = app.kat
+    app.configure(cursor="watch"); app.update()
+    try:
+        haupt = eps_altbestand.lesen(pfad, kat)
+        partner_pfad = eps_altbestand.partner_datei(pfad)
+        partner = eps_altbestand.lesen(partner_pfad, kat) if partner_pfad else None
+    except Exception as e:
+        app.configure(cursor="")
+        if einzeln:
+            messagebox.showerror("Import", f"Das EPS-Datenblatt konnte nicht gelesen werden:\n{e}")
+        return None, f"nicht lesbar ({e})"
+    app.configure(cursor="")
+    if partner and partner.sprache == haupt.sprache:
+        partner = None
+    de_ab, en_ab = (haupt, partner) if haupt.sprache == "de" else (partner, haupt)
+    de_pfad = pfad if haupt.sprache == "de" else partner_pfad
+    nur_en = de_ab is None
+    if nur_en:                                   # nur das englische Blatt vorhanden
+        de_ab, en_ab, de_pfad = haupt, None, pfad
+
+    ds = Datensatz()
+    ordner = app.ablage.ordner(ds.id)
+    shutil.copy2(de_pfad, ordner / QUELLE)
+    ds.quelle_pdf = de_pfad.name
+    ds.regel = REGEL_EPS
+
+    def text_paar(de_text: str, en_text: str | None, fid: str = "") -> tuple[str, str, str]:
+        """(de, en, teiluebersetzt) – EN aus dem englischen Blatt, sonst Wörterbuch/Formulierungen."""
+        if nur_en:
+            en = de_text
+            de = kat.uebersetze_rueck(en)
+            if de is None:
+                de = en if fid == "beschreibung" else kat.teilweise(en, "de")
+                return (de, en, "de" if de != en else "")
+            return de, en, ""
+        if en_text:
+            return de_text, en_text, ""
+        en = kat.uebersetze(de_text)
+        if en is None:
+            en = de_text if fid == "beschreibung" else kat.teilweise(de_text, "en")
+            return de_text, en, "en" if en != de_text else ""
+        return de_text, en, ""
+
+    for fid, (de_text, seite, box) in de_ab.werte.items():
+        if not kat.hat(fid):
+            continue
+        en_text = en_ab.werte.get(fid, ("",))[0] if en_ab else ""
+        de, en, teil = text_paar(de_text, en_text, fid)
+        fs = f"{seite}|{box[0]:.1f}|{box[1]:.1f}|{box[2]:.1f}|{box[3]:.1f}|{kat.feld(fid).de}" if box and not nur_en else ""
+        w = _wert_altbestand(kat.feld(fid), kat, de, en, fs)
+        if teil and (w.de or w.en):
+            w.teiluebersetzt = teil
+        ds.werte[fid] = w
+
+    for fid, wert_de, wert_en in (("serie", de_ab.serie, en_ab.serie if en_ab else ""),
+                                  ("typbezeichnung", de_ab.typbezeichnung, de_ab.typbezeichnung),
+                                  ("produkttyp", de_ab.produkttyp, en_ab.produkttyp if en_ab else "")):
+        if wert_de:
+            de, en, teil = text_paar(wert_de, wert_en, fid)
+            ds.werte[fid] = Wert(de=de, en=en, herkunft=HERKUNFT_PDF, teiluebersetzt=teil, en_manuell=bool(wert_en))
+    if de_ab.beschreibung:
+        de, en, _ = text_paar(de_ab.beschreibung, en_ab.beschreibung if en_ab else "", "beschreibung")
+        ds.werte["beschreibung"] = Wert(de=de, en=en if (en_ab or nur_en) else "", herkunft=HERKUNFT_PDF)
+
+    en_liefer = en_ab.lieferumfang if en_ab and len(en_ab.lieferumfang) == len(de_ab.lieferumfang) else []
+    for i, t in enumerate(de_ab.lieferumfang):
+        de, en, _ = text_paar(t, en_liefer[i] if en_liefer else "")
+        ds.lieferumfang.append(Eintrag(de=de, en=en))
+    en_opt = {nr: txt for nr, _, txt in (en_ab.optionen if en_ab else [])}
+    for nr, code, txt in de_ab.optionen:
+        de, en, _ = text_paar(txt, en_opt.get(nr, ""))
+        ds.optionen.append(Option(nr=nr, code=code, de=de, en=en))
+
+    # Netzanschluss → Eingangsspannung (EPS nennt die Eingangsspannung „Netzanschluss“)
+    if "netzanschluss" in ds.werte and "eingangsspannung" not in ds.werte and kat.hat("eingangsspannung"):
+        n = ds.werte["netzanschluss"]
+        ds.werte["eingangsspannung"] = _wert_altbestand(kat.feld("eingangsspannung"), kat, n.de, n.en, n.fundstelle)
+    if kat.hat("herkunft"):
+        ds.werte["herkunft"] = Wert(auswahl=["Altbestand"], herkunft=HERKUNFT_PDF)
+    try:
+        ds.bilder = [Bild(datei=d) for d in auslesen.bilder_extrahieren(de_pfad, ordner)]
+    except Exception:
+        ds.bilder = []
+    try:
+        import pdfplumber
+        with pdfplumber.open(str(de_pfad)) as pdf:
+            text = " ".join((p.extract_text() or "") for p in pdf.pages)
+        gt = geraetetyp_vorschlag(text, kat)
+        if gt and "geraetetyp" not in ds.werte:
+            ds.werte["geraetetyp"] = Wert(auswahl=gt, herkunft=HERKUNFT_PDF)
+    except Exception:
+        pass
+
+    ds.import_werte = {fid: asdict(w) for fid, w in ds.werte.items()}
+    n = sum(1 for w in ds.werte.values() if w.herkunft == HERKUNFT_PDF)
+    en_pfad = (partner_pfad if haupt.sprache == "de" else pfad) if en_ab else None
+    quellen = de_pfad.name + (f" + {en_pfad.name}" if en_pfad else "")
+    protokoll.eintragen(ds, app.einst, "Importiert", [["Quelle (EPS-Altbestand)", "", quellen],
+                                                      ["Werte aus dem PDF", "", str(n)]])
+    app.ablage.speichern(ds)
+    hinweise = []
+    if en_ab:
+        hinweise.append(f"englische Texte aus {en_pfad.name}")
+    elif nur_en:
+        hinweise.append("nur englisches Blatt – Deutsch vorübersetzt (gelb)")
+    else:
+        hinweise.append("kein englisches Blatt (e…pdf) daneben gefunden – Englisch vorübersetzt (gelb)")
+    dopp = app.ablage.finde_bestellnummer(ds.bestellnummer, ausser_id=ds.id) if ds.bestellnummer else None
+    if dopp:
+        hinweise.append(f"ACHTUNG: Bestellnummer {ds.bestellnummer} gibt es schon ({dopp.titel or 'ohne Namen'}, {dopp.status})")
+    kurz = f"EPS-Altbestand, {n} Werte, {len(ds.optionen)} Optionen" + "".join(f"; {h}" for h in hinweise)
+    if einzeln:
+        app.maske_zeigen(ds)
+        app.original_zeigen(ordner / QUELLE)
+        app.aktuell.hinweis(f"EPS-Datenblatt erkannt (Altbestand): {n} Werte, {len(ds.optionen)} Optionen, "
+                            f"{len(ds.lieferumfang)} Lieferumfang-Positionen übernommen. " + " · ".join(hinweise)
+                            + ". Hersteller bitte von Hand eintragen.")
+    return ds, kurz
