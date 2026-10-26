@@ -114,7 +114,7 @@ def _kern_sidebar(ds: Datensatz, kat: K.Katalog, sprache: str) -> list[tuple[str
         else:
             t = darstellung.text(ds, f, kat, sprache)
         if t:
-            out.append((f.label(sprache), t))
+            out.append((darstellung.label(ds, f, kat, sprache), t))
     return out
 
 

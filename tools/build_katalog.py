@@ -50,9 +50,11 @@ f("beschreibung", KOPF, "Beschreibung", "Description", T_TEXT, quelle="P",
 f("technologie", ALLG, "Technologie", "Technology", T_AUSW, filterart="", quelle="V, F")
 f("betriebsarten", ALLG, "Betriebsarten", "Operation modes", T_MULTI, kern=True, filterart="Mehrfachauswahl", quelle="V, F")
 f("netzanschluss", ALLG, "Netzanschluss", "Mains", T_TEXT, quelle="V",
-  bem="Text wie im Datenblatt (z. B. „208–240 V AC ±10 % 1ph.“). Die Eingangsspannung wird daraus abgeleitet.")
+  bem="Text wie im Datenblatt (z. B. „208–240 V AC ±10 % 1ph.“). Bei AC-versorgten Geräten (AC/DC, AC/AC, Ladegeräte, Lasten).")
+f("netzspannung", ALLG, "Netzspannung", "Mains voltage", T_MULTI, kern=True, filterart="Mehrfachauswahl", quelle="Enton 26.10.2026",
+  bem="Konfigurator-Filter für AC-versorgte Geräte; wird aus dem Netzanschluss vorgeschlagen. Entfällt bei DC/DC und DC/AC.")
 f("eingangsspannung", TECH, "Eingangsspannung", "Input Voltage", T_BEREICH, "V", kern=True, filterart="Schieberegler", quelle="F, V(EN)",
-  bem="Für den Filter; Wert aus Netzanschluss bzw. Eingangsangaben des Herstellers.")
+  bem="Nur DC-Eingang (DC/DC, DC/AC), z. B. 10–800 VDC. Bei AC-Geräten steht die Versorgung in Netzanschluss/Netzspannung.")
 f("eingangsfrequenz", ALLG, "Eingangsfrequenz", "Input frequency", T_TEXT, "Hz", quelle="V")
 f("leistungsfaktor", ALLG, "Leistungsfaktor", "Power factor", T_TEXT, quelle="V")
 f("netzrueckspeisung", ALLG, "Netzrückspeisung", "Power feed back", T_JN, kern=True, filterart="Ja/Nein", quelle="V, F")
@@ -179,6 +181,10 @@ def a(fid, de, en, st=VOR, beleg=""):
 for de, en in [("AC/AC", "AC/AC"), ("AC/DC", "AC/DC"), ("DC/AC", "DC/AC"), ("DC/DC", "DC/DC"),
                ("Elektronische Last", "Electronic load"), ("Ladegeräte", "Chargers")]:
     a("geraetetyp", de, en, OK, "Pflichtenheft (= Warengruppen)")
+for de, en in [("1~ 115 V", "1~ 115 V"), ("1~ 230 V", "1~ 230 V"), ("1~ Weitbereich 90–264 V", "1~ wide range 90–264 V"),
+               ("3~ 208–230 V", "3~ 208–230 V"), ("3~ 400 V", "3~ 400 V"), ("3~ 480 V", "3~ 480 V"),
+               ("Sonderspannung", "Special voltage")]:
+    a("netzspannung", de, en, VOR, "Enton 26.10.2026 (Entscheidung 2b)")
 a("technologie", "Switching", "Switching", VOR, "EPS-Datenblätter (alle 3 Paare)")
 a("technologie", "Linear", "Linear", VOR, "Vorschlag")
 for v in ["CV", "CC", "CP", "CR"]:
@@ -359,7 +365,8 @@ s("ausgangsleistung", "Ausgangsleistung", "Output power", "Nennleistung & Bereic
 s("eingangsspannung", "AC Eingangsspannung", "DC Eingangsspannung", "Eingangsspannung", "Input voltage", "Netzspannung", "Spannung / Phasen / Frequenz", "Mains voltage", "AC input voltage")
 s("eingangsstrom", "Eingangsstrom", "Input current")
 s("eingangsfrequenz", "Eingangsfrequenz", "Input frequency")
-s("netzanschluss", "Netzanschluss", "Mains", "AC-Anschluss", "AC input")
+s("netzanschluss", "Netzanschluss", "Mains", "AC-Anschluss", "AC input", "Supply voltage", "Versorgungsspannung", "AC supply",
+  "Mains voltage", "Netzspannung", "Mains supply")
 s("leistungsfaktor", "Leistungsfaktor", "Power factor")
 s("wirkungsgrad", "Wirkungsgrad", "Efficiency", "Effizienz", "Effizienz max.")
 s("betriebstemperatur", "Betriebstemperatur", "Operating temperature", "Operating temperature range", "Operation temperature",
@@ -449,6 +456,7 @@ lines = [
     ("• Spalten „Feld (DE)“, „Feld (EN)“, „Bemerkung“ und die Reihenfolge der Zeilen (= Reihenfolge auf dem Datenblatt).", False),
     ("• Blatt „Auswahlwerte“: Werte ergänzen, umbenennen, löschen. Danach Status auf „bestätigt“ setzen.", False),
     ("• Blatt „Wörterbuch“: Übersetzungen ganzer Werte ergänzen oder korrigieren.", False),
+    ("• Blatt „Bezeichnungen“: andere Feldbezeichnung je Gerätetyp im EPS-Datenblatt (z. B. Lasten: „Eingangsspannung (Lastseite)“).", False),
     ("• Blatt „Formulierungen“: Textbausteine innerhalb eines Werts (z. B. „at full load“ = „bei Volllast“). Gilt in beide Richtungen.", False),
     ("• Blatt „Synonyme“: wie ein Feld in Hersteller-Datenblättern heißen kann (hilft beim Auslesen ohne KI).", False),
     ("• Spalte „ID“ bitte NICHT ändern – darüber werden die Daten gespeichert.", False),
@@ -489,6 +497,18 @@ ws2.add_data_validation(dv_st2); dv_st2.add(f"D2:D{ws2.max_row + 200}")
 ws4 = None
 ws3 = wb.create_sheet("Wörterbuch")
 sheet(ws3, ["Deutsch", "Englisch", "Quelle (EPS-Artikel)", "Bemerkung"], W, [50, 50, 20, 45])
+
+# Bezeichnungen je Gerätetyp: gilt, wenn das Gerät NUR diesen Gerätetyp hat (bidirektionale Geräte behalten die Standard-Bezeichnung)
+BZ = [
+    ("Elektronische Last", "ausgangsspannung", "Eingangsspannung (Lastseite)", "Input voltage (load side)", "Entscheidung 1a: Lasten nutzen die Ausgangsfelder"),
+    ("Elektronische Last", "ausgangsstrom", "Eingangsstrom (Lastseite)", "Input current (load side)", ""),
+    ("Elektronische Last", "ausgangsleistung", "Eingangsleistung (Lastseite)", "Input power (load side)", ""),
+    ("Elektronische Last", "ausgangsspannung_2", "Eingangsspannung 2 (Lastseite)", "Input voltage 2 (load side)", ""),
+    ("Elektronische Last", "ausgangsstrom_2", "Eingangsstrom 2 (Lastseite)", "Input current 2 (load side)", ""),
+    ("Elektronische Last", "eingangsstrom", "Versorgungsstrom", "Supply current", "Netzseite der Last"),
+]
+wsb = wb.create_sheet("Bezeichnungen")
+sheet(wsb, ["Gerätetyp", "Feld-ID", "Bezeichnung DE", "Bezeichnung EN", "Bemerkung"], BZ, [22, 24, 34, 34, 40])
 
 wsf = wb.create_sheet("Formulierungen")
 sheet(wsf, ["Englisch", "Deutsch", "Bemerkung"], FO, [55, 60, 40])

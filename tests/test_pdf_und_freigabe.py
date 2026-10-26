@@ -9,9 +9,9 @@ from beispiel_200034 import datensatz, FIX
 KAT = Path(__file__).resolve().parents[1] / "katalog" / "feldkatalog.xlsx"
 
 
-def test_katalog_hat_18_kernfelder():
+def test_katalog_hat_19_kernfelder():
     k = katalog.laden(KAT)
-    assert len(k.kernfelder) == 18
+    assert len(k.kernfelder) == 19   # 18 + Netzspannung (AC) – je Gerät sind 18 relevant
     assert k.feld("kuehlung").auswahl[0] == ("Lüfter", "Fan")
 
 

@@ -52,8 +52,14 @@ def zeilen(ds: Datensatz, kat: K.Katalog, abschnitt: str, sprache: str) -> list[
             continue
         t = text(ds, f, kat, sprache)
         if t:
-            out.append((f.label(sprache), t))
+            out.append((label(ds, f, kat, sprache), t))
     return out
+
+
+def label(ds: Datensatz, f: K.Feld, kat: K.Katalog, sprache: str) -> str:
+    """Feldbezeichnung fürs Datenblatt, ggf. je Gerätetyp (z. B. Lasten: „Eingangsspannung (Lastseite)“)."""
+    typen = ds.werte["geraetetyp"].auswahl if "geraetetyp" in ds.werte else []
+    return kat.bezeichnung(f, typen, sprache)
 
 
 def _kurz(name: str) -> str:

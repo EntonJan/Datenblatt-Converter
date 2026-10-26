@@ -22,7 +22,7 @@ def datensatz() -> Datensatz:
     t("technologie", "Switching")
     W["betriebsarten"] = Wert(auswahl=["CV", "CC", "CP"], geprueft=True)
     t("netzanschluss", "208/220/230/240 V AC ±10 % 1ph.")
-    t("eingangsspannung", "208–240 V AC", min=208, max=240)
+    W["netzspannung"] = Wert(auswahl=["1~ 230 V"], geprueft=True)      # AC/DC: Versorgung über Netzspannung (seit v0.9)
     t("eingangsfrequenz", "45–65 Hz")
     t("leistungsfaktor", "> 0,99")
     W["netzrueckspeisung"] = Wert(ja=False, geprueft=True)

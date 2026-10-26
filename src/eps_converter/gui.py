@@ -14,7 +14,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 
-from . import __version__, katalog as K, regeln, pdf_export, einstellungen as E, pfade, darstellung, formatierer, protokoll
+from . import __version__, katalog as K, regeln, pdf_export, einstellungen as E, pfade, darstellung, formatierer, protokoll, geraetetyp
 from .ablage import LokaleAblage
 from .modell import Datensatz, Wert, Option, Eintrag, Bild, ENTWURF, FREIGEGEBEN, REGEL_EPS, REGEL_HAENDLER, jetzt
 
@@ -336,7 +336,7 @@ class FeldEditor:
             if isinstance(self.de, tk.Entry):
                 self.de.configure(background="white")
             seite = getattr(self, w.teiluebersetzt, None) if w.teiluebersetzt in ("de", "en") else None
-            if isinstance(seite, tk.Entry):
+            if isinstance(seite, tk.Entry) and seite.get().strip():
                 seite.configure(background=WARN_BG)       # per Formulierungs-Wörterbuch vorübersetzt → prüfen
         self.geprueft.set(w.geprueft)
         self._lade = False
@@ -781,14 +781,49 @@ class Maske(ttk.Frame):
     def hinweis(self, text):
         self.statuszeile.configure(text=text, fg="#6A7380")
 
-    def zaehler_aktualisieren(self):
-        kern = [e for e in self.editoren.values() if e.f.kern]
+    def _typen(self) -> list[str]:
+        ed = self.editoren.get("geraetetyp")
+        if ed is not None:
+            w = Wert()
+            try:
+                ed.speichern(w)
+                return list(w.auswahl)
+            except Exception:
+                pass
+        g = self.ds.werte.get("geraetetyp")
+        return list(g.auswahl) if g else []
+
+    def _kern_relevant(self) -> list:
+        typen = self._typen()
+        return [e for e in self.editoren.values() if e.f.kern and geraetetyp.relevant(e.f.id, typen)]
+
+    def _zaehler_text(self):
+        kern = self._kern_relevant()
         n = sum(1 for e in kern if e.geprueft.get()) + (1 if self.opt_geprueft.get() else 0)
         gesamt = len(kern) + 1
         self.zaehler.configure(text=f"Geprüft: {n}/{gesamt}", fg="white" if n < gesamt else "#9BE29B")
-        self.reiter_spaeter_aktualisieren()
         if hasattr(self, "btn_alle"):
             self.btn_alle.configure(text="Haken entfernen ☐" if n == gesamt else "Alle geprüft ☑")
+
+    def zaehler_aktualisieren(self):
+        self._zaehler_text()
+        self.reiter_spaeter_aktualisieren()
+
+    def relevanz_aktualisieren(self):
+        """Felder, die beim gewählten Gerätetyp entfallen (z. B. Eingangsspannung bei AC/DC), grau und ohne Prüfpflicht;
+        Bezeichnungen je Gerätetyp (z. B. Lasten: „Eingangsspannung (Lastseite)“)."""
+        typen = self._typen()
+        for fid, e in self.editoren.items():
+            name = self.app.kat.bezeichnung(e.f, typen, "de") + (" *" if e.f.pflicht else "")
+            if geraetetyp.relevant(fid, typen):
+                e.lab.configure(text=name, foreground="#D62828" if e.lab.cget("foreground") == "#D62828" else "black")
+                if e.pruef is not None:
+                    e.pruef.configure(state="normal")
+            else:
+                e.lab.configure(text=f"{name}  (entfällt bei {', '.join(typen)})", foreground="#9AA3AE")
+                if e.pruef is not None:
+                    e.pruef.configure(state="disabled")
+        self._zaehler_text()
 
     def _opt_markieren(self, an: bool):
         f = "#D62828" if an else KERN_BG
@@ -966,6 +1001,7 @@ class Maske(ttk.Frame):
                 self.nb.tab(reiter, text=f"{titel} ({n} offen)" if n else titel)
             except tk.TclError:
                 pass
+        self.relevanz_aktualisieren()
 
     # ---- Leere Felder ausblenden
     def leere_umschalten(self):
@@ -990,7 +1026,7 @@ class Maske(ttk.Frame):
 
     def alle_geprueft(self):
         """Setzt alle Prüfhaken der Kernfelder auf einmal – oder entfernt sie, wenn schon alle gesetzt sind."""
-        kern = [e for e in self.editoren.values() if e.f.kern]
+        kern = self._kern_relevant()
         alle = all(e.geprueft.get() for e in kern) and self.opt_geprueft.get()
         if not alle and not messagebox.askyesno(
                 "Alle Kernfelder geprüft?",

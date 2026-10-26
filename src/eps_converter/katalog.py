@@ -69,6 +69,14 @@ class Katalog:
     quelle: Path
     synonyme: dict[str, str] = field(default_factory=dict)   # normalisierte Bezeichnung -> Feld-ID
     formulierungen: list = field(default_factory=list)        # [(englisch, deutsch)] – Textbausteine in Werten
+    bezeichnungen: dict = field(default_factory=dict)         # (Gerätetyp, Feld-ID) -> (DE, EN)
+
+    def bezeichnung(self, f: "Feld", geraetetypen: list[str], sprache: str) -> str:
+        """Feldbezeichnung fürs Datenblatt; hat das Gerät genau einen Gerätetyp mit eigener Bezeichnung, gilt diese."""
+        if len(geraetetypen) == 1 and (geraetetypen[0], f.id) in self.bezeichnungen:
+            de, en = self.bezeichnungen[(geraetetypen[0], f.id)]
+            return (en or de) if sprache == "en" else de
+        return f.label(sprache)
 
     def __post_init__(self):
         self._by_id = {f.id: f for f in self.felder}
@@ -225,8 +233,41 @@ def laden(pfad: Path | None = None) -> Katalog:
             synonyme.setdefault(normalisieren(f.en), f.id)
     wb.close()
     formulierungen = _formulierungen(pfad)
+    bezeichnungen = _bezeichnungen(pfad)
     return Katalog(felder=felder, woerterbuch=woerter, schnittstellen_werte=schnittstellen_werte, quelle=pfad,
-                   synonyme=synonyme, formulierungen=formulierungen)
+                   synonyme=synonyme, formulierungen=formulierungen, bezeichnungen=bezeichnungen)
+
+
+def _bezeichnungen_aus(pfad: Path) -> dict | None:
+    try:
+        wb = load_workbook(pfad, read_only=True, data_only=True)
+    except Exception:
+        return None
+    if "Bezeichnungen" not in wb.sheetnames:
+        wb.close()
+        return None
+    out = {}
+    for r in list(wb["Bezeichnungen"].iter_rows(values_only=True))[1:]:
+        r = list(r) + [None] * 4
+        typ, fid, de, en = (_text(x) for x in r[:4])
+        if typ and fid and de:
+            out[(typ, fid)] = (de, en)
+    wb.close()
+    return out
+
+
+def _bezeichnungen(pfad: Path) -> dict:
+    """Blatt „Bezeichnungen“ aus dem Katalog im Programmordner; fehlt es dort (älterer Katalog), das mitgelieferte."""
+    eigene = _bezeichnungen_aus(pfad)
+    if eigene is not None:
+        return eigene
+    m = pfade.KATALOG_MITGELIEFERT
+    try:
+        if m.exists() and m.resolve() != Path(pfad).resolve():
+            return _bezeichnungen_aus(m) or {}
+    except OSError:
+        pass
+    return {}
 
 
 def _formulierungen_aus(pfad: Path) -> list[tuple[str, str]]:

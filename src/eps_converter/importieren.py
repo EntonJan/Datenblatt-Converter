@@ -8,7 +8,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 
-from . import protokoll, auslesen, regeln, eps_altbestand
+from . import protokoll, auslesen, regeln, eps_altbestand, geraetetyp
 from . import katalog as K
 from .modell import Datensatz, Wert, Bild, Option, Eintrag, HERKUNFT_PDF, REGEL_HAENDLER, REGEL_EPS
 
@@ -102,11 +102,6 @@ def datensatz_aus_ergebnis(erg: auslesen.Ergebnis, kat: K.Katalog, ds: Datensatz
             w.ja = not txt.strip().lower().startswith(NEIN_WOERTER)
             w.de = w.en = ""        # Datenblatt zeigt „Ja“/„Nein“; der Originaltext bleibt über die Fundstelle sichtbar
         ds.werte[fid] = w
-    if "netzanschluss" in ds.werte and "eingangsspannung" not in ds.werte and kat.hat("eingangsspannung"):
-        n = ds.werte["netzanschluss"]                 # „Netzanschluss“ = Eingangsspannung (EPS- und Hersteller-Blätter)
-        e = Wert(de=n.de, en=n.en, herkunft=HERKUNFT_PDF, fundstelle=n.fundstelle, teiluebersetzt=n.teiluebersetzt)
-        e.min, e.max = regeln.parse_bereich(n.de, kat.feld("eingangsspannung").einheit or "V")
-        ds.werte["eingangsspannung"] = e
     if modell_label:
         ds.werte["hersteller_typ"] = Wert(de=modell_label, en=modell_label, herkunft=HERKUNFT_PDF)
         ds.modell_auswahl = modell_label
@@ -117,6 +112,17 @@ GERAETETYP_HINWEISE = [("ac/ac", "AC/AC"), ("frequency converter", "AC/AC"), ("f
                        ("dc/ac", "DC/AC"), ("inverter", "DC/AC"), ("wechselrichter", "DC/AC"),
                        ("dc/dc", "DC/DC"), ("ac/dc", "AC/DC"), ("elektronische last", "Elektronische Last"),
                        ("electronic load", "Elektronische Last"), ("ladegerät", "Ladegeräte"), ("charger", "Ladegeräte")]
+
+
+def typ_und_zuordnung(ds: Datensatz, kat: K.Katalog, text: str) -> list[str]:
+    """Gerätetyp vorschlagen (Ein-/Ausgangsart, Begriffe) und Eingangsangaben ins passende Feld verschieben."""
+    erlaubt = {de for de, _ in kat.feld("geraetetyp").auswahl} if kat.hat("geraetetyp") else set()
+    typen = geraetetyp.erkennen(ds, text, erlaubt) or geraetetyp_vorschlag(text, kat)
+    if typen and "geraetetyp" not in ds.werte:
+        ds.werte["geraetetyp"] = Wert(auswahl=typen, herkunft=HERKUNFT_PDF)
+    typen = ds.werte["geraetetyp"].auswahl if "geraetetyp" in ds.werte else []
+    hinweise = geraetetyp.zuordnen(ds, kat, typen)
+    return ([f"Gerätetyp-Vorschlag: {', '.join(typen)}"] if typen else []) + hinweise
 
 
 def geraetetyp_vorschlag(text: str, kat: K.Katalog) -> list[str]:
@@ -287,6 +293,7 @@ def importieren_datei(app, pfad: Path, einzeln: bool = True) -> tuple[Datensatz 
         ds.werte["hersteller"] = Wert(de=hersteller, en=hersteller, herkunft=HERKUNFT_PDF)
 
     hinweis = ""
+    typ_hinweise: list[str] = []
     if not erg.hat_text:
         hinweis = "kein Text im PDF (Scan) – leeres Datenblatt angelegt"
         if einzeln:
@@ -305,14 +312,12 @@ def importieren_datei(app, pfad: Path, einzeln: bool = True) -> tuple[Datensatz 
         erg = auslesen.auslesen(pfad, app.kat, modell)
         app.configure(cursor="")
         datensatz_aus_ergebnis(erg, app.kat, ds, modell.label if modell else "")
-        ds.import_werte = {fid: asdict(w) for fid, w in ds.werte.items()}
         try:                                            # Produktfotos aus dem PDF als Vorschlag übernehmen
             ds.bilder = [Bild(datei=d) for d in auslesen.bilder_extrahieren(pfad, ordner)]
         except Exception:
             ds.bilder = []
-        gt = geraetetyp_vorschlag(text, app.kat)
-        if gt and "geraetetyp" not in ds.werte:
-            ds.werte["geraetetyp"] = Wert(auswahl=gt, herkunft=HERKUNFT_PDF)
+        typ_hinweise = typ_und_zuordnung(ds, app.kat, text)
+        ds.import_werte = {fid: asdict(w) for fid, w in ds.werte.items()}
 
     haendler = app.einst.ist_haendlerware(hersteller)
     ds.regel = REGEL_HAENDLER if haendler else REGEL_EPS
@@ -329,7 +334,8 @@ def importieren_datei(app, pfad: Path, einzeln: bool = True) -> tuple[Datensatz 
         app.original_zeigen(ordner / QUELLE)
         app.aktuell.hinweis(f"{n} Werte aus dem PDF übernommen (Sprache: {'Deutsch' if erg.sprache == 'de' else 'Englisch'}). "
                             "Alle Werte sind Vorschläge – bitte prüfen. Feld anklicken zeigt die Fundstelle."
-                            + (f" {len(ds.bilder)} Bild(er) aus dem PDF übernommen – auf Herstellerlogos prüfen." if ds.bilder else ""))
+                            + (f" {len(ds.bilder)} Bild(er) aus dem PDF übernommen – auf Herstellerlogos prüfen." if ds.bilder else "")
+                            + (" " + " · ".join(typ_hinweise) + "." if typ_hinweise else ""))
     return ds, hinweis
 
 
@@ -476,10 +482,6 @@ def altbestand_importieren(app, pfad: Path, einzeln: bool = True) -> tuple[Daten
         de, en, _ = text_paar(txt, en_opt.get(nr, ""))
         ds.optionen.append(Option(nr=nr, code=code, de=de, en=en))
 
-    # Netzanschluss → Eingangsspannung (EPS nennt die Eingangsspannung „Netzanschluss“)
-    if "netzanschluss" in ds.werte and "eingangsspannung" not in ds.werte and kat.hat("eingangsspannung"):
-        n = ds.werte["netzanschluss"]
-        ds.werte["eingangsspannung"] = _wert_altbestand(kat.feld("eingangsspannung"), kat, n.de, n.en, n.fundstelle)
     if kat.hat("herkunft"):
         ds.werte["herkunft"] = Wert(auswahl=["Altbestand"], herkunft=HERKUNFT_PDF)
     try:
@@ -490,11 +492,9 @@ def altbestand_importieren(app, pfad: Path, einzeln: bool = True) -> tuple[Daten
         import pdfplumber
         with pdfplumber.open(str(de_pfad)) as pdf:
             text = " ".join((p.extract_text() or "") for p in pdf.pages)
-        gt = geraetetyp_vorschlag(text, kat)
-        if gt and "geraetetyp" not in ds.werte:
-            ds.werte["geraetetyp"] = Wert(auswahl=gt, herkunft=HERKUNFT_PDF)
     except Exception:
-        pass
+        text = ""
+    typ_hinweise = typ_und_zuordnung(ds, kat, text + " " + de_ab.produkttyp)
 
     ds.import_werte = {fid: asdict(w) for fid, w in ds.werte.items()}
     n = sum(1 for w in ds.werte.values() if w.herkunft == HERKUNFT_PDF)
@@ -503,7 +503,7 @@ def altbestand_importieren(app, pfad: Path, einzeln: bool = True) -> tuple[Daten
     protokoll.eintragen(ds, app.einst, "Importiert", [["Quelle (EPS-Altbestand)", "", quellen],
                                                       ["Werte aus dem PDF", "", str(n)]])
     app.ablage.speichern(ds)
-    hinweise = []
+    hinweise = list(typ_hinweise)
     if en_ab:
         hinweise.append(f"englische Texte aus {en_pfad.name}")
     elif nur_en:

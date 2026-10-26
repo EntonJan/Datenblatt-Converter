@@ -190,9 +190,13 @@ def pruefe_freigabe(ds: Datensatz, kat: K.Katalog) -> list[str]:
 
 def pruefe_freigabe_felder(ds: Datensatz, kat: K.Katalog) -> list[tuple[str, str, str]]:
     """Wie pruefe_freigabe, aber mit Feld-ID und Art: (feld_id, "wert" | "geprueft", Meldung)."""
+    from . import geraetetyp                       # spät importieren (vermeidet Kreisimport)
+    typen = ds.werte["geraetetyp"].auswahl if "geraetetyp" in ds.werte else []
     p = []
     for f in kat.felder:
         w = ds.werte.get(f.id)
+        if not geraetetyp.relevant(f.id, typen) and not hat_wert(w, f):
+            continue                               # z. B. Eingangsspannung bei AC/DC-Geräten: entfällt
         if f.pflicht and f.typ != K.LISTE and not hat_wert(w, f):
             p.append((f.id, "wert", f"Pflichtfeld fehlt: {f.de}"))
         if f.kern and f.typ != K.LISTE and not (w and w.geprueft):

@@ -12,7 +12,7 @@ Grundlage: Pflichtenheft Produktdaten-Pipeline (Stand 15.10.2026).
 2. **Hersteller-PDF importieren** → bei Serien-Datenblättern das Modell zum Auftrag wählen → Werte werden vorbefüllt,
    das Original erscheint daneben (Feld anklicken = Fundstelle gelb markiert).
    Oder **Leeres Datenblatt** für Eingabe von Hand.
-3. In der Prüfmaske alle Werte prüfen, die **18 Kernfelder** als „geprüft“ abhaken, Bestellnummer eintragen.
+3. In der Prüfmaske alle Werte prüfen, die **Kernfelder** (je Gerät 18) als „geprüft“ abhaken, Bestellnummer eintragen.
 4. **Freigeben** → `ausgabe\d<Bestellnummer>.pdf` und `e<Bestellnummer>.pdf`. Fehlende Felder werden rot umrandet,
    mögliche Herstellerspuren (Herstellername, „our plant“, Modellnummern in der Beschreibung) vorher gemeldet.
 
@@ -26,6 +26,12 @@ Sortierung und Filter werden gemerkt.
 Prüfhaken, sobald er geändert wird; Warnung bei doppelter Typbezeichnung/Hersteller-Bestellnummer; Papierkorb für
 gelöschte Entwürfe; **Verlauf** je Datenblatt (wer/wann/was – Benutzer = Anzeigename oder Windows-Anmeldename,
 nicht fälschungssicher).
+
+**Gerätetyp & Eingang (seit v0.9.0):** Der Gerätetyp wird aus Ein-/Ausgangsart (AC/DC aus VAC/VDC, Hz, Phasen) und
+Begriffen (Elektronische Last, Ladegerät, bidirektional) vorgeschlagen. AC-versorgte Geräte (AC/DC, AC/AC, Ladegeräte,
+Lasten): Versorgung → Netzanschluss + Kernfeld **Netzspannung** (Auswahl 1~/3~); DC-Eingang (DC/DC, DC/AC): Kernfeld
+**Eingangsspannung**. Nicht zutreffende Kernfelder sind grau und ohne Prüfpflicht. Reine elektronische Lasten nutzen die
+Ausgangsfelder; im Datenblatt heißen sie „Eingangsspannung (Lastseite)“ usw. (Blatt „Bezeichnungen“ im Feldkatalog).
 
 **EPS-Altbestand (seit v0.8.0):** Alte EPS-Datenblätter („EPS - Datenblatt“ im Kopf) werden erkannt und vollständig
 übernommen: Serie, Typbezeichnung, Produkttyp, Beschreibung, Lieferumfang, alle Tabellenwerte, Schnittstellen
