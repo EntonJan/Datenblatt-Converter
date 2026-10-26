@@ -27,6 +27,11 @@ Prüfhaken, sobald er geändert wird; Warnung bei doppelter Typbezeichnung/Herst
 gelöschte Entwürfe; **Verlauf** je Datenblatt (wer/wann/was – Benutzer = Anzeigename oder Windows-Anmeldename,
 nicht fälschungssicher).
 
+**Extras (seit v0.11.0):** Startseite → „Extras ▾“: **Konfigurator-Export** (CSV für Excel + JSON mit allen Filterwerten,
+von/bis in Grundeinheit, Shop-Sichtbarkeit, PDF-Namen) für CharismaCom; **Qualitätsbericht** (alle Datenblätter mit
+fehlenden Pflichtwerten, ungeprüften Kernfeldern, Herstellerspuren, Vorübersetzungen – als CSV speicherbar);
+**Selbst-Update**: neue Version wird in den Programmordner geladen, gestartet, ältere `Datenblatt-Converter-v*.exe` entfernt.
+
 **Layouts (seit v0.10.0):** A – Klassisch (Banner, Kerndaten-Kasten, 2 Seiten), B – Kompakt (eine Seite,
 Kennzahl-Kacheln), C – Seitenleiste. Standard in den Einstellungen; in der Vorschau umschaltbar („Als Standard“).
 

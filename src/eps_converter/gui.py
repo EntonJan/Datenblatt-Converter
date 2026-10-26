@@ -1434,6 +1434,76 @@ class VorschauFenster(tk.Toplevel):
         oeffnen(p)
 
 
+class QualitaetsDialog(tk.Toplevel):
+    """Qualitätsbericht: alle Datenblätter mit offenen Punkten, schlechteste zuerst. Doppelklick öffnet."""
+
+    def __init__(self, start):
+        super().__init__(start)
+        from . import export
+        self.start = start
+        self.title("Qualitätsbericht")
+        self.geometry("1250x600")
+        self.transient(start.winfo_toplevel())
+        app = start.app
+        self.zeilen = []
+        for ds in app.ablage.alle():
+            self.zeilen.append((ds, export.qualitaet(ds, app.kat, app.einst.hersteller)))
+        self.zeilen.sort(key=lambda z: -z[1]["punkte"])
+        fr = ttk.Frame(self, padding=10)
+        fr.pack(fill="both", expand=True)
+        n_ok = sum(1 for _, q in self.zeilen if q["punkte"] == 0)
+        ttk.Label(fr, text=f"{len(self.zeilen)} Datenblätter · {n_ok} ohne offene Punkte · schlechteste zuerst",
+                  font=("Segoe UI", 11, "bold"), foreground=NAVY).pack(anchor="w")
+        ttk.Label(fr, text="Punkte: fehlender Pflichtwert ×3, Herstellerspur ×2, ungeprüftes Kernfeld / vorübersetzt / "
+                           "Sonstiges ×1. Doppelklick öffnet das Datenblatt.", foreground="#6A7380").pack(anchor="w", pady=(2, 6))
+        sp = [("nr", "Bestellnr.", 80), ("titel", "Typbezeichnung", 210), ("status", "Status", 85), ("pkt", "Punkte", 55),
+              ("fehlt", "Fehlende Pflichtwerte", 160), ("ungeprueft", "Ungeprüfte Kernfelder", 220),
+              ("spuren", "Herstellerspuren", 170), ("gelb", "Vorübersetzt", 120), ("sonst", "Sonstiges", 170)]
+        self.tv = ttk.Treeview(fr, columns=[x[0] for x in sp], show="headings")
+        for k, t, b in sp:
+            self.tv.heading(k, text=t)
+            self.tv.column(k, width=b, stretch=k in ("ungeprueft", "spuren", "sonst"))
+        self.tv.tag_configure("ok", foreground="#2E7D32")
+        self.tv.tag_configure("schlecht", foreground="#D62828")
+        sb = ttk.Scrollbar(fr, orient="vertical", command=self.tv.yview)
+        self.tv.configure(yscrollcommand=sb.set)
+        self.tv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+        for ds, q in self.zeilen:
+            kurz = lambda xs, n=3: ", ".join(xs[:n]) + (f" (+{len(xs) - n})" if len(xs) > n else "")   # noqa: E731
+            tag = ("ok",) if q["punkte"] == 0 else ("schlecht",) if q["fehlend"] or q["spuren"] else ()
+            self.tv.insert("", "end", iid=ds.id, tags=tag, values=[
+                ds.bestellnummer, ds.titel or "(ohne Namen)", ds.status, q["punkte"], kurz(q["fehlend"]),
+                f"{len(q['ungeprueft'])} Felder" if len(q["ungeprueft"]) > 3 else kurz(q["ungeprueft"]),
+                kurz(q["spuren"], 2), kurz(q["gelb"], 2), kurz(q["hinweise"])])
+        self.tv.bind("<Double-1>", lambda e: self.oeffnen())
+        unten = ttk.Frame(self, padding=(10, 0, 10, 10))
+        unten.pack(fill="x")
+        ttk.Button(unten, text="Öffnen", command=self.oeffnen).pack(side="left")
+        ttk.Button(unten, text="Als CSV speichern (Excel)", command=self.csv).pack(side="left", padx=6)
+        ttk.Button(unten, text="Schließen", command=self.destroy).pack(side="right")
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    def oeffnen(self):
+        sel = self.tv.selection()
+        if sel:
+            app = self.start.app
+            self.destroy()
+            app.maske_zeigen(app.ablage.laden(sel[0]))
+
+    def csv(self):
+        from . import export
+        from datetime import date
+        ziel = self.start.app.einst.ausgabe() / f"Qualitaetsbericht_{date.today().isoformat()}.csv"
+        try:
+            export.qualitaet_csv(self.zeilen, ziel)
+        except PermissionError:
+            messagebox.showerror("Qualitätsbericht", "Die Datei ist noch geöffnet (z. B. in Excel). Bitte schließen.", parent=self)
+            return
+        if messagebox.askyesno("Qualitätsbericht", f"Gespeichert:\n{ziel}\n\nOrdner öffnen?", parent=self):
+            oeffnen(ziel.parent)
+
+
 class PapierkorbDialog(tk.Toplevel):
     """Gelöschte Entwürfe ansehen, wiederherstellen oder endgültig löschen."""
 
@@ -1652,6 +1722,14 @@ class Start(ttk.Frame):
         ttk.Button(leiste, text="Entwurf löschen", command=self.loeschen).pack(side="left", padx=6)
         ttk.Button(leiste, text="Papierkorb …", command=self.papierkorb).pack(side="left", padx=6)
         ttk.Button(leiste, text="Ausgabeordner öffnen", command=lambda: oeffnen(app.einst.ausgabe())).pack(side="right")
+        extras = ttk.Menubutton(leiste, text="Extras ▾")
+        menue = tk.Menu(extras, tearoff=0)
+        menue.add_command(label="Konfigurator-Export (CSV + JSON) …", command=self.konfigurator_export)
+        menue.add_command(label="Qualitätsbericht …", command=lambda: QualitaetsDialog(self))
+        menue.add_separator()
+        menue.add_command(label="Nach Updates suchen", command=self.updates_suchen)
+        extras["menu"] = menue
+        extras.pack(side="right", padx=6)
 
         such = ttk.Frame(self, padding=(10, 2, 10, 0))
         such.pack(fill="x")
@@ -1767,6 +1845,29 @@ class Start(ttk.Frame):
 
     def papierkorb(self):
         PapierkorbDialog(self)
+
+    def konfigurator_export(self):
+        from . import export
+        alle = self.app.ablage.alle()
+        n_frei = sum(1 for d in alle if d.status == FREIGEGEBEN)
+        r = messagebox.askyesnocancel(
+            "Konfigurator-Export",
+            f"Nur freigegebene Datenblätter exportieren ({n_frei})?\n\n"
+            f"„Nein“ = alle {len(alle)} Datenblätter inkl. Entwürfe (z. B. für Tests mit CharismaCom).")
+        if r is None:
+            return
+        try:
+            pc, pj, n = export.konfigurator_export(alle, self.app.kat, self.app.einst.ausgabe(), nur_freigegeben=r)
+        except PermissionError:
+            messagebox.showerror("Konfigurator-Export", "Die Exportdatei ist noch geöffnet (z. B. in Excel). Bitte schließen.")
+            return
+        if messagebox.askyesno("Konfigurator-Export", f"{n} Geräte exportiert:\n\n{pc.name}\n{pj.name}\n\n"
+                                                       f"in {pc.parent}\n\nOrdner öffnen?"):
+            oeffnen(pc.parent)
+
+    def updates_suchen(self):
+        from . import updates
+        updates.im_hintergrund(self.app, auch_ohne_update_melden=True)
 
 
 # ======================================================================== Einstellungen
@@ -1903,9 +2004,8 @@ class App(tk.Tk):
         self.start_zeigen()
         self.protocol("WM_DELETE_WINDOW", self.beenden)
         self._kuerzel()
-        if self.einst.update_pruefen:
-            from . import updates
-            updates.im_hintergrund(self)
+        from . import updates
+        updates.start(self, pruefen=self.einst.update_pruefen)
 
     def _kuerzel(self):
         """Tastenkürzel: Strg+S speichern, Strg+P / Strg+Umschalt+P Vorschau DE/EN, Strg+O importieren,
