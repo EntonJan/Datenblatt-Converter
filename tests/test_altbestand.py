@@ -41,3 +41,20 @@ def test_103389_und_200034():
     en = A.lesen(Path(D) / "e200034.pdf", k)
     assert en.sprache == "en" and en.serie == "E/PS 10000 2U" and en.produkttyp == "Laboratory Power Supply"
     assert A.partner_datei(Path(D) / "d200034.pdf").name == "e200034.pdf"
+
+
+@pytest.mark.skipif(not D or not (Path(D or ".") / "d123711.pdf").exists(), reason="d123711.pdf fehlt")
+def test_elektronische_last_123711():
+    from eps_converter import geraetetyp as G
+    from eps_converter.modell import Datensatz, Wert
+    k = katalog.laden(KAT)
+    e = A.lesen(Path(D) / "d123711.pdf", k)
+    assert e.produkttyp == "Elektronische Last mit Netzrückspeisung" and "if_gpib" in e.werte
+    assert e.optionen[-1] == ("6", "EPS/ELR-US", "Eingangsspannung 208V +-10%, L-L")
+    ds = Datensatz()
+    for fid, (t, _, _) in e.werte.items():
+        ds.werte[fid] = Wert(de=t, en=t)
+    assert G.erkennen(ds, "Elektronische Last … Quelle-Senke-Prinzip", {"AC/DC", "Elektronische Last"}) == ["Elektronische Last"]
+    G.zuordnen(ds, k, ["Elektronische Last"])
+    assert ds.werte["ausgangsspannung"].max == 80 and ds.werte["ausgangsstrom"].max == 510
+    assert ds.werte["netzspannung"].auswahl == ["3~ 400 V"]

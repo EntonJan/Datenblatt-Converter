@@ -35,6 +35,7 @@ EXTRA = {
     "can schnittstelle": "if_can", "can interface": "if_can",
     "canopen schnittstelle": "if_canopen", "canopen interface": "if_canopen",
     "ethercat schnittstelle": "if_ethercat", "ethercat interface": "if_ethercat",
+    "gbip schnittstelle": "if_gpib", "gbip interface": "if_gpib",          # Tippfehler in alten EPS-Blättern
     "profibus": "if_profibus", "profinet": "if_profinet", "modbus": "if_modbus",
     "modbus schnittstelle": "if_modbus", "modbus interface": "if_modbus",
     "attitude": "betriebshoehe", "altitude": "betriebshoehe",
@@ -221,7 +222,7 @@ def _option_teilen(text: str) -> tuple[str, str]:
             while j < len(teile) and re.fullmatch(r"[A-Z0-9][A-Z0-9/\-.+]*", teile[j]):
                 j += 1
             code = " ".join(teile[i:j])
-            beschr = " ".join(teile[:i] + teile[j:])
+            beschr = " ".join(teile[:i] + teile[j:]).strip(" ,;")
             return code, beschr
     return "", text
 

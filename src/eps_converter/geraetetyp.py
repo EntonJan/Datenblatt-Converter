@@ -23,7 +23,7 @@ _DC = re.compile(r"v\s*dc\b|vdc\b|\bdc\b|batter|bordnetz", re.I)
 _LAST = re.compile(r"electronic(?:al)? (?:dc )?load|elektronische(?:n)? last|\bdc[- ]load\b|\belr\s?\d|\bel\s?\d{4}|"
                    r"current sink|stromsenke|\bsenke\b|\bsink mode", re.I)
 _LADE = re.compile(r"\bcharger\b|ladegerät|battery charg", re.I)
-_BIDI = re.compile(r"bidirektional|bidirectional|source.{0,10}sink|quelle.{0,10}senke", re.I)
+_BIDI = re.compile(r"bidirektional|bidirectional", re.I)     # „Quelle-Senke-Prinzip“ bei Lasten ist kein bidirektionales Gerät
 
 
 def art(text: str) -> str:
@@ -84,6 +84,8 @@ def netzspannung_vorschlag(text: str) -> list[str]:
     if not text:
         return []
     tl = text.lower()
+    tl = re.sub(r"\d{2,3}(?:[.,]\d)?\s*v\s*(?:ac)?[^,;]{0,25}\bl-n\b", " ", tl) if re.search(r"\bl-l\b", tl) else tl
+    # „400 VAC L-L, 230 VAC L-N“: 230 V ist die Strangspannung desselben Netzes, kein zweiter Netzanschluss
     drei = bool(re.search(r"\b3\s*(?:x|~|ph|-?\s*phas)|three.phase|drehstrom|\bl-l\b|3p\b|\b3\s*/\s*n?\s*/?\s*pe\b|"
                           r"\d\s*v\s*/\s*3\b", tl))
     zahlen = [float(z.replace(",", ".")) for z in re.findall(r"(?<!\d)(?<!\d[.,])(\d{2,3}(?:[.,]\d)?)(?=\s*(?:v|…|\.\.\.|-|–|/|\s*$))", tl)]
