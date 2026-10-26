@@ -27,6 +27,9 @@ Prüfhaken, sobald er geändert wird; Warnung bei doppelter Typbezeichnung/Herst
 gelöschte Entwürfe; **Verlauf** je Datenblatt (wer/wann/was – Benutzer = Anzeigename oder Windows-Anmeldename,
 nicht fälschungssicher).
 
+**Layouts (seit v0.10.0):** A – Klassisch (Banner, Kerndaten-Kasten, 2 Seiten), B – Kompakt (eine Seite,
+Kennzahl-Kacheln), C – Seitenleiste. Standard in den Einstellungen; in der Vorschau umschaltbar („Als Standard“).
+
 **Gerätetyp & Eingang (seit v0.9.0):** Der Gerätetyp wird aus Ein-/Ausgangsart (AC/DC aus VAC/VDC, Hz, Phasen) und
 Begriffen (Elektronische Last, Ladegerät, bidirektional) vorgeschlagen. AC-versorgte Geräte (AC/DC, AC/AC, Ladegeräte,
 Lasten): Versorgung → Netzanschluss + Kernfeld **Netzspannung** (Auswahl 1~/3~); DC-Eingang (DC/DC, DC/AC): Kernfeld

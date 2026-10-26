@@ -70,3 +70,16 @@ def test_bildrand_linie_wird_entfernt():
     d.line((0, 0, 199, 0), fill="black", width=3)              # Tabellenlinie oben
     t = auslesen._raender_trimmen(im)
     assert t.size[1] <= 97 and t.getpixel((100, 0)) != (0, 0, 0)
+
+
+def test_alle_layouts(tmp_path):
+    k = katalog.laden(KAT)
+    for lay in ("A", "B", "C"):
+        for sp in ("de", "en"):
+            p = pdf_export.erzeugen(datensatz(), k, tmp_path / f"{lay}{sp}.pdf", sp, FIX, lay)
+            with pdfplumber.open(p) as pdf:
+                text = " ".join(pg.extract_text() or "" for pg in pdf.pages)
+                assert "E/PS 10750-06 2U" in text and "200034" in text
+                assert ("Ausgangsspannung" if sp == "de" else "Output voltage") in text
+                if lay == "B":
+                    assert len(pdf.pages) == 1                       # Kompakt: eine Seite

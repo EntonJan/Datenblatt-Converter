@@ -1187,13 +1187,16 @@ class Maske(ttk.Frame):
         super().destroy()
 
     def vorschau(self, sprache, still=False):
-        """PDF-Vorschau im eigenen Fenster. Das PDF wird im Speicher gehalten (keine gesperrte Datei)."""
+        """PDF-Vorschau im eigenen Fenster. Das PDF wird im Speicher gehalten (keine gesperrte Datei).
+        Layout: das im Vorschaufenster gewählte, sonst das aus den Einstellungen."""
         self.uebernehmen()
+        vf = self.app.vorschau_fenster
+        layout = vf.layout_code() if vf is not None and vf.winfo_exists() else self.app.einst.layout
         tmp = Path(tempfile.gettempdir()) / "eps-converter-vorschau"
         tmp.mkdir(exist_ok=True)
         datei = tmp / f"vorschau_{sprache}_{self.ds.id}_{os.getpid()}_{int(time.time() * 1000)}.pdf"
         try:
-            pdf_export.erzeugen(self.ds, self.app.kat, datei, sprache, self.app.ablage.ordner(self.ds.id))
+            pdf_export.erzeugen(self.ds, self.app.kat, datei, sprache, self.app.ablage.ordner(self.ds.id), layout)
             daten = datei.read_bytes()
         except Exception as e:
             if not still:
@@ -1253,7 +1256,8 @@ class Maske(ttk.Frame):
             ziel_pdfs = []
         else:
             try:
-                ziel_pdfs = pdf_export.beide(self.ds, self.app.kat, self.app.einst.ausgabe(), self.app.ablage.ordner(self.ds.id))
+                ziel_pdfs = pdf_export.beide(self.ds, self.app.kat, self.app.einst.ausgabe(), self.app.ablage.ordner(self.ds.id),
+                                             self.app.einst.layout)
             except PermissionError:
                 messagebox.showerror("Freigabe", "Ein PDF mit dieser Bestellnummer ist noch geöffnet. Bitte schließen.")
                 return
@@ -1346,6 +1350,13 @@ class VorschauFenster(tk.Toplevel):
         self.sprache = tk.StringVar(value="de")
         for t, v in (("Deutsch", "de"), ("Englisch", "en")):
             ttk.Radiobutton(leiste, text=t, value=v, variable=self.sprache, command=self.neu_erzeugen).pack(side="left", padx=2)
+        ttk.Label(leiste, text="Layout:").pack(side="left", padx=(12, 2))
+        self.layout = tk.StringVar(value=pdf_export.LAYOUTS.get(app.einst.layout, pdf_export.LAYOUTS["C"]))
+        cb = ttk.Combobox(leiste, textvariable=self.layout, values=list(pdf_export.LAYOUTS.values()), state="readonly", width=22)
+        cb.pack(side="left")
+        cb.bind("<<ComboboxSelected>>", lambda e: self.neu_erzeugen())
+        self.btn_standard = ttk.Button(leiste, text="Als Standard", command=self.als_standard)
+        self.btn_standard.pack(side="left", padx=4)
         ttk.Button(leiste, text="Aktualisieren", command=self.neu_erzeugen).pack(side="left", padx=8)
         ttk.Button(leiste, text="Im PDF-Programm öffnen", command=self.extern).pack(side="left")
         ttk.Button(leiste, text="−", width=3, command=lambda: self.zoom(0.85)).pack(side="right")
@@ -1371,7 +1382,7 @@ class VorschauFenster(tk.Toplevel):
         from PIL import ImageTk
         self.daten = daten
         self.sprache.set(sprache)
-        self.title(f"Vorschau {'DE' if sprache == 'de' else 'EN'} – {ds.titel or 'ohne Namen'}")
+        self.title(f"Vorschau {'DE' if sprache == 'de' else 'EN'} – {ds.titel or 'ohne Namen'} – Layout {self.layout_code()}")
         pos = self.cv.yview()[0] if self._bilder else 0.0
         doc = pdfium.PdfDocument(daten)
         try:
@@ -1386,8 +1397,23 @@ class VorschauFenster(tk.Toplevel):
             y += b.height() + 12
         self.cv.configure(scrollregion=(0, 0, breite + 20, y))
         self.cv.yview_moveto(pos)
-        self.info.configure(text=f"{n} Seite(n) · Stand {jetzt()[11:19]} · aktualisiert sich beim Speichern (Strg+S)")
+        std = " (Standard)" if self.layout_code() == self.app.einst.layout else " – Freigabe nutzt " + \
+            pdf_export.LAYOUTS.get(self.app.einst.layout, "C")
+        self.info.configure(text=f"{n} Seite(n) · Layout {self.layout.get()}{std} · Stand {jetzt()[11:19]} · "
+                                 "aktualisiert sich beim Speichern (Strg+S)")
         self.lift()
+
+    def layout_code(self) -> str:
+        return next((k for k, v in pdf_export.LAYOUTS.items() if v == self.layout.get()), "C")
+
+    def als_standard(self):
+        """Gewähltes Layout für alle Freigaben übernehmen (Einstellungen)."""
+        self.app.einst.layout = self.layout_code()
+        try:
+            E.speichern(self.app.einst)
+        except OSError:
+            pass
+        self.info.configure(text=f"Layout {self.layout.get()} ist jetzt Standard für freigegebene Datenblätter.")
 
     def neu_erzeugen(self):
         m = self.app.aktuell
@@ -1772,6 +1798,10 @@ class EinstellungenDialog(tk.Toplevel):
         zeile("Anzeigename im Verlauf", self.benutzer, f"Leer = Windows-Anmeldename ({protokoll.benutzer(None)})")
         self.ausgabe = self._ordnerfeld(fr, e.ausgabe_ordner)
         zeile("Ausgabeordner PDFs", self.ausgabe.master, f"Leer = {pfade.AUSGABE_DIR}")
+        self.layout = tk.StringVar(value=pdf_export.LAYOUTS.get(e.layout, pdf_export.LAYOUTS["C"]))
+        zeile("Datenblatt-Layout", ttk.Combobox(fr, textvariable=self.layout, values=list(pdf_export.LAYOUTS.values()),
+                                                state="readonly", width=30),
+              "Gilt für freigegebene Datenblätter. In der Vorschau kann jedes Layout zum Vergleich angezeigt werden.")
         self.archiv = self._ordnerfeld(fr, e.archiv_ordner)
         zeile("Archivordner (optional)", self.archiv.master, "Zusätzliche Kopie jeder freigegebenen PDF, z. B. Netzlaufwerk.")
         self.hersteller = tk.Text(fr, height=6, width=52, relief="solid", borderwidth=1)
@@ -1822,6 +1852,7 @@ class EinstellungenDialog(tk.Toplevel):
         e.benutzer = self.benutzer.get().strip()
         e.ausgabe_ordner = self.ausgabe.get().strip()
         e.archiv_ordner = self.archiv.get().strip()
+        e.layout = next((k for k, v in pdf_export.LAYOUTS.items() if v == self.layout.get()), "C")
         e.hersteller = [x.strip() for x in self.hersteller.get("1.0", "end").splitlines() if x.strip()]
         e.haendlerware_hersteller = self._hw
         E.speichern(e)

@@ -21,6 +21,8 @@ def selbsttest(ordner: Path) -> int:
             ds.werte[fid] = Wert(de=de, en=en)
         ds.werte["kuehlung"] = Wert(auswahl=["Lüfter"])
         pdfs = pdf_export.beide(ds, k, ordner)
+        for lay in ("A", "B"):                                       # alle Layouts müssen sich erzeugen lassen
+            pdf_export.erzeugen(ds, k, ordner / f"layout_{lay}.pdf", "de", None, lay)
         from eps_converter import formatierer, protokoll, importieren, gui  # noqa: F401  (alles mitgebaut?)
         assert formatierer.formatieren("230Vac", "de") == "230 VAC"
         dnd = "DnD fehlt"

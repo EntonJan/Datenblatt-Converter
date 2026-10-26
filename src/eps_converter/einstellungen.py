@@ -26,6 +26,7 @@ class Einstellungen:
         "Gustav Klein", "Schäfer Elektronik", "SHT-Power SAS"])
     update_pruefen: bool = True
     legende_anzeigen: bool = True     # Tastenkürzel-Leiste rechts (F1)
+    layout: str = "C"                 # Datenblatt-Layout: A Klassisch · B Kompakt · C Seitenleiste
     leere_ausblenden: bool = False    # in den Reitern leere Nicht-Kernfelder ausblenden
     fenster: str = ""                 # letzte Fenstergröße/-position, z. B. "1280x820+100+50"
     fenster_maximiert: bool = False
