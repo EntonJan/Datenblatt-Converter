@@ -243,3 +243,11 @@ def test_echte_lastseite():
     assert (e.bestellnummer, e.umax, e.imax, e.pmax, e.aus_name) == ("300297", 80, 510, 15000, "")
     assert e.spannung == "0 V bis 80V" and e.strom == "0,01 A bis 510A" and e.parallel
     assert e.pdf_url == "https://www.eps-germany.de/shop/media/products/a300297_0.pdf"
+
+
+def test_kleiner_groesser_zeichen_bleiben_erhalten():
+    seite = ('<h1>EPS/B AC/AC</h1><div class="listingrow"><div class="lr_title mb"><strong>EPS/BB1.5-SSR-AU</strong></div>'
+             '<div class="lr_desc mb"><span><strong>Bestellnr.:</strong> 400040<br></span>'
+             '<span><strong>Strom:</strong>&nbsp;10Aeff/15App@<150V / 5Aeff/7.5App@>150V<br></span></div></div>')
+    g = S.geraete_lesen(seite, S.serie_lesen(seite, "https://www.eps-germany.de/shop/AC-AC/x:::22_577.html"))
+    assert g[0].strom == "10Aeff/15App@<150V / 5Aeff/7.5App@>150V"

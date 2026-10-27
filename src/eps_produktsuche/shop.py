@@ -159,7 +159,8 @@ def aus_typbezeichnung(name: str) -> tuple[float | None, float | None, float | N
 # ------------------------------------------------------------------------ HTML auswerten
 
 def _text(fragment: str) -> str:
-    t = re.sub(r"<[^>]+>", " ", fragment)
+    # Nur echte Tags entfernen – „10Aeff/15App@<150V / 5Aeff@>150V“ ist Text, kein Tag
+    t = re.sub(r"<(?:[a-zA-Z/!][^<>]*)>", " ", fragment)
     return re.sub(r"\s+", " ", html.unescape(t)).strip()
 
 
