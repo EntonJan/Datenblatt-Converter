@@ -12,8 +12,12 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+import pdfplumber
+
 from eps_converter import auslesen, importieren, pfade, katalog as K, regeln
-from eps_converter.modell import Datensatz
+from eps_converter.modell import Datensatz, Wert, HERKUNFT_PDF
+
+from . import allgemein
 
 LAST = "Elektronische Last"
 
@@ -83,24 +87,44 @@ def katalog() -> K.Katalog:
     return K.laden(pfade.KATALOG_MITGELIEFERT)
 
 
+@dataclass
+class Analyse:
+    modelle: list[auslesen.Modellspalte]          # Modellspalten der Converter-Auslese (Seriendatenblatt)
+    varianten: list[allgemein.Variante]           # Zahlenreihen der allgemeinen Erkennung (nur ohne Modellspalten)
+    hat_text: bool
+
+
+def _text(pfad: Path, max_seiten: int = 4) -> str:
+    with pdfplumber.open(str(pfad)) as pdf:
+        return "\n".join((p.extract_text() or "") for p in pdf.pages[:max_seiten])
+
+
+def analysieren(pfad: Path) -> Analyse:
+    erg, _, _ = auslesen.analysieren(Path(pfad), katalog())
+    varianten = [] if erg.modelle or not erg.hat_text else allgemein.erkennen(_text(Path(pfad))).varianten
+    return Analyse(erg.modelle, varianten, erg.hat_text)
+
+
 def modelle(pfad: Path) -> tuple[list[auslesen.Modellspalte], bool]:
     """(Modellspalten, hat_text). Leere Liste = Einzeldatenblatt."""
-    erg, _, _ = auslesen.analysieren(Path(pfad), katalog())
-    return erg.modelle, erg.hat_text
+    a = analysieren(pfad)
+    return a.modelle, a.hat_text
 
 
-def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None) -> Fremdgeraet:
+def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
+          variante: allgemein.Variante | None = None) -> Fremdgeraet:
     pfad = Path(pfad)
     kat = katalog()
     erg = auslesen.auslesen(pfad, kat, modell)
-    fg = Fremdgeraet(datei=pfad.name, modell=modell.label if modell else "", sprache=erg.sprache)
+    fg = Fremdgeraet(datei=pfad.name, modell=modell.label if modell else (variante.label if variante else ""),
+                     sprache=erg.sprache)
     if not erg.hat_text:
         fg.hinweise.append("Das PDF enthält keinen lesbaren Text (Scan) – Werte bitte von Hand eingeben.")
         return fg
-    ds = importieren.datensatz_aus_ergebnis(erg, kat, Datensatz(), fg.modell)
-    _, zeilen, _ = auslesen.analysieren(pfad, kat)
-    gesamt = " ".join(s.text for z in zeilen for s in z.stuecke)
-    importieren.typ_und_zuordnung(ds, kat, gesamt)
+    ds = importieren.datensatz_aus_ergebnis(erg, kat, Datensatz(), fg.modell if modell else "")
+    volltext = _text(pfad)
+    ergaenzt = _allgemein_ergaenzen(ds, kat, allgemein.erkennen(volltext), variante, mit_modell=modell is not None)
+    importieren.typ_und_zuordnung(ds, kat, volltext.replace("\n", " "))
     w = ds.werte
     fg.geraetetyp = list(w["geraetetyp"].auswahl) if "geraetetyp" in w else []
     for feld, attr, einheit in (("ausgangsspannung", "spannung", "V"), ("ausgangsstrom", "strom", "A"),
@@ -110,11 +134,15 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None) -> Fremdgerae
             continue
         text = wert.en if erg.sprache == "en" and wert.en else (wert.de or wert.en)
         setattr(fg, attr, text)
-        _, mx = regeln.parse_bereich(_tausender(text), einheit)
+        _, mx = (None, wert.max) if wert.fundstelle == "allgemein" else regeln.parse_bereich(_tausender(text), einheit)
         if mx is None:
             mx = wert.max if wert.max is not None else wert.min
         setattr(fg, {"V": "umax", "A": "imax", "W": "pmax"}[einheit], mx)
-    fg.ac = bool(re.search(r"VAC|V AC|\bAC\b|Vrms|~", fg.spannung)) or any(t in ("AC/AC", "DC/AC") for t in fg.geraetetyp)
+    fg.ac = bool(re.search(r"VAC|V AC|\bAC\b|Vrms|~", fg.spannung, re.I)) or any(t in ("AC/AC", "DC/AC") for t in fg.geraetetyp)
+    if not fg.geraetetyp and not fg.leer():
+        fg.geraetetyp = _typ_aus_text(volltext, fg.ac)
+        if fg.geraetetyp:
+            fg.hinweise.append(f"Gerätetyp geschätzt: {fg.geraetetyp[0]}.")
     if fg.ac:
         u = _strangspannung(fg.spannung)
         if u:
@@ -128,7 +156,67 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None) -> Fremdgerae
             fg.hinweise.append(f"Leistung berechnet ({'√3 × U(L-L)' if l_l else '3 × U(L-N)'} × I = {_z(fg.pmax)} VA).")
     ht = w.get("hersteller_typ") or w.get("typbezeichnung")
     fg.hersteller_typ = (ht.de or ht.en) if ht else fg.modell
+    if variante or not fg.hersteller_typ:
+        name = _produktname(volltext)
+        fg.hersteller_typ = f"{name} ({variante.label})" if name and variante else (name or fg.hersteller_typ)
+    if ergaenzt:
+        fg.hinweise.append("Ohne feste Bezeichnung erkannt (bitte kurz prüfen): " + ", ".join(ergaenzt) + ".")
     fehlt = [n for n, v in (("Spannung", fg.umax), ("Strom", fg.imax), ("Leistung", fg.pmax)) if not v]
     if fehlt:
         fg.hinweise.append("Nicht gefunden: " + ", ".join(fehlt) + " – ggf. von Hand ergänzen.")
     return fg
+
+
+def _allgemein_ergaenzen(ds: Datensatz, kat: K.Katalog, e: allgemein.Erkennung,
+                         variante: allgemein.Variante | None, mit_modell: bool = False) -> list[str]:
+    """Fehlende Ausgangswerte aus der allgemeinen Erkennung bzw. der gewählten Variante eintragen.
+    Ist ein Modell einer Serie gewählt, gelten nur eindeutig bezeichnete Werte – sonst landen Serienwerte
+    („bis 80 kW“, Leerlaufstrom) beim Einzelmodell."""
+    ergaenzt = []
+    quellen = {
+        "ausgangsspannung": (variante.spannung, variante.umax) if variante and variante.umax else (e.spannung, e.umax),
+        "ausgangsstrom": (variante.strom, variante.imax) if variante and variante.imax else (e.strom, e.imax),
+        "ausgangsleistung": (variante.leistung, variante.pmax) if variante and variante.pmax else (e.leistung, e.pmax),
+    }
+    namen = {"ausgangsspannung": "Spannung", "ausgangsstrom": "Strom", "ausgangsleistung": "Leistung"}
+    for fid, (text, wert) in quellen.items():
+        vorhanden = ds.werte.get(fid)
+        if wert is None or (vorhanden and (vorhanden.max is not None or vorhanden.min is not None) and not variante):
+            continue
+        einheit = {"ausgangsspannung": "V", "ausgangsstrom": "A", "ausgangsleistung": "W"}[fid]
+        if mit_modell and not variante and e.prio.get(einheit, 0) < 3:
+            continue
+        text = text or _z(wert)
+        if fid == "ausgangsspannung" and e.ac and "AC" not in text.upper():
+            text += " AC"
+        ds.werte[fid] = Wert(de=text, en=text, min=None, max=wert, herkunft=HERKUNFT_PDF, fundstelle="allgemein")
+        ergaenzt.append(namen[fid])
+    return ergaenzt
+
+
+def _typ_aus_text(text: str, ausgang_ac: bool) -> list[str]:
+    """Gerätetyp, wenn die Converter-Erkennung keinen findet: Netzeingang (AC) + Ausgang DC → AC/DC usw."""
+    t = (text or "").lower()
+    if re.search(r"elektronische last|electronic load|\bsenke\b", t):
+        return [LAST]
+    if re.search(r"wechselrichter|inverter", t):
+        return ["DC/AC"]
+    netz_ac = bool(re.search(r"netzeingang|netzanschluss|netzspannung|mains|ac[- ]input|input voltage.{0,30}v\s*ac|"
+                             r"\b(230|400|115|208|480)\s*v\s*(ac|~)", t))
+    dc_eingang = bool(re.search(r"dc[- ]eingang|dc[- ]input|eingangsspannung.{0,20}v\s*dc|input.{0,20}vdc", t))
+    if ausgang_ac:
+        return ["DC/AC"] if dc_eingang and not netz_ac else (["AC/AC"] if netz_ac else [])
+    if dc_eingang and not netz_ac:
+        return ["DC/DC"]
+    if netz_ac or re.search(r"netzgerät|netzteil|power supply|labornetz", t):
+        return ["AC/DC"]
+    return []
+
+
+def _produktname(text: str) -> str:
+    """Erste aussagekräftige Zeile des Datenblatts (meist Serien-/Produktname, z. B. „ARGOS 1200“)."""
+    for z in (text or "").splitlines()[:6]:
+        z = z.strip()
+        if 3 <= len(z) <= 60 and re.search(r"[A-Za-z]{2,}", z) and not re.search(r"seite|page|datenblatt|datasheet|www\.|@", z, re.I):
+            return z
+    return ""

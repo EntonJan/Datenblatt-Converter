@@ -324,3 +324,47 @@ def test_unplausible_shopdaten_markiert():
     t = Q.bewerten(g, Q.anfrage_lesen("115VAC 3kVA"))
     assert "Shopdaten unplausibel" in t.hinweis
     assert not Q.unplausibel(quelle("EPS/FTP 3000-UM-19", "400227", "200/115 VAC 3ph+N", "8,7A", "3000 VA", typ="AC/AC"))
+
+
+# ------------------------------------------------------------------ allgemeine Erkennung (v1.1.1)
+ARGOS_AEHNLICH = """XYZ 1200
+Hochleistungs-Netzgeräteserie
+Merkmale
+ 1200W Dauerausgangsleistung
+U-Aus (V ) 0-30 0-40 0-60 0-100 0-160 0-200
+DC
+I-Aus (A ) 0-40 0-30 0-20 0-12 0-7,5 0-6
+DC
+Netzausregelung: 0,01% bei 10% Netzschwankung
+Restwelligkeit: 30mV , 120mV
+Netzeingang:
+230V 10%, 47..65Hz
+Primärstromaufnahme: Ca. 7A bei 230V und Nennlast"""
+
+
+def test_allgemein_variantentabelle():
+    from eps_produktsuche import allgemein as A
+    e = A.erkennen(ARGOS_AEHNLICH)
+    assert e.pmax == 1200 and not e.ac
+    assert [(v.umax, v.imax, v.pmax) for v in e.varianten][:3] == [(30, 40, 1200), (40, 30, 1200), (60, 20, 1200)]
+    assert len(e.varianten) == 6 and e.varianten[4].label == "0-160 V / 0-7,5 A / 1,2 kW"
+
+
+def test_allgemein_einzelwerte_und_ausschluesse():
+    from eps_produktsuche import allgemein as A
+    e = A.erkennen("Nenndaten AC-Anschluss\nAC-Netzspannung 3/PE AC 400 V 50 Hz\nAC-Strom max. 1102 A\n"
+                   "Nenndaten DC-Anschluss\nLeistung ± 1440 kW (Auf 650kW durch GL begrenzt)\n"
+                   "Spannung DC 10 – 1 200 V\nStrom ± 1 200 A\nRestwelligkeit Spannung < 0,1 % fs")
+    assert (e.umax, e.imax, e.pmax) == (1200, 1200, 650000)
+    e = A.erkennen("Ausgangsspannung 3 5-800VDC einstellbar\nAusgangsstrom ± 1.000 A einstellbar\n"
+                   "Schaltspannung maximal 400 VAC\nAusgangsleistung 160kW")
+    assert (e.umax, e.imax, e.pmax) == (800, 1000, 160000)
+    e = A.erkennen("VOLTAGE\nInput Range [PH-N] 190 - 267 Vac\nLOW 2-150Vac / HIGH 4-300Vac\nPower 1.5 kVA 3 kVA 5 kVA 7.5 kVA")
+    assert e.umax == 300 and e.ac and e.pmax == 7500
+
+
+def test_typ_aus_text():
+    from eps_produktsuche import datenblatt as D
+    assert D._typ_aus_text(ARGOS_AEHNLICH, False) == ["AC/DC"]
+    assert D._typ_aus_text("Sinus-Wechselrichter 24 VDC", True) == ["DC/AC"]
+    assert D._typ_aus_text("Netzanschluss 3x400V, Ausgang 115 VAC 400 Hz", True) == ["AC/AC"]

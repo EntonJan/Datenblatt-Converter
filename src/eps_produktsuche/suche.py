@@ -281,8 +281,9 @@ def empfehlung(treffer: list[Treffer], a: Anfrage, sprache: str = "de", alternat
         zeilen.append(z)
     bedarf = ", ".join(zahl_text(x, e) for x, e in ((a.spannung, "V"), (a.strom, "A"), (a.leistung_bedarf, "W")) if x)
     if alternative_zu:
-        kopf = (f"As an alternative to {alternative_zu} ({bedarf}) we recommend:" if en
-                else f"Als Alternative zu {alternative_zu} ({bedarf}) empfehlen wir:")
+        werte = "" if re.search(r"\d\s*V\b", alternative_zu) or not bedarf else f" ({bedarf})"
+        kopf = (f"As an alternative to {alternative_zu}{werte} we recommend:" if en
+                else f"Als Alternative zu {alternative_zu}{werte} empfehlen wir:")
     else:
         kopf = (f"For your requirement ({bedarf}) we recommend:" if en else f"Für Ihre Anforderung ({bedarf}) empfehlen wir:") \
             if bedarf else ("We recommend:" if en else "Wir empfehlen:")

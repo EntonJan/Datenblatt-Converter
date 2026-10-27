@@ -18,6 +18,53 @@ FARBEN = {Q.PASST: "#2E7D32", Q.GROESSER: "#1B4F72", Q.PARALLEL: "#8E5A00", Q.RE
 BEISPIELE = "z. B. „Stromquelle 0-30V 1kA 30kW“ · „E-Last 500V 100A“ · „230VAC 3kVA“ · „Wechselrichter 400V 6kVA“ · „ELR 10080“"
 
 
+class VariantenDialog(tk.Toplevel):
+    """Auswahl einer Variante aus einer Zahlenreihe ohne Modellnamen (z. B. „0-30 V / 0-40 A / 1,2 kW“)."""
+
+    def __init__(self, master, varianten, datei: str = ""):
+        super().__init__(master)
+        self.title("Variante auswählen" + (f" – {datei}" if datei else ""))
+        self.transient(master)
+        self.grab_set()
+        self.ergebnis = None
+        self.varianten = varianten
+        ttk.Label(self, text="Das Datenblatt enthält mehrere Varianten ohne Modellnamen.\n"
+                             "Welche hat der Kunde? (Werte aus der Variantentabelle)", padding=10).pack(anchor="w")
+        fr = ttk.Frame(self, padding=(10, 0))
+        fr.pack(fill="both", expand=True)
+        self.lb = tk.Listbox(fr, height=min(16, len(varianten) + 1), width=52, activestyle="dotbox", font=("Segoe UI", 10))
+        sb = ttk.Scrollbar(fr, command=self.lb.yview)
+        self.lb.configure(yscrollcommand=sb.set)
+        for v in varianten:
+            self.lb.insert("end", v.label)
+        self.lb.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.lb.bind("<Double-1>", lambda e: self.ok())
+        self.lb.bind("<Return>", lambda e: self.ok())
+        self.lb.selection_set(0)
+        self.lb.focus_set()
+        bf = ttk.Frame(self, padding=10)
+        bf.pack(fill="x")
+        ttk.Button(bf, text="Ohne Variante (Höchstwerte)", command=self.ohne).pack(side="left")
+        ttk.Button(bf, text="Übernehmen", command=self.ok).pack(side="right")
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.update_idletasks()
+        x = master.winfo_rootx() + (master.winfo_width() - self.winfo_reqwidth()) // 2
+        y = master.winfo_rooty() + (master.winfo_height() - self.winfo_reqheight()) // 3
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        self.wait_window()
+
+    def ok(self):
+        sel = self.lb.curselection()
+        if sel:
+            self.ergebnis = self.varianten[sel[0]]
+            self.destroy()
+
+    def ohne(self):
+        self.ergebnis = False
+        self.destroy()
+
+
 def programmordner() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -280,19 +327,26 @@ class App(tk.Tk):
         self.info.configure(text=f"Lese {pfad.name} …")
         self.update_idletasks()
         try:
-            modelle, hat_text = datenblatt.modelle(pfad)
-            modell = None
-            if modelle and hat_text:
+            analyse = datenblatt.analysieren(pfad)
+            modell = variante = None
+            if analyse.modelle and analyse.hat_text:
                 from eps_converter.importieren import ModellDialog
                 self.configure(cursor="")
-                d = ModellDialog(self, modelle, pfad.name)
+                d = ModellDialog(self, analyse.modelle, pfad.name)
                 if d.ergebnis is None:
                     self.info.configure(text="Abgebrochen – kein Modell gewählt.")
                     return
                 modell = d.ergebnis or None
-                self.configure(cursor="watch")
-                self.update_idletasks()
-            fg = datenblatt.lesen(pfad, modell)
+            elif len(analyse.varianten) > 1:
+                self.configure(cursor="")
+                d = VariantenDialog(self, analyse.varianten, pfad.name)
+                if d.ergebnis is None:
+                    self.info.configure(text="Abgebrochen – keine Variante gewählt.")
+                    return
+                variante = d.ergebnis or None
+            self.configure(cursor="watch")
+            self.update_idletasks()
+            fg = datenblatt.lesen(pfad, modell, variante)
         except Exception as e:  # noqa: BLE001
             self.configure(cursor="")
             messagebox.showerror("Kunden-Datenblatt", f"Das PDF konnte nicht gelesen werden:\n{e}", parent=self)

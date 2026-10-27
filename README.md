@@ -94,4 +94,8 @@ z. B. `Stromquelle 0-30V 1kA 30kW`, `E-Last 500V 100A`, `230VAC 3kVA`, oder eine
   bzw. in der Typbezeichnung (ELR 10080-510 → 80 V / 510 A).
 - Doppelklick öffnet das Datenblatt-PDF aus dem Shop; „Empfehlung kopieren (DE/EN)“ legt einen Antworttext mit
   Bestellnummern und PDF-Links in die Zwischenablage.
+- **Kunden-Datenblatt (seit 1.1):** Fremd-PDF ins Fenster ziehen bzw. „Kunden-Datenblatt (PDF) …“ (Strg+O) → Werte
+  werden mit der Converter-Auslese gelesen; Datenblätter ohne feste Bezeichnungen (z. B. „U-Aus (V) 0-30 0-40 …“)
+  erkennt eine allgemeine Einheiten-/Muster-Erkennung, Variantentabellen werden zur Auswahl angeboten. Die Anfrage
+  steht danach im Suchfeld und kann korrigiert werden; „Empfehlung kopieren“ schreibt „Als Alternative zu …“.
 - Eigene Releases mit Tag `produktsuche-v<Version>` (stören das Selbst-Update des Converters nicht).
