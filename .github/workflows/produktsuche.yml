@@ -1,0 +1,62 @@
+name: EPS-Produktsuche bauen
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/eps_produktsuche/**"
+      - "src/produktsuche_main.py"
+      - "packaging/eps-produktsuche.spec"
+      - "tests/test_produktsuche.py"
+      - ".github/workflows/produktsuche.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller==6.22.3 pytest
+      - name: Tests
+        run: python -m pytest -q tests/test_produktsuche.py
+        env:
+          PYTHONPATH: src
+      - name: EXE bauen
+        run: pyinstaller --noconfirm --clean packaging/eps-produktsuche.spec
+      - name: Selbsttest der fertigen EXE
+        shell: pwsh
+        run: |
+          $ziel = "$env:RUNNER_TEMP\selbsttest"
+          $p = Start-Process -FilePath "dist\EPS-Produktsuche.exe" -ArgumentList "--selbsttest", $ziel -Wait -PassThru
+          Get-Content "$ziel\selbsttest.txt"
+          if ($p.ExitCode -ne 0) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EPS-Produktsuche
+          path: dist/EPS-Produktsuche.exe
+      - name: Version lesen und prüfen, ob es dafür schon ein Release gibt
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path src/eps_produktsuche/__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          "tag=produktsuche-v$v" >> $env:GITHUB_OUTPUT
+          git fetch --tags --quiet
+          if (git tag -l "produktsuche-v$v") { "neu=false" >> $env:GITHUB_OUTPUT } else { "neu=true" >> $env:GITHUB_OUTPUT }
+      - name: Release anlegen (nur wenn die Versionsnummer neu ist)
+        if: github.ref == 'refs/heads/main' && steps.version.outputs.neu == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: EPS-Produktsuche ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: dist/EPS-Produktsuche.exe
+          make_latest: false

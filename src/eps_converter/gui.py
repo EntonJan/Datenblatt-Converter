@@ -1295,7 +1295,7 @@ class Maske(ttk.Frame):
 
 
 TASTENKUERZEL = [
-    ("Überall", [("PDF ins Fenster ziehen", "Importieren (mehrere = Stapel)"), ("Strg+O", "Hersteller-PDF importieren"), ("Strg+N", "Leeres Datenblatt"), ("Strg+K", "Produktsuche (V/A/W)"), ("F1", "Diese Legende ein/aus")]),
+    ("Überall", [("PDF ins Fenster ziehen", "Importieren (mehrere = Stapel)"), ("Strg+O", "Hersteller-PDF importieren"), ("Strg+N", "Leeres Datenblatt"), ("F1", "Diese Legende ein/aus")]),
     ("Startliste", [("Strg+F", "Suchen"), ("Esc", "Suche leeren (im Suchfeld)"), ("Enter", "Auswahl öffnen"),
                     ("Doppelklick", "Öffnen"), ("Klick auf Spalte", "Sortieren")]),
     ("Datenblatt", [("Strg+S", "Speichern"), ("Strg+P", "Vorschau DE (im Programm)"), ("Strg+Umschalt+P", "Vorschau EN"),
@@ -1701,167 +1701,6 @@ class FreigabeDialog(tk.Toplevel):
         self.grab_set()
 
 
-def produktsuche(app):
-    """Öffnet die Produktsuche – oder holt das offene Fenster nach vorne."""
-    d = getattr(app, "_produktsuche", None)
-    if d is not None and d.winfo_exists():
-        d.lift()
-        d.focus_force()
-        return d
-    app._produktsuche = ProduktsucheDialog(app)
-    return app._produktsuche
-
-
-class ProduktsucheDialog(tk.Toplevel):
-    """Produktsuche für Kundenanfragen: „0-30V 1kA 30kW“ eintippen → passende Geräte aus allen Datensätzen."""
-
-    def __init__(self, app: "App"):
-        super().__init__(app)
-        from . import suche
-        self.S = suche
-        self.app = app
-        self.title("Produktsuche (Strg+K)")
-        self.geometry("1180x600")
-        self.transient(app)
-        self.alle = app.ablage.alle()
-        self.treffer: list = []
-        fr = ttk.Frame(self, padding=10)
-        fr.pack(fill="both", expand=True)
-        ttk.Label(fr, text="Kundenanfrage eingeben – z. B. „Stromquelle 0-30V 1kA 30kW“, „Last 500V 100A“, „DC/DC 48V 20A“",
-                  font=("Segoe UI", 10, "bold"), foreground=NAVY).pack(anchor="w")
-        zeile = ttk.Frame(fr)
-        zeile.pack(fill="x", pady=(4, 2))
-        self.eingabe = tk.StringVar()
-        e = ttk.Entry(zeile, textvariable=self.eingabe, font=("Segoe UI", 12))
-        e.pack(side="left", fill="x", expand=True)
-        ttk.Label(zeile, text="Gerätetyp:").pack(side="left", padx=(12, 4))
-        self.typ = tk.StringVar(value="automatisch")
-        cb = ttk.Combobox(zeile, textvariable=self.typ, values=["automatisch", "alle", *suche.GERAETETYPEN],
-                          state="readonly", width=18)
-        cb.pack(side="left")
-        opt = ttk.Frame(fr)
-        opt.pack(fill="x")
-        self.erkannt = ttk.Label(opt, text="", foreground="#6A7380")
-        self.erkannt.pack(side="left")
-        self.knapp = tk.BooleanVar(value=True)
-        self.nur_frei = tk.BooleanVar(value=False)
-        ttk.Checkbutton(opt, text="nur freigegebene", variable=self.nur_frei, command=self.suchen).pack(side="right")
-        ttk.Checkbutton(opt, text="auch knapp darunter (bis −10 %)", variable=self.knapp,
-                        command=self.suchen).pack(side="right", padx=10)
-
-        sp = [("bew", "Bewertung", 105), ("nr", "Bestellnr.", 70), ("titel", "Typbezeichnung", 200), ("typ", "Gerätetyp", 110),
-              ("u", "Spannung", 70), ("i", "Strom", 70), ("p", "Leistung", 70), ("res", "Reserve", 175),
-              ("hin", "Hinweis", 220), ("st", "Status", 75)]
-        tf = ttk.Frame(fr)
-        tf.pack(fill="both", expand=True, pady=(6, 0))
-        self.tv = ttk.Treeview(tf, columns=[x[0] for x in sp], show="headings", selectmode="extended")
-        for k, t, b in sp:
-            self.tv.heading(k, text=t)
-            self.tv.column(k, width=b, stretch=k in ("titel", "res", "hin"))
-        for kat, farbe in ((suche.PASST, "#2E7D32"), (suche.GROESSER, "#1B4F72"), (suche.PARALLEL, "#8E5A00"),
-                           (suche.REIHE, "#8E5A00"), (suche.KNAPP_DARUNTER, "#8A8F98")):
-            self.tv.tag_configure(kat, foreground=farbe)
-        sb = ttk.Scrollbar(tf, orient="vertical", command=self.tv.yview)
-        self.tv.configure(yscrollcommand=sb.set)
-        self.tv.pack(side="left", fill="both", expand=True)
-        sb.pack(side="left", fill="y")
-        self.info = ttk.Label(fr, text="", foreground="#6A7380")
-        self.info.pack(anchor="w", pady=(4, 0))
-
-        unten = ttk.Frame(self, padding=(10, 0, 10, 10))
-        unten.pack(fill="x")
-        ttk.Button(unten, text="Datensatz öffnen", command=self.oeffnen).pack(side="left")
-        ttk.Button(unten, text="Datenblatt-PDF", command=self.pdf).pack(side="left", padx=6)
-        ttk.Button(unten, text="Empfehlung kopieren (DE)", command=lambda: self.kopieren("de")).pack(side="left", padx=(18, 0))
-        ttk.Button(unten, text="(EN)", command=lambda: self.kopieren("en")).pack(side="left", padx=4)
-        ttk.Button(unten, text="Schließen", command=self.destroy).pack(side="right")
-
-        self.eingabe.trace_add("write", lambda *a: self.suchen())
-        cb.bind("<<ComboboxSelected>>", lambda ev: self.suchen())
-        self.tv.bind("<Double-1>", lambda ev: self.oeffnen())
-        self.tv.bind("<Return>", lambda ev: self.oeffnen())
-        self.tv.bind("<<TreeviewSelect>>", lambda ev: self._details())
-        self.bind("<Escape>", lambda ev: self.destroy())
-        e.bind("<Down>", lambda ev: (self.tv.focus_set(), self.tv.get_children() and (
-            self.tv.selection_set(self.tv.get_children()[0]), self.tv.focus(self.tv.get_children()[0]))))
-        e.focus_set()
-        self.suchen()
-
-    def anfrage(self):
-        a = self.S.anfrage_lesen(self.eingabe.get())
-        wahl = self.typ.get()
-        if wahl == "alle":
-            a.geraetetyp = ""
-        elif wahl != "automatisch":
-            a.geraetetyp = wahl
-        return a
-
-    def suchen(self):
-        a = self.anfrage()
-        self.tv.delete(*self.tv.get_children())
-        self.erkannt.configure(text=("Erkannt: " + " · ".join(a.erkannt)) if a.erkannt else
-                               "Noch keine Werte erkannt (Einheit V, A oder W mit angeben, k für kilo).")
-        if a.leer():
-            self.treffer = []
-            self.info.configure(text=f"{len(self.alle)} Datensätze durchsuchbar.")
-            return
-        self.treffer = self.S.suchen(self.alle, a, self.knapp.get(), self.nur_frei.get())
-        Z = self.S.zahl_text
-        for n, t in enumerate(self.treffer):
-            ds = t.ds
-            self.tv.insert("", "end", iid=str(n), tags=(t.kategorie,), values=[
-                t.bewertung, ds.bestellnummer, ds.titel or "(ohne Namen)", ", ".join(self.S.geraetetypen(ds)),
-                Z(t.umax, "V"), Z(t.imax, "A"), Z(t.pmax, "W"), t.reserve_text(), t.hinweis, ds.status])
-        ohne = sum(1 for ds in self.alle if not (ds.werte.get("ausgangsspannung") and ds.werte.get("ausgangsleistung")))
-        self.info.configure(text=f"{len(self.treffer)} Treffer aus {len(self.alle)} Datensätzen"
-                                 + (f" · {ohne} ohne Spannung/Leistung (nicht bewertbar)" if ohne else "")
-                                 + " · Doppelklick öffnet · Mehrfachauswahl mit Strg für die Empfehlung")
-
-    def _auswahl(self):
-        return [self.treffer[int(i)] for i in self.tv.selection()]
-
-    def _details(self):
-        sel = self._auswahl()
-        if len(sel) == 1:
-            t = sel[0]
-            self.info.configure(text=f"{t.ds.titel}: {t.bewertung} · {t.reserve_text()}" + (f" · {t.hinweis}" if t.hinweis else ""))
-        elif sel:
-            self.info.configure(text=f"{len(sel)} Geräte ausgewählt – „Empfehlung kopieren“ übernimmt alle.")
-
-    def oeffnen(self):
-        sel = self._auswahl()
-        if sel:
-            ds = sel[0].ds
-            if self.app.maske_verlassen():
-                self.destroy()
-                self.app.maske_zeigen(self.app.ablage.laden(ds.id))
-
-    def pdf(self):
-        sel = self._auswahl()
-        if not sel:
-            return
-        ds = sel[0].ds
-        kandidaten = []
-        if ds.bestellnummer:
-            kandidaten += [self.app.einst.ausgabe() / regeln.dateiname(ds.bestellnummer, "de")]
-        kandidaten.append(self.app.ablage.ordner(ds.id) / "quelle.pdf")
-        for k in kandidaten:
-            if k.exists():
-                oeffnen(k)
-                return
-        messagebox.showinfo("Produktsuche", "Zu diesem Gerät gibt es noch kein PDF.", parent=self)
-
-    def kopieren(self, sprache):
-        sel = self._auswahl() or [t for t in self.treffer if t.kategorie == self.S.PASST][:3]
-        if not sel:
-            messagebox.showinfo("Produktsuche", "Bitte zuerst ein oder mehrere Geräte auswählen.", parent=self)
-            return
-        text = self.S.empfehlung(sel, self.anfrage(), sprache)
-        self.clipboard_clear()
-        self.clipboard_append(text)
-        self.info.configure(text=f"Empfehlung mit {len(sel)} Gerät(en) in die Zwischenablage kopiert ({sprache.upper()}).")
-
-
 # ======================================================================== Startseite
 
 class Start(ttk.Frame):
@@ -1882,7 +1721,6 @@ class Start(ttk.Frame):
         ttk.Button(leiste, text="Duplizieren", command=self.duplizieren).pack(side="left", padx=6)
         ttk.Button(leiste, text="Entwurf löschen", command=self.loeschen).pack(side="left", padx=6)
         ttk.Button(leiste, text="Papierkorb …", command=self.papierkorb).pack(side="left", padx=6)
-        ttk.Button(leiste, text="Produktsuche (V/A/W) …", command=lambda: produktsuche(app)).pack(side="left", padx=(18, 6))
         ttk.Button(leiste, text="Ausgabeordner öffnen", command=lambda: oeffnen(app.einst.ausgabe())).pack(side="right")
         extras = ttk.Menubutton(leiste, text="Extras ▾")
         menue = tk.Menu(extras, tearoff=0)
@@ -2190,11 +2028,9 @@ class App(tk.Tk):
         self.bind_all("<F1>", self.legende_umschalten)
         self.bind_all("<Control-e>", in_maske(lambda m: m.einheiten_vereinheitlichen()))
         self.bind_all("<F3>", in_maske(lambda m: m.naechstes_offenes()))
-        self.bind_all("<Control-k>", lambda e: (produktsuche(self), "break")[1])
-        self.bind_all("<Control-K>", lambda e: (produktsuche(self), "break")[1])
 
         # Tk-Textfelder haben eigene Emacs-Kürzel (Strg+O fügt z. B. eine Zeile ein) – hier abschalten
-        for seq in ("<Control-o>", "<Control-p>", "<Control-n>", "<Control-f>", "<Control-e>", "<Control-k>"):
+        for seq in ("<Control-o>", "<Control-p>", "<Control-n>", "<Control-f>", "<Control-e>"):
             self.bind_class("Text", seq, lambda e: None)
 
         def suchen(e=None):

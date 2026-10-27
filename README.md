@@ -32,12 +32,6 @@ von/bis in Grundeinheit, Shop-Sichtbarkeit, PDF-Namen) für CharismaCom; **Quali
 fehlenden Pflichtwerten, ungeprüften Kernfeldern, Herstellerspuren, Vorübersetzungen – als CSV speicherbar);
 **Selbst-Update**: neue Version wird in den Programmordner geladen, gestartet, ältere `Datenblatt-Converter-v*.exe` entfernt.
 
-**Produktsuche (seit v0.12.0, Strg+K):** Kundenanfrage wie „Stromquelle 0-30V 1kA 30kW“ eintippen → passende Geräte aus
-allen Datensätzen (auch Entwürfe), bewertet als *passt genau* (≤ Konfigurator-Obergrenze +20 %), *passt (größer)*,
-*n× parallel / in Reihe* (nur wenn laut Datenblatt möglich) oder *knapp darunter* (bis −10 %). U × I wird als
-Leistungsbedarf mitgeprüft, „VAC/VDC“, „Last“, „DC/DC“ … grenzen den Gerätetyp ein. „Empfehlung kopieren“ legt einen
-Antworttext (DE/EN) in die Zwischenablage. Je mehr EPS-Datenblätter importiert sind (Stapel-Import), desto besser.
-
 **Layouts (seit v0.10.0):** A – Klassisch (Banner, Kerndaten-Kasten, 2 Seiten), B – Kompakt (eine Seite,
 Kennzahl-Kacheln), C – Seitenleiste. Standard in den Einstellungen; in der Vorschau umschaltbar („Als Standard“).
 
@@ -83,3 +77,21 @@ automatisch ein Release `v<Version>` mit der EXE an (nur wenn es die Version noc
 - Etappe 1–3 und 5 fertig (Feldkatalog, Prüfmaske + PDF, PDF-Import ohne KI, EXE-Build).
 - Etappe 4 (KI-Auslesen und -Übersetzen) folgt nach Freigabe der API-Kosten.
 - Weclapp-Übertragung folgt, sobald ein Zugang besteht.
+
+## Zweites Programm: EPS-Produktsuche (`EPS-Produktsuche.exe`)
+
+Eigenständiges Werkzeug für Kundenanfragen (innerbetrieblich, unabhängig vom Converter). Kundenanfrage eintippen,
+z. B. `Stromquelle 0-30V 1kA 30kW`, `E-Last 500V 100A`, `230VAC 3kVA`, oder einen Namen/eine Bestellnummer.
+
+- **Datenquelle:** der EPS-Onlineshop (www.eps-germany.de/shop). Beim ersten Start und danach wöchentlich liest das
+  Programm alle Serienseiten (ca. 750 Geräte, 1–3 Minuten) und speichert sie in `EPS-Produktsuche-Daten\shopdaten.json`
+  neben der EXE; „Shop neu einlesen“ erzwingt das. Ohne Internet wird mit dem letzten Stand gesucht.
+- **Bewertung:** passt genau (≤ Wunsch +20 %, wie Konfigurator) · passt (größer) · n× parallel (nur Serien mit
+  Parallelschaltung/Master-Slave laut Shop, bis zur dort genannten Gerätezahl) · n× in Reihe · knapp darunter (−10 %).
+  U × I wird als Leistungsbedarf mitgeprüft. AC-Festspannungen müssen ±10 % passen (400 V passt nicht zu 230 V).
+  „Last“ zeigt E-Lasten und bidirektionale Geräte; „Stromquelle/Netzgerät“ blendet reine Lasten aus.
+- **E-Lasten:** Spannung/Strom stehen nicht in der Shopliste, sondern in der Produktbeschreibung („Lastgleichspannung …“)
+  bzw. in der Typbezeichnung (ELR 10080-510 → 80 V / 510 A).
+- Doppelklick öffnet das Datenblatt-PDF aus dem Shop; „Empfehlung kopieren (DE/EN)“ legt einen Antworttext mit
+  Bestellnummern und PDF-Links in die Zwischenablage.
+- Eigene Releases mit Tag `produktsuche-v<Version>` (stören das Selbst-Update des Converters nicht).
