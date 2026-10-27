@@ -47,6 +47,7 @@ class App(tk.Tk):
         self.geraete, self.stand = shop.laden(self.pfad)
         self.treffer: list[Q.Treffer] = []
         self.zeilen_geraete: list[shop.Geraet] = []
+        self.fremd_anfrage = ""
         self.laedt = False
         self._stil()
         self._aufbauen()
@@ -86,6 +87,11 @@ class App(tk.Tk):
         self.typ_cb = ttk.Combobox(oben, textvariable=self.typ, state="readonly", width=20,
                                    values=["automatisch", "alle", *Q.GERAETETYPEN])
         self.typ_cb.pack(side="left", padx=(4, 0))
+        ttk.Button(oben, text="Kunden-Datenblatt (PDF) …", command=self.datenblatt_waehlen).pack(side="left", padx=(12, 0))
+
+        self.fremd_lbl = tk.Label(self, text="", anchor="w", justify="left", bg="#EEF4FA", fg="#1C2633",
+                                  padx=12, pady=6, wraplength=1200)
+        self.fremd: "datenblatt.Fremdgeraet | None" = None
 
         opt = ttk.Frame(self, padding=(12, 4, 12, 0))
         opt.pack(fill="x")
@@ -138,6 +144,8 @@ class App(tk.Tk):
         self.bind_all("<Control-c>", lambda e: self.kopieren("de") if self.focus_get() is not self.feld else None)
         self.feld.bind("<Escape>", lambda e: self.eingabe.set(""))
         self.feld.bind("<Down>", lambda e: self._in_liste())
+        self.bind_all("<Control-o>", lambda e: (self.datenblatt_waehlen(), "break")[1])
+        self._dnd_einrichten()
         self.feld.focus_set()
 
     def _in_liste(self):
@@ -166,6 +174,9 @@ class App(tk.Tk):
         if not self.geraete:
             self.erkannt.configure(text="Noch keine Shopdaten – „Shop neu einlesen“ (dauert ca. 1–3 Minuten).")
             return
+        if self.fremd and text != self.fremd_anfrage:
+            self.fremd_lbl.configure(text=self.fremd_lbl.cget("text").split("  ·  Anfrage geändert")[0]
+                                     + "  ·  Anfrage geändert")
         if a.leer():
             self.erkannt.configure(text=BEISPIELE if not text else "Keine V/A/W erkannt – Suche nach Name/Bestellnummer:")
             if text:
@@ -185,7 +196,8 @@ class App(tk.Tk):
             self._zeile(t.bewertung, t.g, t.reserve_text(), t.hinweis, (t.kategorie,))
         n = {k: sum(1 for t in self.treffer if t.kategorie == k) for k in FARBEN}
         self.info.configure(text=f"{len(self.treffer)} Treffer: {n[Q.PASST]} passen genau, {n[Q.GROESSER]} größer, "
-                                 f"{n[Q.PARALLEL] + n[Q.REIHE]} mit mehreren Geräten, {n[Q.KNAPP_DARUNTER]} knapp darunter")
+                                 f"{n[Q.PARALLEL] + n[Q.REIHE]} mit mehreren Geräten, {n[Q.KNAPP_DARUNTER]} knapp darunter"
+                                 + (" – Gerätetyp auf „alle“ stellen?" if not self.treffer and a.geraetetyp else ""))
 
     def _zeile(self, bew, g: shop.Geraet, reserve, hinweis, tags):
         iid = str(len(self.zeilen_geraete))
@@ -232,8 +244,75 @@ class App(tk.Tk):
             self.info.configure(text="Bitte zuerst ein oder mehrere Geräte auswählen (Strg/Umschalt + Klick).")
             return
         self.clipboard_clear()
-        self.clipboard_append(Q.empfehlung(tr, self.anfrage(), sprache))
+        zu = (self.fremd.hersteller_typ or self.fremd.modell) if self.fremd and self.eingabe.get().strip() == self.fremd_anfrage else ""
+        self.clipboard_append(Q.empfehlung(tr, self.anfrage(), sprache, alternative_zu=zu))
         self.info.configure(text=f"Empfehlung mit {len(tr)} Gerät(en) in die Zwischenablage kopiert ({sprache.upper()}).")
+
+    # ------------------------------------------------------------------ Kunden-Datenblatt
+    def _dnd_einrichten(self):
+        """PDF ins Fenster ziehen (tkinterdnd2; fehlt die Bibliothek, gibt es nur den Button)."""
+        try:
+            from tkinterdnd2 import TkinterDnD, DND_FILES
+            TkinterDnD._require(self)
+            for w in (self, self.tv, self.feld):
+                w.drop_target_register(DND_FILES)
+                w.dnd_bind("<<Drop>>", self._drop)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _drop(self, e):
+        pfade = [Path(p) for p in self.tk.splitlist(e.data) if p.lower().endswith(".pdf")]
+        if pfade:
+            self.after(10, lambda: self.datenblatt_laden(pfade[0]))
+        return "copy"
+
+    def datenblatt_waehlen(self):
+        from tkinter import filedialog
+        pfad = filedialog.askopenfilename(parent=self, title="Datenblatt des Kunden öffnen",
+                                          filetypes=[("PDF", "*.pdf"), ("Alle Dateien", "*.*")])
+        if pfad:
+            self.datenblatt_laden(Path(pfad))
+
+    def datenblatt_laden(self, pfad: Path):
+        """Kunden-/Fremddatenblatt auslesen (Converter-Logik), Modell wählen lassen, Anfrage ins Suchfeld setzen."""
+        from . import datenblatt
+        self.configure(cursor="watch")
+        self.info.configure(text=f"Lese {pfad.name} …")
+        self.update_idletasks()
+        try:
+            modelle, hat_text = datenblatt.modelle(pfad)
+            modell = None
+            if modelle and hat_text:
+                from eps_converter.importieren import ModellDialog
+                self.configure(cursor="")
+                d = ModellDialog(self, modelle, pfad.name)
+                if d.ergebnis is None:
+                    self.info.configure(text="Abgebrochen – kein Modell gewählt.")
+                    return
+                modell = d.ergebnis or None
+                self.configure(cursor="watch")
+                self.update_idletasks()
+            fg = datenblatt.lesen(pfad, modell)
+        except Exception as e:  # noqa: BLE001
+            self.configure(cursor="")
+            messagebox.showerror("Kunden-Datenblatt", f"Das PDF konnte nicht gelesen werden:\n{e}", parent=self)
+            return
+        self.configure(cursor="")
+        self.fremd = fg
+        self.fremd_anfrage = fg.anfrage()
+        werte = " · ".join(f"{n}: {t}" for n, t in (("Spannung", fg.spannung), ("Strom", fg.strom), ("Leistung", fg.leistung)) if t)
+        kopf = f"Kunden-Datenblatt: {fg.datei}" + (f" – Modell {fg.modell}" if fg.modell else "")
+        if fg.geraetetyp:
+            kopf += f" – {', '.join(fg.geraetetyp)}"
+        zeilen = [kopf, werte or "Keine Werte gefunden."] + fg.hinweise
+        self.fremd_lbl.configure(text="\n".join(zeilen))
+        self.fremd_lbl.pack(fill="x", padx=12, pady=(6, 0), before=self.tv.master)
+        self.typ.set("automatisch")
+        self.eingabe.set(self.fremd_anfrage)
+        self.feld.focus_set()
+        self.feld.icursor("end")
+        if fg.leer():
+            self.info.configure(text="Keine Werte erkannt – bitte Spannung/Strom/Leistung von Hand ins Suchfeld eintragen.")
 
     # ------------------------------------------------------------------ Shopdaten
     def _status(self):

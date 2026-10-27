@@ -251,3 +251,76 @@ def test_kleiner_groesser_zeichen_bleiben_erhalten():
              '<span><strong>Strom:</strong>&nbsp;10Aeff/15App@<150V / 5Aeff/7.5App@>150V<br></span></div></div>')
     g = S.geraete_lesen(seite, S.serie_lesen(seite, "https://www.eps-germany.de/shop/AC-AC/x:::22_577.html"))
     assert g[0].strom == "10Aeff/15App@<150V / 5Aeff/7.5App@>150V"
+
+
+# ------------------------------------------------------------------ Kunden-/Fremddatenblatt (v1.1.0)
+import os
+from pathlib import Path
+
+BEISPIELE = Path(os.environ.get("EPS_BEISPIELE", "/nicht/vorhanden"))
+
+
+def test_angegebene_leistung_gilt_autoranging():
+    a = Q.anfrage_lesen("60V 1000A 30kW")
+    assert a.leistung_bedarf == 30000                      # nicht 60 kW
+    t = Q.suchen(katalog(), a)
+    assert t[0].g.bestellnummer == "200360" and t[0].kategorie == Q.PASST
+    assert Q.anfrage_lesen("Ladegeräte 230VAC 1kW").geraetetyp == "Ladegeräte"
+
+
+def test_hilfsfunktionen_datenblatt():
+    from eps_produktsuche import datenblatt as D
+    assert D._tausender("max. 10.000 A bzw. 2 x 5000 A") == "max. 10000 A bzw. 2 x 5000 A"
+    assert D._tausender("2.17 A") == "2.17 A"
+    assert D._strangspannung("3/N/PE AC 420/242 V") == 242
+    assert D._strangspannung("400/230 VAC 3ph+N") == 230
+    assert D._strangspannung("200/220/230/240 VAC") is None
+    fg = D.Fremdgeraet("x.pdf", umax=80, imax=360, pmax=15000, geraetetyp=["AC/DC", "Elektronische Last"])
+    assert fg.anfrage() == "Last 80V 360A 15kW"
+    fg = D.Fremdgeraet("x.pdf", umax=115, imax=8.7, pmax=3000, ac=True, geraetetyp=["AC/AC"])
+    assert fg.anfrage() == "AC/AC 115VAC 8,7A 3kW"
+
+
+def test_empfehlung_als_alternative():
+    t = Q.suchen(katalog(), Q.anfrage_lesen("Stromquelle 0-30V 1kA 30kW"))[:1]
+    txt = Q.empfehlung(t, Q.anfrage_lesen("Stromquelle 0-30V 1kA 30kW"), alternative_zu="Delta SM 30-1000")
+    assert txt.startswith("Als Alternative zu Delta SM 30-1000 (30 V, 1000 A, 30 kW) empfehlen wir:")
+
+
+@pytest.mark.skipif(not BEISPIELE.exists(), reason="Beispiel-PDFs fehlen")
+def test_fremddatenblatt_ftp3k(tmp_path, monkeypatch):
+    monkeypatch.setenv("EPS_CONVERTER_HOME", str(tmp_path))
+    from eps_produktsuche import datenblatt as D
+    p = next(BEISPIELE.glob("Absopulse/*FTP3K*.pdf"))
+    mods, hat_text = D.modelle(p)
+    assert hat_text and not mods
+    fg = D.lesen(p)
+    assert (fg.umax, fg.imax, fg.pmax, fg.ac, fg.geraetetyp) == (115, 8.7, 3000, True, ["AC/AC"])
+    assert fg.anfrage() == "AC/AC 115VAC 8,7A 3kW"
+
+
+@pytest.mark.skipif(not BEISPIELE.exists(), reason="Beispiel-PDFs fehlen")
+def test_fremddatenblatt_serie_mit_modell():
+    from eps_produktsuche import datenblatt as D
+    p = next(BEISPIELE.glob("EA-Tektronix/*.pdf"))
+    mods, _ = D.modelle(p)
+    m = next(x for x in mods if "9080-360" in x.label)
+    fg = D.lesen(p, m)
+    assert (fg.umax, fg.imax, fg.pmax) == (80, 360, 15000) and "Elektronische Last" in fg.geraetetyp
+
+
+@pytest.mark.skipif(not BEISPIELE.exists(), reason="Beispiel-PDFs fehlen")
+def test_fremddatenblatt_drehstrom_und_tausender():
+    from eps_produktsuche import datenblatt as D
+    fg = D.lesen(next(BEISPIELE.glob("Gustav Klein/Datenblatt TS-AC-5446-120.pdf")))
+    assert fg.umax == 242 and fg.imax == 165.1 and 119000 < fg.pmax < 121000
+    fg = D.lesen(next(BEISPIELE.glob("Plating Electronics/*pe5910*.pdf")),
+                 next(m for m in D.modelle(next(BEISPIELE.glob("Plating Electronics/*pe5910*.pdf")))[0] if m.label == "unipolar"))
+    assert fg.imax == 10000 and fg.pmax == 200000
+
+
+def test_unplausible_shopdaten_markiert():
+    g = quelle("EPS/FTP 3000-UM-19-CT-OF", "400232", "115 VAC", "8,7A", "3000 VA", typ="AC/AC")
+    t = Q.bewerten(g, Q.anfrage_lesen("115VAC 3kVA"))
+    assert "Shopdaten unplausibel" in t.hinweis
+    assert not Q.unplausibel(quelle("EPS/FTP 3000-UM-19", "400227", "200/115 VAC 3ph+N", "8,7A", "3000 VA", typ="AC/AC"))

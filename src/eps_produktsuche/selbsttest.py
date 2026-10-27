@@ -24,6 +24,18 @@ def selbsttest(ziel: Path) -> int:
         zeilen.append(f"Geräte: {len(g)} · Treffer: {[x.bewertung for x in t]}")
         ok &= len(g) == 1 and bool(t)
         shop.speichern(g, ziel / "shopdaten.json")
+        from . import datenblatt
+        kat = datenblatt.katalog()
+        zeilen.append(f"Feldkatalog: {len(kat.felder)} Felder · Datenblatt-Import bereit")
+        ok &= len(kat.felder) > 50
+        fg = datenblatt.Fremdgeraet("test.pdf", umax=60, imax=1000, pmax=30000, geraetetyp=["AC/DC"])
+        ok &= fg.anfrage() == "AC/DC 60V 1000A 30kW"
+        try:
+            import tkinterdnd2  # noqa: F401
+            zeilen.append("DnD OK")
+        except ImportError:
+            zeilen.append("DnD fehlt")
+            ok = False
         from .gui import App
         app = App(pfad=ziel / "shopdaten.json", automatisch_laden=False)
         app.eingabe.set("Stromquelle 0-30V 1kA 30kW")

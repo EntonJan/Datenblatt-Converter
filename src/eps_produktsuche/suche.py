@@ -66,8 +66,11 @@ class Anfrage:
 
     @property
     def leistung_bedarf(self) -> float | None:
-        k = [x for x in (self.leistung, self.spannung * self.strom if self.spannung and self.strom else None) if x]
-        return max(k) if k else None
+        """Angegebene Leistung; nur ohne Angabe U × I. Eine angegebene Leistung unter U × I bedeutet Autoranging
+        (z. B. 60 V / 1000 A / 30 kW) – dann braucht es nicht U_max und I_max gleichzeitig."""
+        if self.leistung:
+            return self.leistung
+        return self.spannung * self.strom if self.spannung and self.strom else None
 
     def leer(self) -> bool:
         return not (self.spannung or self.strom or self.leistung)
@@ -95,7 +98,7 @@ def anfrage_lesen(text: str) -> Anfrage:
             if typ.lower() in tl:
                 a.geraetetyp = typ
                 break
-        if re.search(r"lade(gerät|geraet)?\b|charger", tl):
+        if re.search(r"ladeger(ä|ae)t|\blader?\b|charger", tl):
             a.geraetetyp = "Ladegeräte"
         if re.search(r"wechselrichter|inverter", tl):
             a.geraetetyp = "DC/AC"
@@ -159,6 +162,16 @@ def typ_passt(g: Geraet, a: Anfrage) -> bool:
     return True
 
 
+def unplausibel(g: Geraet) -> bool:
+    """Leistung größer als Spannung × Strom × Kanäle (+10 %) – Datenfehler im Shop (vgl. Fehlerliste 27.10.2026)."""
+    if not (g.umax and g.imax and g.pmax):
+        return False
+    m = re.search(r"(\d)\s*x\b", g.strom) or re.search(r"(\d)x\d", g.name)
+    k = int(m.group(1)) if m else 3 if (re.search(r"triple|3-fach", g.name + " " + g.serie, re.I) or
+                                        (g.ac and re.search(r"3\s*ph|3x|L-L|\+N", g.spannung, re.I))) else 1
+    return g.pmax > g.umax * g.imax * k * 1.1
+
+
 def _ac_spannung_passt(g: Geraet, u: float) -> bool:
     if any(lo - 1e-9 <= u <= hi + 1e-9 for lo, hi in g.u_bereiche):
         return True
@@ -196,6 +209,8 @@ def bewerten(g: Geraet, a: Anfrage) -> Treffer | None:
             teile.append("stark überdimensioniert: " + ", ".join(gross))
         if g.aus_name:
             teile.append(f"{g.aus_name} aus Typbezeichnung")
+        if unplausibel(g):
+            teile.append("Shopdaten unplausibel (P > U × I) – vor Empfehlung prüfen")
         if "vorführ" in g.name.lower():
             teile.append("Vorführgerät")
         return Treffer(g, kat, n, res, "; ".join(teile))
@@ -241,7 +256,7 @@ def textsuche(geraete: list[Geraet], text: str) -> list[Geraet]:
 
 # ------------------------------------------------------------------------ Empfehlungstext
 
-def empfehlung(treffer: list[Treffer], a: Anfrage, sprache: str = "de") -> str:
+def empfehlung(treffer: list[Treffer], a: Anfrage, sprache: str = "de", alternative_zu: str = "") -> str:
     en = sprache == "en"
     zeilen = []
     for t in treffer:
@@ -265,6 +280,10 @@ def empfehlung(treffer: list[Treffer], a: Anfrage, sprache: str = "de") -> str:
             z += f"\n  {'Datasheet' if en else 'Datenblatt'}: {g.pdf_url}"
         zeilen.append(z)
     bedarf = ", ".join(zahl_text(x, e) for x, e in ((a.spannung, "V"), (a.strom, "A"), (a.leistung_bedarf, "W")) if x)
-    kopf = (f"For your requirement ({bedarf}) we recommend:" if en else f"Für Ihre Anforderung ({bedarf}) empfehlen wir:") \
-        if bedarf else ("We recommend:" if en else "Wir empfehlen:")
+    if alternative_zu:
+        kopf = (f"As an alternative to {alternative_zu} ({bedarf}) we recommend:" if en
+                else f"Als Alternative zu {alternative_zu} ({bedarf}) empfehlen wir:")
+    else:
+        kopf = (f"For your requirement ({bedarf}) we recommend:" if en else f"Für Ihre Anforderung ({bedarf}) empfehlen wir:") \
+            if bedarf else ("We recommend:" if en else "Wir empfehlen:")
     return kopf + "\n" + "\n".join(zeilen)

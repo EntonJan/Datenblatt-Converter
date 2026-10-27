@@ -6,9 +6,11 @@ ROOT = Path(SPECPATH).parent
 a = Analysis(
     [str(ROOT / "src" / "produktsuche_main.py")],
     pathex=[str(ROOT / "src")],
-    datas=[(str(ROOT / "assets" / "icon.ico"), "assets")],
-    hiddenimports=["eps_produktsuche.selbsttest"],
-    excludes=["pytest", "reportlab", "openpyxl", "pdfplumber", "pypdfium2", "PIL", "tkinterdnd2", "eps_converter"],
+    # Kunden-Datenblatt auslesen: Auslese-Logik + Feldkatalog des Datenblatt-Converters, pdfplumber, openpyxl
+    datas=[(str(ROOT / "assets" / "icon.ico"), "assets"), (str(ROOT / "katalog" / "feldkatalog.xlsx"), "katalog")],
+    hiddenimports=["eps_produktsuche.selbsttest", "eps_produktsuche.datenblatt", "eps_converter.auslesen",
+                   "eps_converter.importieren", "PIL._tkinter_finder", "tkinterdnd2"],
+    excludes=["pytest", "reportlab"],
 )
 pyz = PYZ(a.pure)
 exe = EXE(
