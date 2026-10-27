@@ -32,6 +32,12 @@ von/bis in Grundeinheit, Shop-Sichtbarkeit, PDF-Namen) für CharismaCom; **Quali
 fehlenden Pflichtwerten, ungeprüften Kernfeldern, Herstellerspuren, Vorübersetzungen – als CSV speicherbar);
 **Selbst-Update**: neue Version wird in den Programmordner geladen, gestartet, ältere `Datenblatt-Converter-v*.exe` entfernt.
 
+**Produktsuche (seit v0.12.0, Strg+K):** Kundenanfrage wie „Stromquelle 0-30V 1kA 30kW“ eintippen → passende Geräte aus
+allen Datensätzen (auch Entwürfe), bewertet als *passt genau* (≤ Konfigurator-Obergrenze +20 %), *passt (größer)*,
+*n× parallel / in Reihe* (nur wenn laut Datenblatt möglich) oder *knapp darunter* (bis −10 %). U × I wird als
+Leistungsbedarf mitgeprüft, „VAC/VDC“, „Last“, „DC/DC“ … grenzen den Gerätetyp ein. „Empfehlung kopieren“ legt einen
+Antworttext (DE/EN) in die Zwischenablage. Je mehr EPS-Datenblätter importiert sind (Stapel-Import), desto besser.
+
 **Layouts (seit v0.10.0):** A – Klassisch (Banner, Kerndaten-Kasten, 2 Seiten), B – Kompakt (eine Seite,
 Kennzahl-Kacheln), C – Seitenleiste. Standard in den Einstellungen; in der Vorschau umschaltbar („Als Standard“).
 
