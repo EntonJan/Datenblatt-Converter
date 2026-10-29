@@ -63,6 +63,12 @@ class Anfrage:
     last: bool = False
     ausgang: str = ""            # "AC"/"DC"
     erkannt: list[str] = field(default_factory=list)
+    # Zusatzkriterien (v1.2)
+    bauform: str = ""            # "19 Zoll", "Desktop", "Schrank/Cabinet", "Einbau/Built-in", "Tower", "DIN Rail"
+    bidirektional: bool = False
+    rueckspeisung: bool = False
+    wasser: bool = False
+    frequenzen: list[float] = field(default_factory=list)
 
     @property
     def leistung_bedarf(self) -> float | None:
@@ -106,6 +112,7 @@ def anfrage_lesen(text: str) -> Anfrage:
             a.geraetetyp = "AC/AC"
     if re.search(r"quelle|netzger|netzteil|stromversorgung|source|power supply", tl):
         a.quelle = True
+    merkmale_lesen(a, tl)
     if a.spannung is not None:
         a.erkannt.append(f"U = {zahl_text(a.spannung, 'V')}")
     if a.strom is not None:
@@ -120,7 +127,30 @@ def anfrage_lesen(text: str) -> Anfrage:
         a.erkannt.append(a.geraetetyp + (" (inkl. bidirektionaler Geräte)" if a.last else ""))
     elif a.quelle:
         a.erkannt.append("Quelle (ohne reine Lasten)")
+    a.erkannt += [x for x, ja in ((a.bauform, a.bauform), ("bidirektional", a.bidirektional),
+                                  ("Netzrückspeisung", a.rueckspeisung), ("wassergekühlt", a.wasser)) if ja]
+    if a.frequenzen:
+        a.erkannt.append(" / ".join(zahl_text(f, "Hz") for f in a.frequenzen))
     return a
+
+
+BAUFORMEN = [(r"19\s*(?:\"|”|“|''|zoll|inch|-zoll)|\brack\b|einschub|\b\d\s*he\b|\b\du\b", "19 Zoll"),
+             (r"tischger|desktop|tischgeh", "Desktop"), (r"schrank|cabinet", "Schrank/Cabinet"),
+             (r"einbau|built-?in|chassis", "Einbau/Built-in"), (r"hutschiene|din.?rail", "DIN Rail"), (r"\btower\b", "Tower")]
+
+
+def merkmale_lesen(a: Anfrage, tl: str) -> None:
+    """Zusatzkriterien aus dem Anfragetext: Bauform, bidirektional, Rückspeisung, Wasserkühlung, Frequenz."""
+    for muster, bauform in BAUFORMEN:
+        if re.search(muster, tl):
+            a.bauform = bauform
+            break
+    a.bidirektional = bool(re.search(r"bi-?direktional|bidirectional", tl))
+    a.rueckspeisung = bool(re.search(r"rückspeis|ruckspeis|regenerativ|regenerative|energy recovery", tl))
+    a.wasser = bool(re.search(r"wassergek(ü|ue)hlt|wasserk(ü|ue)hlung|water.?cool|\bwc\b", tl))
+    a.frequenzen = sorted({float(x.replace(",", ".")) for x in re.findall(r"(\d+(?:[.,]\d+)?)\s*hz\b", tl)})
+    if a.frequenzen and not a.ausgang and not a.geraetetyp:
+        a.ausgang = "AC"                           # eine Ausgangsfrequenz gibt es nur bei AC-Ausgängen
 
 
 # ------------------------------------------------------------------------ Bewertung
@@ -178,9 +208,51 @@ def _ac_spannung_passt(g: Geraet, u: float) -> bool:
     return any(abs(f - u) <= AC_TOLERANZ * u for f in g.u_fest)
 
 
+def merkmale_pruefen(g: Geraet, a: Anfrage) -> tuple[bool, list[str]]:
+    """(passt, Hinweise). Bekannte Abweichung → passt nicht; fehlende Shopangabe → passt mit Hinweis."""
+    hinweise = []
+    if a.bauform:
+        if not g.bauart:
+            hinweise.append("Bauform nicht im Shop angegeben")
+        elif g.bauart != a.bauform:
+            return False, []
+    if a.bidirektional and not g.bidirektional:
+        return False, []
+    if a.rueckspeisung and not (getattr(g, "rueckspeisung", False) or re.search(r"rückspeis|regenerativ", g.name + g.serie, re.I)):
+        return False, []
+    if a.wasser:
+        w = getattr(g, "wasser", "")
+        if w == "option":
+            hinweise.append("Wasserkühlung als Option")
+        elif w != "ja":
+            return False, []
+    if a.frequenzen:
+        fest, bereiche, option = getattr(g, "f_fest", []), getattr(g, "f_bereiche", []), getattr(g, "f_option", [])
+        for f in a.frequenzen:
+            if f in fest or any(lo <= f <= hi for lo, hi in bereiche):
+                continue
+            if f in option:
+                hinweise.append(f"{zahl_text(f, 'Hz')} als Option")
+            elif not (fest or bereiche or option):
+                hinweise.append("Frequenz nicht im Shop angegeben – prüfen")
+            else:
+                return False, []
+    return True, hinweise
+
+
 def bewerten(g: Geraet, a: Anfrage) -> Treffer | None:
     if a.leer() or not typ_passt(g, a):
         return None
+    ok, merkmal_hinweise = merkmale_pruefen(g, a)
+    if not ok:
+        return None
+    t = _bewerten_werte(g, a)
+    if t and merkmal_hinweise:
+        t.hinweis = "; ".join([*merkmal_hinweise, t.hinweis] if t.hinweis else merkmal_hinweise)
+    return t
+
+
+def _bewerten_werte(g: Geraet, a: Anfrage) -> Treffer | None:
     u, i, p = a.spannung, a.strom, a.leistung_bedarf
     if (u and g.umax is None) or (i and g.imax is None) or (p and g.pmax is None):
         return None
@@ -244,6 +316,14 @@ def suchen(geraete: list[Geraet], a: Anfrage, knapp_zeigen: bool = True, max_par
             continue
         out.append(t)
     return sorted(out, key=lambda t: t.rang)
+
+
+def nach_serie(treffer: list[Treffer]) -> list[tuple[str, list[Treffer]]]:
+    """Treffer je Serie zusammenfassen; Reihenfolge = bester Treffer der Serie (Liste ist schon sortiert)."""
+    gruppen: dict[str, list[Treffer]] = {}
+    for t in treffer:
+        gruppen.setdefault(t.g.serie or t.g.name, []).append(t)
+    return list(gruppen.items())
 
 
 def textsuche(geraete: list[Geraet], text: str) -> list[Geraet]:

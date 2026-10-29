@@ -37,6 +37,7 @@ class Fremdgeraet:
     geraetetyp: list[str] = field(default_factory=list)
     hersteller_typ: str = ""
     hinweise: list[str] = field(default_factory=list)
+    merkmale: list[str] = field(default_factory=list)   # z. B. ["19Zoll", "bidirektional", "400Hz"] – Teil der Anfrage
 
     def anfrage(self) -> str:
         """Anfragetext für die Suche, z. B. „AC/DC 60V 1000A 30kW“."""
@@ -54,7 +55,7 @@ class Fremdgeraet:
             teile.append(_z(self.imax) + "A")
         if self.pmax:
             teile.append(_z(self.pmax / 1000) + "kW" if self.pmax >= 1000 else _z(self.pmax) + "W")
-        return " ".join(teile)
+        return " ".join(teile + self.merkmale)
 
     def leer(self) -> bool:
         return not (self.umax or self.imax or self.pmax)
@@ -154,6 +155,9 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
             l_l = re.search(r"L-L", fg.spannung) and not _strangspannung(fg.spannung)
             fg.pmax = round((3 ** 0.5 if l_l else 3) * fg.umax * fg.imax, -1)
             fg.hinweise.append(f"Leistung berechnet ({'√3 × U(L-L)' if l_l else '3 × U(L-N)'} × I = {_z(fg.pmax)} VA).")
+    fg.merkmale = merkmale(volltext, fg.ac)
+    if fg.merkmale:
+        fg.hinweise.append("Merkmale aus dem Datenblatt: " + ", ".join(fg.merkmale) + " (im Suchfeld änderbar).")
     ht = w.get("hersteller_typ") or w.get("typbezeichnung")
     fg.hersteller_typ = (ht.de or ht.en) if ht else fg.modell
     if variante or not fg.hersteller_typ:
@@ -220,3 +224,33 @@ def _produktname(text: str) -> str:
         if 3 <= len(z) <= 60 and re.search(r"[A-Za-z]{2,}", z) and not re.search(r"seite|page|datenblatt|datasheet|www\.|@", z, re.I):
             return z
     return ""
+
+
+_OPTION_SATZ = re.compile(r"option|optional|auf anfrage|on request|wahlweise|zubehör|accessor", re.I)
+
+
+def merkmale(text: str, ausgang_ac: bool) -> list[str]:
+    """Zusatzkriterien aus dem Datenblatt – nur feste Eigenschaften, nichts aus Options-/Zubehörsätzen."""
+    saetze = [z for z in re.split(r"(?<=[.!;])\s+|\n", text or "") if z.strip()]
+    fest = " ".join(z for z in saetze if not _OPTION_SATZ.search(z))
+    out = []
+    if re.search(r"19\s*(?:\"|”|“|''|zoll|inch|-zoll)|\b[1-9]\s*HE\b|\b[1-9]U\b(?!\s*[-/])", fest):
+        out.append("19Zoll")
+    if re.search(r"bi-?direktional|bidirectional", fest, re.I):
+        out.append("bidirektional")
+    if re.search(r"rückspeis|regenerativ|energy recovery", fest, re.I):
+        out.append("Rückspeisung")
+    if re.search(r"wassergekühlt|wasserkühlung|water.?cooled", fest, re.I):
+        out.append("wassergekühlt")
+    if ausgang_ac:
+        hz = []
+        for z in saetze:
+            if re.search(r"ausgangsfrequenz|output frequency|frequenz\s*(ausgang|output)|frequency\s*out", z, re.I) \
+                    and not _OPTION_SATZ.search(z):
+                hz += re.findall(r"(\d{2,4})\s*Hz", z, re.I)
+        if not hz:
+            hz = re.findall(r"\b(400)\s*Hz", fest, re.I)        # Avionik: 400 Hz steht oft nur im Fließtext
+        werte = sorted({int(x) for x in hz if 16 <= int(x) <= 2000})
+        if 0 < len(werte) <= 3:
+            out += [f"{w}Hz" for w in werte]
+    return out

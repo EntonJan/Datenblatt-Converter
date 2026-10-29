@@ -88,7 +88,7 @@ z. B. `Stromquelle 0-30V 1kA 30kW`, `E-Last 500V 100A`, `230VAC 3kVA`, oder eine
   neben der EXE; „Shop neu einlesen“ erzwingt das. Ohne Internet wird mit dem letzten Stand gesucht.
 - **Bewertung:** passt genau (≤ Wunsch +20 %, wie Konfigurator) · passt (größer) · n× parallel (nur Serien mit
   Parallelschaltung/Master-Slave laut Shop, bis zur dort genannten Gerätezahl) · n× in Reihe · knapp darunter (−10 %).
-  U × I wird als Leistungsbedarf mitgeprüft. AC-Festspannungen müssen ±10 % passen (400 V passt nicht zu 230 V).
+  Leistungsbedarf = angegebene Leistung, nur ohne Angabe U × I (Autoranging). AC-Festspannungen müssen ±10 % passen (400 V passt nicht zu 230 V).
   „Last“ zeigt E-Lasten und bidirektionale Geräte; „Stromquelle/Netzgerät“ blendet reine Lasten aus.
 - **E-Lasten:** Spannung/Strom stehen nicht in der Shopliste, sondern in der Produktbeschreibung („Lastgleichspannung …“)
   bzw. in der Typbezeichnung (ELR 10080-510 → 80 V / 510 A).
@@ -98,4 +98,19 @@ z. B. `Stromquelle 0-30V 1kA 30kW`, `E-Last 500V 100A`, `230VAC 3kVA`, oder eine
   werden mit der Converter-Auslese gelesen; Datenblätter ohne feste Bezeichnungen (z. B. „U-Aus (V) 0-30 0-40 …“)
   erkennt eine allgemeine Einheiten-/Muster-Erkennung, Variantentabellen werden zur Auswahl angeboten. Die Anfrage
   steht danach im Suchfeld und kann korrigiert werden; „Empfehlung kopieren“ schreibt „Als Alternative zu …“.
+- **Neu in 1.2:**
+  - *Zusatzkriterien* in der Anfrage und aus Kunden-Datenblättern: Bauform (19 Zoll/Rack/HE/U, Desktop, Schrank,
+    Einbau, DIN Rail, Tower), bidirektional, Netzrückspeisung, wassergekühlt, Ausgangsfrequenz (z. B. 400 Hz).
+    Bekannte Abweichung schließt aus; fehlt die Angabe im Shop, bleibt das Gerät mit Hinweis „prüfen“.
+  - *Nach Serie gruppieren* (Standard): eine Zeile je Serie mit dem besten Gerät, aufklappbar.
+  - *Gegenüberstellung PDF (DE/EN)*: Kundengerät bzw. Anforderung neben bis zu 4 EPS-Vorschlägen (ausgewählte
+    Geräte, sonst die besten Treffer) → `EPS-Produktsuche-Daten\Gegenueberstellungen\`.
+  - *Verlauf*: Enter, Empfehlung, Gegenüberstellung und Kunden-Datenblatt werden gemerkt (`verlauf.json`, max. 500);
+    „Verlauf …“ mit Suche, Notiz (z. B. Kunde/Angebot) und „Übernehmen“.
+  - *Shop-Einlesen abgesichert*: weniger als 80 % der bisherigen Geräte (oder kaum Werte) → alte Daten bleiben,
+    Warnung mit Wahl „trotzdem übernehmen“; das verworfene Ergebnis liegt als `shopdaten_abgelehnt.json` daneben.
+  - *Selbst-Update* („Updates“, beim Start automatisch): lädt `EPS-Produktsuche-v<Version>.exe` in den Programmordner,
+    startet sie, ältere EXE-Versionen werden danach entfernt. Keine Admin-Rechte nötig.
+  - Kunden-PDFs werden im Hintergrund gelesen – das Fenster bleibt bedienbar.
+- **Gemeinsame Testfälle** mit dem Produktkonfigurator: `tests/gemeinsame-suchfaelle.json` (in beiden Repos identisch).
 - Eigene Releases mit Tag `produktsuche-v<Version>` (stören das Selbst-Update des Converters nicht).

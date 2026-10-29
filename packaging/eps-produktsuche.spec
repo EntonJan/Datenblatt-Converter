@@ -7,10 +7,14 @@ a = Analysis(
     [str(ROOT / "src" / "produktsuche_main.py")],
     pathex=[str(ROOT / "src")],
     # Kunden-Datenblatt auslesen: Auslese-Logik + Feldkatalog des Datenblatt-Converters, pdfplumber, openpyxl
-    datas=[(str(ROOT / "assets" / "icon.ico"), "assets"), (str(ROOT / "katalog" / "feldkatalog.xlsx"), "katalog")],
-    hiddenimports=["eps_produktsuche.selbsttest", "eps_produktsuche.datenblatt", "eps_converter.auslesen",
+    datas=[(str(ROOT / "assets" / "icon.ico"), "assets"), (str(ROOT / "assets" / "logo.jpg"), "assets"),
+           (str(ROOT / "assets" / "fonts" / "Carlito-Regular.ttf"), "assets/fonts"),
+           (str(ROOT / "assets" / "fonts" / "Carlito-Bold.ttf"), "assets/fonts"),
+           (str(ROOT / "katalog" / "feldkatalog.xlsx"), "katalog")],
+    hiddenimports=["eps_produktsuche.selbsttest", "eps_produktsuche.datenblatt", "eps_produktsuche.vergleich",
+                   "eps_produktsuche.verlauf", "eps_produktsuche.aktualisierung", "eps_converter.auslesen",
                    "eps_converter.importieren", "PIL._tkinter_finder", "tkinterdnd2"],
-    excludes=["pytest", "reportlab"],
+    excludes=["pytest"],
 )
 pyz = PYZ(a.pure)
 exe = EXE(

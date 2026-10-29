@@ -1,4 +1,6 @@
 """EPS-Produktsuche (eigenes Programm): Shop-Texte lesen, Seiten auswerten, Anfragen bewerten."""
+import json
+from pathlib import Path
 import pytest
 
 from eps_produktsuche import shop as S, suche as Q
@@ -368,3 +370,87 @@ def test_typ_aus_text():
     assert D._typ_aus_text(ARGOS_AEHNLICH, False) == ["AC/DC"]
     assert D._typ_aus_text("Sinus-Wechselrichter 24 VDC", True) == ["DC/AC"]
     assert D._typ_aus_text("Netzanschluss 3x400V, Ausgang 115 VAC 400 Hz", True) == ["AC/AC"]
+
+
+# ---------------------------------------------------------------- gemeinsame Suchfälle (auch im Produktkonfigurator)
+_FAELLE = json.loads((Path(__file__).with_name("gemeinsame-suchfaelle.json")).read_text(encoding="utf-8"))
+_KAT = {Q.PASST: "exact", Q.GROESSER: "larger", Q.PARALLEL: "parallel", Q.REIHE: "series", Q.KNAPP_DARUNTER: "slightly_below"}
+
+
+def _gemeinsame_geraete():
+    return [Geraet(**g) for g in _FAELLE["geraete"]]
+
+
+@pytest.mark.parametrize("fall", _FAELLE["faelle"], ids=[f["anfrage"] for f in _FAELLE["faelle"]])
+def test_gemeinsame_suchfaelle(fall):
+    treffer = Q.suchen(_gemeinsame_geraete(), Q.anfrage_lesen(fall["anfrage"]))
+    nach_nr = {t.g.bestellnummer: t for t in treffer}
+    for nr, erwartet in fall["ergebnis"].items():
+        t = nach_nr.get(nr)
+        ist = None if t is None else _KAT[t.kategorie] + (f":{t.anzahl}" if t.kategorie in (Q.PARALLEL, Q.REIHE) else "")
+        assert ist == erwartet, f"{fall['anfrage']}: {nr} ist {ist}, erwartet {erwartet}"
+    if "erster" in fall:
+        assert treffer[0].g.bestellnummer == fall["erster"]
+    for nr, art in fall.get("merkmal", {}).items():
+        h = nach_nr[nr].hinweis
+        assert ("Option" in h) if art == "option" else ("nicht im Shop angegeben" in h), f"{nr}: {h}"
+
+
+# ---------------------------------------------------------------- v1.2: Absicherung, Update, Verlauf, Gegenüberstellung
+def test_shop_pruefen():
+    alt = _gemeinsame_geraete() * 50                 # 650 Geräte
+    assert S.pruefen(alt, alt) == ""
+    assert "Nur" in S.pruefen(alt[:3], alt)
+    assert "80" in S.pruefen(alt[:400], alt) or "%" in S.pruefen(alt[:400], alt)
+    leer = [Geraet(f"X{i}", "X") for i in range(700)]
+    assert S.pruefen(leer, alt)                      # kaum Werte → unplausibel
+
+
+def test_aktualisierung(tmp_path, monkeypatch):
+    from eps_produktsuche import aktualisierung as A
+    rel = [{"tag_name": "v9.9.9", "assets": [{"name": A.ASSET, "browser_download_url": "c"}]},
+           {"tag_name": "produktsuche-v1.0.0", "assets": [{"name": A.ASSET, "browser_download_url": "a"}]},
+           {"tag_name": "produktsuche-v99.1.0", "assets": [{"name": A.ASSET, "browser_download_url": "b"}]},
+           {"tag_name": "produktsuche-v99.2.0", "draft": True, "assets": [{"name": A.ASSET, "browser_download_url": "d"}]}]
+    assert A.neueste(releases=rel) == ("99.1.0", "b")
+    assert A.neueste(releases=rel[:2]) is None
+    for n in ["EPS-Produktsuche.exe", "EPS-Produktsuche-v1.1.0.exe", "EPS-Produktsuche-v99.0.0.exe", "anderes.exe"]:
+        (tmp_path / n).write_bytes(b"x")
+    eigene = tmp_path / "EPS-Produktsuche-v1.2.0.exe"
+    eigene.write_bytes(b"x")
+    monkeypatch.setattr(A, "__version__", "1.2.0")
+    assert sorted(A.alte_entfernen(tmp_path, eigene, versuche=1)) == ["EPS-Produktsuche-v1.1.0.exe", "EPS-Produktsuche.exe"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["EPS-Produktsuche-v1.2.0.exe", "EPS-Produktsuche-v99.0.0.exe", "anderes.exe"]
+
+
+def test_verlauf(tmp_path):
+    from datetime import datetime, timedelta
+    from eps_produktsuche import verlauf as V
+    p = tmp_path / "verlauf.json"
+    t = datetime(2026, 10, 29, 10, 0)
+    V.hinzufuegen(p, "60V 100A", "Suche", jetzt=t)
+    V.hinzufuegen(p, "60V 100A", "Empfehlung DE", [{"bestellnummer": "T-001", "name": "TEST"}], jetzt=t + timedelta(minutes=5))
+    V.hinzufuegen(p, "60V 100A", "Suche", jetzt=t + timedelta(hours=2))
+    e = V.laden(p)
+    assert len(e) == 2 and e[1]["aktionen"] == ["Suche", "Empfehlung DE"] and e[1]["geraete"][0]["bestellnummer"] == "T-001"
+    V.notiz_setzen(p, 1, "Kunde Muster, Angebot 4711")
+    assert V.passt(V.laden(p)[1], "muster t-001") and not V.passt(V.laden(p)[0], "muster")
+    V.loeschen(p, 0)
+    assert len(V.laden(p)) == 1
+
+
+def test_gegenueberstellung(tmp_path):
+    pytest.importorskip("reportlab")
+    from eps_produktsuche import vergleich, datenblatt
+    a = Q.anfrage_lesen("60V 100A 3kW 19 Zoll")
+    tr = Q.suchen(_gemeinsame_geraete(), a)[:4]
+    fg = datenblatt.Fremdgeraet("kunde.pdf", hersteller_typ="FREMD 1000", umax=60, imax=100, pmax=3000, merkmale=["19Zoll"])
+    for sp in ("de", "en"):
+        ziel = vergleich.erzeugen(tmp_path / vergleich.dateiname(fg, a, sp), tr, a, fg, sp)
+        assert ziel.stat().st_size > 5000 and ziel.name.startswith("Gegenueberstellung_FREMD")
+
+
+def test_nach_serie():
+    tr = Q.suchen(_gemeinsame_geraete(), Q.anfrage_lesen("wassergekühlt 30V 1000A 30kW"))
+    gruppen = Q.nach_serie(tr)
+    assert [s for s, _ in gruppen] == ["TEST-Serie F"] and len(gruppen[0][1]) == 2

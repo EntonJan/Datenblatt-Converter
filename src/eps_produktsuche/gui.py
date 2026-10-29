@@ -1,21 +1,31 @@
 """Oberfläche der EPS-Produktsuche (Tkinter, keine Installation nötig)."""
 from __future__ import annotations
 
+import json
 import os
 import queue
 import sys
 import threading
 import tkinter as tk
 import webbrowser
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 
-from . import __version__, shop, suche as Q
+from . import __version__, shop, suche as Q, verlauf, aktualisierung
 
 NAVY, CYAN, GRAU = "#35528C", "#52B4D7", "#6A7380"
 FARBEN = {Q.PASST: "#2E7D32", Q.GROESSER: "#1B4F72", Q.PARALLEL: "#8E5A00", Q.REIHE: "#8E5A00", Q.KNAPP_DARUNTER: "#8A8F98"}
-BEISPIELE = "z. B. „Stromquelle 0-30V 1kA 30kW“ · „E-Last 500V 100A“ · „230VAC 3kVA“ · „Wechselrichter 400V 6kVA“ · „ELR 10080“"
+BEISPIELE = ("z. B. „Stromquelle 0-30V 1kA 30kW“ · „E-Last 500V 100A“ · „230VAC 3kVA 400Hz“ · „19 Zoll bidirektional 80V 300A“"
+             " · „ELR 10080“")
+
+
+def _zentrieren(fenster: tk.Toplevel, master: tk.Misc) -> None:
+    fenster.update_idletasks()
+    x = master.winfo_rootx() + (master.winfo_width() - fenster.winfo_reqwidth()) // 2
+    y = master.winfo_rooty() + (master.winfo_height() - fenster.winfo_reqheight()) // 3
+    fenster.geometry(f"+{max(x, 0)}+{max(y, 0)}")
 
 
 class VariantenDialog(tk.Toplevel):
@@ -48,10 +58,7 @@ class VariantenDialog(tk.Toplevel):
         ttk.Button(bf, text="Ohne Variante (Höchstwerte)", command=self.ohne).pack(side="left")
         ttk.Button(bf, text="Übernehmen", command=self.ok).pack(side="right")
         self.bind("<Escape>", lambda e: self.destroy())
-        self.update_idletasks()
-        x = master.winfo_rootx() + (master.winfo_width() - self.winfo_reqwidth()) // 2
-        y = master.winfo_rooty() + (master.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        _zentrieren(self, master)
         self.wait_window()
 
     def ok(self):
@@ -63,6 +70,93 @@ class VariantenDialog(tk.Toplevel):
     def ohne(self):
         self.ergebnis = False
         self.destroy()
+
+
+class VerlaufDialog(tk.Toplevel):
+    """Letzte Anfragen: Doppelklick/„Übernehmen“ holt Anfrage und Kunden-Datenblatt zurück."""
+
+    def __init__(self, app: "App"):
+        super().__init__(app)
+        self.app = app
+        self.title("Verlauf der Anfragen")
+        self.geometry("1100x520")
+        self.transient(app)
+        oben = ttk.Frame(self, padding=(10, 10, 10, 4))
+        oben.pack(fill="x")
+        ttk.Label(oben, text="Suchen:").pack(side="left")
+        self.filter = tk.StringVar()
+        e = ttk.Entry(oben, textvariable=self.filter, width=40)
+        e.pack(side="left", padx=6)
+        self.anzahl = ttk.Label(oben, text="", foreground=GRAU)
+        self.anzahl.pack(side="right")
+        sp = [("zeit", "Zeit", 115), ("anfrage", "Anfrage", 300), ("datei", "Kunden-Datenblatt", 220),
+              ("geraete", "Empfohlene Geräte", 280), ("aktion", "Aktion", 130), ("notiz", "Notiz", 200)]
+        fr = ttk.Frame(self, padding=(10, 0))
+        fr.pack(fill="both", expand=True)
+        self.tv = ttk.Treeview(fr, columns=[x[0] for x in sp], show="headings", selectmode="browse")
+        for k, t, b in sp:
+            self.tv.heading(k, text=t)
+            self.tv.column(k, width=b, stretch=k in ("anfrage", "geraete", "notiz"))
+        sb = ttk.Scrollbar(fr, orient="vertical", command=self.tv.yview)
+        self.tv.configure(yscrollcommand=sb.set)
+        self.tv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+        unten = ttk.Frame(self, padding=10)
+        unten.pack(fill="x")
+        ttk.Button(unten, text="Übernehmen", command=self.uebernehmen).pack(side="left")
+        ttk.Button(unten, text="Notiz …", command=self.notiz).pack(side="left", padx=6)
+        ttk.Button(unten, text="Eintrag löschen", command=self.loeschen).pack(side="left", padx=6)
+        ttk.Button(unten, text="Schließen", command=self.destroy).pack(side="right")
+        self.tv.bind("<Double-1>", lambda ev: self.uebernehmen())
+        self.tv.bind("<Return>", lambda ev: self.uebernehmen())
+        self.filter.trace_add("write", lambda *a: self.fuellen())
+        self.bind("<Escape>", lambda ev: self.destroy())
+        e.focus_set()
+        self.fuellen()
+
+    def fuellen(self):
+        self.eintraege = verlauf.laden(self.app.verlauf_pfad)
+        self.tv.delete(*self.tv.get_children())
+        n = 0
+        for i, e in enumerate(self.eintraege):
+            if not verlauf.passt(e, self.filter.get()):
+                continue
+            f = e.get("fremd") or {}
+            try:
+                zeit = datetime.fromisoformat(e["zeit"]).strftime("%d.%m.%Y %H:%M")
+            except (KeyError, ValueError):
+                zeit = e.get("zeit", "")
+            geraete = ", ".join(f"{g['bestellnummer']} {g['name']}" for g in e.get("geraete", []))
+            self.tv.insert("", "end", iid=str(i), values=[zeit, e.get("anfrage", ""), f.get("datei", ""), geraete,
+                                                          ", ".join(e.get("aktionen", [])), e.get("notiz", "")])
+            n += 1
+        self.anzahl.configure(text=f"{n} von {len(self.eintraege)} Einträgen")
+
+    def _gewaehlt(self) -> int | None:
+        sel = self.tv.selection()
+        return int(sel[0]) if sel else None
+
+    def uebernehmen(self):
+        i = self._gewaehlt()
+        if i is not None:
+            self.app.verlauf_uebernehmen(self.eintraege[i])
+            self.destroy()
+
+    def notiz(self):
+        i = self._gewaehlt()
+        if i is None:
+            return
+        neu = simpledialog.askstring("Notiz", "Notiz zu dieser Anfrage (z. B. Kunde, Angebotsnummer):",
+                                     initialvalue=self.eintraege[i].get("notiz", ""), parent=self)
+        if neu is not None:
+            verlauf.notiz_setzen(self.app.verlauf_pfad, i, neu)
+            self.fuellen()
+
+    def loeschen(self):
+        i = self._gewaehlt()
+        if i is not None and messagebox.askyesno("Verlauf", "Diesen Eintrag löschen?", parent=self):
+            verlauf.loeschen(self.app.verlauf_pfad, i)
+            self.fuellen()
 
 
 def programmordner() -> Path:
@@ -80,28 +174,46 @@ def ressource(name: str) -> Path:
     return basis / "assets" / name
 
 
+def datei_oeffnen(pfad: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(str(pfad))  # noqa: S606 – eigene Datei im Programmordner
+    else:
+        webbrowser.open(Path(pfad).resolve().as_uri())
+
+
 class App(tk.Tk):
-    def __init__(self, pfad: Path | None = None, automatisch_laden: bool = True):
+    def __init__(self, pfad: Path | None = None, automatisch_laden: bool = True, update_pruefen: bool | None = None):
         super().__init__()
         self.title(f"EPS-Produktsuche {__version__}")
-        self.geometry("1280x720")
-        self.minsize(980, 520)
+        self.geometry("1320x740")
+        self.minsize(1000, 540)
         try:
             self.iconbitmap(str(ressource("icon.ico")))
         except tk.TclError:
             pass
         self.pfad = pfad or datenpfad()
+        self.verlauf_pfad = self.pfad.parent / "verlauf.json"
         self.geraete, self.stand = shop.laden(self.pfad)
         self.treffer: list[Q.Treffer] = []
         self.zeilen_geraete: list[shop.Geraet] = []
+        self.iid_index: dict[str, int] = {}
+        self.fremd = None
         self.fremd_anfrage = ""
         self.laedt = False
+        self.beschaeftigt = False
         self._stil()
         self._aufbauen()
         self._status()
         self.suchen()
-        if automatisch_laden and (not self.geraete or shop.veraltet(self.stand)):
+        veraltetes_format = bool(self.geraete) and shop.datenformat(self.pfad) < shop.DATENFORMAT
+        if automatisch_laden and (not self.geraete or shop.veraltet(self.stand) or veraltetes_format):
             self.after(300, lambda: self.einlesen(still=bool(self.geraete)))
+        if update_pruefen is None:
+            update_pruefen = aktualisierung.ist_exe()
+        if aktualisierung.ist_exe():
+            threading.Thread(target=aktualisierung.alte_entfernen, daemon=True).start()
+        if update_pruefen:
+            self.after(2500, lambda: self.updates_suchen(still=True))
 
     # ------------------------------------------------------------------ Aufbau
     def _stil(self):
@@ -119,9 +231,11 @@ class App(tk.Tk):
         tk.Label(kopf, text="EPS-Produktsuche", fg="white", bg=NAVY, font=("Segoe UI", 15, "bold")).pack(side="left", padx=14, pady=10)
         tk.Label(kopf, text=f"Version {__version__} · intern", fg=CYAN, bg=NAVY).pack(side="left")
         self.knopf_laden = ttk.Button(kopf, text="Shop neu einlesen", command=lambda: self.einlesen(still=False))
-        self.knopf_laden.pack(side="right", padx=10)
+        self.knopf_laden.pack(side="right", padx=(4, 10))
+        ttk.Button(kopf, text="Updates", command=lambda: self.updates_suchen(still=False)).pack(side="right", padx=4)
+        ttk.Button(kopf, text="Verlauf …", command=lambda: VerlaufDialog(self)).pack(side="right", padx=4)
         self.stand_lbl = tk.Label(kopf, text="", fg="white", bg=NAVY)
-        self.stand_lbl.pack(side="right", padx=6)
+        self.stand_lbl.pack(side="right", padx=10)
 
         oben = ttk.Frame(self, padding=(12, 10, 12, 0))
         oben.pack(fill="x")
@@ -134,11 +248,11 @@ class App(tk.Tk):
         self.typ_cb = ttk.Combobox(oben, textvariable=self.typ, state="readonly", width=20,
                                    values=["automatisch", "alle", *Q.GERAETETYPEN])
         self.typ_cb.pack(side="left", padx=(4, 0))
-        ttk.Button(oben, text="Kunden-Datenblatt (PDF) …", command=self.datenblatt_waehlen).pack(side="left", padx=(12, 0))
+        self.knopf_pdf = ttk.Button(oben, text="Kunden-Datenblatt (PDF) …", command=self.datenblatt_waehlen)
+        self.knopf_pdf.pack(side="left", padx=(12, 0))
 
         self.fremd_lbl = tk.Label(self, text="", anchor="w", justify="left", bg="#EEF4FA", fg="#1C2633",
-                                  padx=12, pady=6, wraplength=1200)
-        self.fremd: "datenblatt.Fremdgeraet | None" = None
+                                  padx=12, pady=6, wraplength=1250)
 
         opt = ttk.Frame(self, padding=(12, 4, 12, 0))
         opt.pack(fill="x")
@@ -149,17 +263,22 @@ class App(tk.Tk):
         ttk.Label(opt, text="max. Geräte parallel/in Reihe:").pack(side="right", padx=(16, 4))
         self.knapp = tk.BooleanVar(value=True)
         ttk.Checkbutton(opt, text="auch knapp darunter (bis −10 %)", variable=self.knapp, command=self.suchen).pack(side="right")
+        self.gruppieren = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opt, text="nach Serie gruppieren", variable=self.gruppieren, command=self.suchen).pack(side="right", padx=12)
 
         sp = [("bew", "Bewertung", 100), ("nr", "Bestellnr.", 70), ("name", "Gerät", 270), ("typ", "Gerätetyp", 105),
-              ("u", "Spannung", 115), ("i", "Strom", 85), ("p", "Leistung", 115), ("res", "Reserve", 150), ("hin", "Hinweis", 220)]
+              ("u", "Spannung", 115), ("i", "Strom", 85), ("p", "Leistung", 115), ("res", "Reserve", 150), ("hin", "Hinweis", 230)]
         tf = ttk.Frame(self, padding=(12, 8, 12, 0))
         tf.pack(fill="both", expand=True)
-        self.tv = ttk.Treeview(tf, columns=[x[0] for x in sp], show="headings", selectmode="extended")
+        self.tabelle_rahmen = tf
+        self.tv = ttk.Treeview(tf, columns=[x[0] for x in sp], show="tree headings", selectmode="extended")
+        self.tv.column("#0", width=28, minwidth=28, stretch=False)
         for k, t, b in sp:
             self.tv.heading(k, text=t)
             self.tv.column(k, width=b, minwidth=50, stretch=k in ("name", "hin"))
         for kat, farbe in FARBEN.items():
             self.tv.tag_configure(kat, foreground=farbe)
+        self.tv.tag_configure("serie", font=("Segoe UI", 9, "bold"))
         sy = ttk.Scrollbar(tf, orient="vertical", command=self.tv.yview)
         sx = ttk.Scrollbar(tf, orient="horizontal", command=self.tv.xview)
         self.tv.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
@@ -179,18 +298,21 @@ class App(tk.Tk):
         ttk.Button(unten, text="Shopseite", command=self.shopseite).pack(side="left", padx=6)
         ttk.Button(unten, text="Empfehlung kopieren (DE)", command=lambda: self.kopieren("de")).pack(side="left", padx=(18, 0))
         ttk.Button(unten, text="(EN)", width=5, command=lambda: self.kopieren("en")).pack(side="left", padx=4)
-        ttk.Label(unten, text="Enter/Doppelklick: Datenblatt · Strg+C: Empfehlung kopieren · Esc: Eingabe leeren",
+        ttk.Button(unten, text="Gegenüberstellung PDF (DE)", command=lambda: self.gegenueberstellung("de")).pack(side="left", padx=(18, 0))
+        ttk.Button(unten, text="(EN)", width=5, command=lambda: self.gegenueberstellung("en")).pack(side="left", padx=4)
+        ttk.Label(unten, text="Enter: im Verlauf merken · Doppelklick: Datenblatt · Strg+C: Empfehlung · Strg+O: Kunden-PDF",
                   foreground=GRAU).pack(side="right")
 
         self.eingabe.trace_add("write", lambda *a: self.suchen())
         self.typ_cb.bind("<<ComboboxSelected>>", lambda e: self.suchen())
         self.max_par.trace_add("write", lambda *a: self.after_idle(self.suchen))
-        self.tv.bind("<Double-1>", lambda e: self.pdf())
+        self.tv.bind("<Double-1>", self._doppelklick)
         self.tv.bind("<Return>", lambda e: self.pdf())
         self.tv.bind("<<TreeviewSelect>>", lambda e: self._details())
         self.bind_all("<Control-c>", lambda e: self.kopieren("de") if self.focus_get() is not self.feld else None)
         self.feld.bind("<Escape>", lambda e: self.eingabe.set(""))
         self.feld.bind("<Down>", lambda e: self._in_liste())
+        self.feld.bind("<Return>", lambda e: self._merken("Suche"))
         self.bind_all("<Control-o>", lambda e: (self.datenblatt_waehlen(), "break")[1])
         self._dnd_einrichten()
         self.feld.focus_set()
@@ -202,6 +324,45 @@ class App(tk.Tk):
             self.tv.selection_set(k[0])
             self.tv.focus(k[0])
         return "break"
+
+    def _doppelklick(self, e):
+        if self.tv.identify_region(e.x, e.y) == "tree":
+            return                                    # Klick auf den Aufklapp-Pfeil
+        self.pdf()
+
+    # ------------------------------------------------------------------ Hintergrundarbeit
+    def _hintergrund(self, arbeit, fertig, text: str):
+        """arbeit() läuft in einem Thread, fertig(wert, fehler) danach im Hauptthread (Tk ist nicht threadsicher)."""
+        ergebnis: dict = {}
+        self.beschaeftigt = True
+        self.knopf_pdf.state(["disabled"])
+        self.info.configure(text=text)
+        self.fortschritt.configure(mode="indeterminate")
+        self.fortschritt.pack(fill="x", padx=12, before=self.info)
+        self.fortschritt.start(12)
+        self.configure(cursor="watch")
+
+        def lauf():
+            try:
+                ergebnis["wert"] = arbeit()
+            except Exception as ex:  # noqa: BLE001
+                ergebnis["fehler"] = ex
+            ergebnis["fertig"] = True
+
+        def abfragen():
+            if not ergebnis.get("fertig"):
+                self.after(100, abfragen)
+                return
+            self.fortschritt.stop()
+            self.fortschritt.configure(mode="determinate")
+            self.fortschritt.pack_forget()
+            self.configure(cursor="")
+            self.knopf_pdf.state(["!disabled"])
+            self.beschaeftigt = False
+            fertig(ergebnis.get("wert"), ergebnis.get("fehler"))
+
+        threading.Thread(target=lauf, daemon=True).start()
+        self.after(100, abfragen)
 
     # ------------------------------------------------------------------ Suche
     def anfrage(self) -> Q.Anfrage:
@@ -215,7 +376,7 @@ class App(tk.Tk):
 
     def suchen(self):
         self.tv.delete(*self.tv.get_children())
-        self.treffer, self.zeilen_geraete = [], []
+        self.treffer, self.zeilen_geraete, self.iid_index = [], [], {}
         text = self.eingabe.get().strip()
         a = self.anfrage()
         if not self.geraete:
@@ -239,22 +400,48 @@ class App(tk.Tk):
         except (tk.TclError, ValueError):
             maxp = 10
         self.treffer = Q.suchen(self.geraete, a, self.knapp.get(), maxp)
-        for t in self.treffer:
-            self._zeile(t.bewertung, t.g, t.reserve_text(), t.hinweis, (t.kategorie,))
+        if self.gruppieren.get():
+            gruppen = Q.nach_serie(self.treffer)
+            for serie, liste in gruppen:
+                erster = liste[0]
+                hinweis = erster.hinweis
+                if len(liste) > 1:
+                    hinweis = f"+{len(liste) - 1} weitere der Serie" + (f"; {hinweis}" if hinweis else "")
+                eltern = self._zeile(erster.bewertung, erster.g, erster.reserve_text(), hinweis, (erster.kategorie,))
+                for t in liste[1:]:
+                    self._zeile(t.bewertung, t.g, t.reserve_text(), t.hinweis, (t.kategorie,), eltern=eltern)
+            serien_text = f" in {len(gruppen)} Serien"
+        else:
+            for t in self.treffer:
+                self._zeile(t.bewertung, t.g, t.reserve_text(), t.hinweis, (t.kategorie,))
+            serien_text = ""
         n = {k: sum(1 for t in self.treffer if t.kategorie == k) for k in FARBEN}
-        self.info.configure(text=f"{len(self.treffer)} Treffer: {n[Q.PASST]} passen genau, {n[Q.GROESSER]} größer, "
+        self.info.configure(text=f"{len(self.treffer)} Treffer{serien_text}: {n[Q.PASST]} passen genau, {n[Q.GROESSER]} größer, "
                                  f"{n[Q.PARALLEL] + n[Q.REIHE]} mit mehreren Geräten, {n[Q.KNAPP_DARUNTER]} knapp darunter"
                                  + (" – Gerätetyp auf „alle“ stellen?" if not self.treffer and a.geraetetyp else ""))
 
-    def _zeile(self, bew, g: shop.Geraet, reserve, hinweis, tags):
+    def _zeile(self, bew, g: shop.Geraet, reserve, hinweis, tags, eltern: str = "") -> str:
         iid = str(len(self.zeilen_geraete))
         self.zeilen_geraete.append(g)
+        self.iid_index[iid] = int(iid)
         typ = g.geraetetyp + (" (bidir.)" if g.bidirektional and g.geraetetyp != shop.LAST else "")
-        self.tv.insert("", "end", iid=iid, tags=tags, values=[bew, g.bestellnummer, g.name, typ, g.spannung or "–",
-                                                              g.strom or "–", g.leistung or "–", reserve, hinweis])
+        self.tv.insert(eltern, "end", iid=iid, tags=tags, open=False,
+                       values=[bew, g.bestellnummer, g.name, typ, g.spannung or "–", g.strom or "–", g.leistung or "–",
+                               reserve, hinweis])
+        return iid
 
     def _auswahl(self) -> list[int]:
-        return [int(i) for i in self.tv.selection()]
+        return [self.iid_index[i] for i in self.tv.selection() if i in self.iid_index]
+
+    def _treffer_zu(self, g: shop.Geraet) -> Q.Treffer:
+        return next((t for t in self.treffer if t.g is g), None) or Q.Treffer(g, Q.PASST)
+
+    def _ausgewaehlte_treffer(self, standard: int = 3) -> list[Q.Treffer]:
+        sel = self._auswahl()
+        if sel:
+            return [self._treffer_zu(self.zeilen_geraete[i]) for i in sel]
+        genau = [t for t in self.treffer if t.kategorie == Q.PASST]
+        return (genau or [t for t in self.treffer if t.kategorie != Q.KNAPP_DARUNTER])[:standard]
 
     def _details(self):
         sel = self._auswahl()
@@ -266,7 +453,7 @@ class App(tk.Tk):
                 teile += [t.bewertung, t.reserve_text(), t.hinweis]
             self.info.configure(text=" · ".join(x for x in teile if x))
         elif sel:
-            self.info.configure(text=f"{len(sel)} Geräte ausgewählt – „Empfehlung kopieren“ übernimmt alle.")
+            self.info.configure(text=f"{len(sel)} Geräte ausgewählt – Empfehlung und Gegenüberstellung übernehmen alle.")
 
     # ------------------------------------------------------------------ Aktionen
     def pdf(self):
@@ -280,20 +467,78 @@ class App(tk.Tk):
         if sel and self.zeilen_geraete[sel[0]].shop_url:
             webbrowser.open(self.zeilen_geraete[sel[0]].shop_url)
 
+    def _alternative_zu(self) -> str:
+        if self.fremd and self.eingabe.get().strip() == self.fremd_anfrage:
+            return self.fremd.hersteller_typ or self.fremd.modell
+        return ""
+
     def kopieren(self, sprache: str):
-        sel = self._auswahl()
-        if sel:
-            ausgewaehlt = [self.zeilen_geraete[i] for i in sel]
-            tr = [next((t for t in self.treffer if t.g is g), None) or Q.Treffer(g, Q.PASST) for g in ausgewaehlt]
-        else:
-            tr = [t for t in self.treffer if t.kategorie == Q.PASST][:3]
+        tr = self._ausgewaehlte_treffer()
         if not tr:
             self.info.configure(text="Bitte zuerst ein oder mehrere Geräte auswählen (Strg/Umschalt + Klick).")
             return
         self.clipboard_clear()
-        zu = (self.fremd.hersteller_typ or self.fremd.modell) if self.fremd and self.eingabe.get().strip() == self.fremd_anfrage else ""
-        self.clipboard_append(Q.empfehlung(tr, self.anfrage(), sprache, alternative_zu=zu))
+        self.clipboard_append(Q.empfehlung(tr, self.anfrage(), sprache, alternative_zu=self._alternative_zu()))
         self.info.configure(text=f"Empfehlung mit {len(tr)} Gerät(en) in die Zwischenablage kopiert ({sprache.upper()}).")
+        self._merken(f"Empfehlung {sprache.upper()}", tr)
+
+    def gegenueberstellung(self, sprache: str):
+        from . import vergleich
+        tr = self._ausgewaehlte_treffer(standard=3)[:vergleich.MAX_VORSCHLAEGE]
+        if not tr:
+            self.info.configure(text="Bitte zuerst bis zu vier Geräte auswählen (Strg + Klick).")
+            return
+        a = self.anfrage()
+        fremd = self.fremd if self._alternative_zu() else None
+        ordner = self.pfad.parent / "Gegenueberstellungen"
+        ziel = ordner / vergleich.dateiname(fremd, a, sprache)
+        for n in range(2, 50):
+            try:
+                vergleich.erzeugen(ziel, tr, a, fremd, sprache)
+                break
+            except PermissionError:                     # gleichnamiges PDF ist noch geöffnet
+                ziel = ziel.with_name(f"{ziel.stem.rsplit('_(', 1)[0]}_({n}).pdf")
+        else:
+            messagebox.showerror("Gegenüberstellung", "Das PDF konnte nicht gespeichert werden.", parent=self)
+            return
+        self.info.configure(text=f"Gegenüberstellung gespeichert: {ziel}")
+        self._merken(f"Gegenüberstellung {sprache.upper()}", tr)
+        try:
+            datei_oeffnen(ziel)
+        except OSError:
+            pass
+
+    # ------------------------------------------------------------------ Verlauf
+    def _merken(self, aktion: str, treffer: list[Q.Treffer] | None = None):
+        text = self.eingabe.get().strip()
+        if not text:
+            return
+        fremd = asdict(self.fremd) if self.fremd and text == self.fremd_anfrage else None
+        geraete = [{"bestellnummer": t.g.bestellnummer, "name": t.g.name} for t in (treffer or [])]
+        try:
+            verlauf.hinzufuegen(self.verlauf_pfad, text, aktion, geraete, self.typ.get(), fremd)
+        except OSError:
+            pass
+
+    def verlauf_uebernehmen(self, e: dict):
+        from . import datenblatt
+        f = e.get("fremd")
+        if f:
+            felder = datenblatt.Fremdgeraet.__dataclass_fields__
+            self._fremd_anzeigen(datenblatt.Fremdgeraet(**{k: v for k, v in f.items() if k in felder}), aus_verlauf=True)
+        else:
+            self.fremd, self.fremd_anfrage = None, ""
+            self.fremd_lbl.pack_forget()
+        typ = e.get("typ") or "automatisch"
+        self.typ.set(typ if typ in self.typ_cb["values"] else "automatisch")
+        self.eingabe.set(e.get("anfrage", ""))
+        if e.get("geraete"):
+            nummern = {g["bestellnummer"] for g in e["geraete"]}
+            sel = [iid for iid, i in self.iid_index.items() if self.zeilen_geraete[i].bestellnummer in nummern]
+            for iid in sel:
+                self.tv.see(iid)
+            self.tv.selection_set(sel)
+        self.feld.focus_set()
 
     # ------------------------------------------------------------------ Kunden-Datenblatt
     def _dnd_einrichten(self):
@@ -320,53 +565,62 @@ class App(tk.Tk):
         if pfad:
             self.datenblatt_laden(Path(pfad))
 
-    def datenblatt_laden(self, pfad: Path):
-        """Kunden-/Fremddatenblatt auslesen (Converter-Logik), Modell wählen lassen, Anfrage ins Suchfeld setzen."""
+    def datenblatt_laden(self, pfad: Path, fertig_cb=None):
+        """Kunden-/Fremddatenblatt auslesen (im Hintergrund), Modell/Variante wählen lassen, Anfrage ins Suchfeld setzen."""
         from . import datenblatt
-        self.configure(cursor="watch")
-        self.info.configure(text=f"Lese {pfad.name} …")
-        self.update_idletasks()
-        try:
-            analyse = datenblatt.analysieren(pfad)
+        if self.beschaeftigt:
+            return
+
+        def fehler_melden(fehler):
+            messagebox.showerror("Kunden-Datenblatt", f"Das PDF konnte nicht gelesen werden:\n{fehler}", parent=self)
+            self.info.configure(text="")
+
+        def nach_analyse(analyse, fehler):
+            if fehler:
+                return fehler_melden(fehler)
             modell = variante = None
             if analyse.modelle and analyse.hat_text:
                 from eps_converter.importieren import ModellDialog
-                self.configure(cursor="")
                 d = ModellDialog(self, analyse.modelle, pfad.name)
                 if d.ergebnis is None:
                     self.info.configure(text="Abgebrochen – kein Modell gewählt.")
                     return
                 modell = d.ergebnis or None
             elif len(analyse.varianten) > 1:
-                self.configure(cursor="")
                 d = VariantenDialog(self, analyse.varianten, pfad.name)
                 if d.ergebnis is None:
                     self.info.configure(text="Abgebrochen – keine Variante gewählt.")
                     return
                 variante = d.ergebnis or None
-            self.configure(cursor="watch")
-            self.update_idletasks()
-            fg = datenblatt.lesen(pfad, modell, variante)
-        except Exception as e:  # noqa: BLE001
-            self.configure(cursor="")
-            messagebox.showerror("Kunden-Datenblatt", f"Das PDF konnte nicht gelesen werden:\n{e}", parent=self)
-            return
-        self.configure(cursor="")
+            self._hintergrund(lambda: datenblatt.lesen(pfad, modell, variante), nach_lesen, f"Werte aus {pfad.name} …")
+
+        def nach_lesen(fg, fehler):
+            if fehler:
+                return fehler_melden(fehler)
+            self._fremd_anzeigen(fg)
+            self.typ.set("automatisch")
+            self.eingabe.set(self.fremd_anfrage)
+            self.feld.focus_set()
+            self.feld.icursor("end")
+            if fg.leer():
+                self.info.configure(text="Keine Werte erkannt – bitte Spannung/Strom/Leistung von Hand ins Suchfeld eintragen.")
+            self._merken("Kunden-Datenblatt")
+            if fertig_cb:
+                fertig_cb(fg)
+
+        self._hintergrund(lambda: datenblatt.analysieren(pfad), nach_analyse, f"Lese {pfad.name} …")
+
+    def _fremd_anzeigen(self, fg, aus_verlauf: bool = False):
         self.fremd = fg
         self.fremd_anfrage = fg.anfrage()
         werte = " · ".join(f"{n}: {t}" for n, t in (("Spannung", fg.spannung), ("Strom", fg.strom), ("Leistung", fg.leistung)) if t)
         kopf = f"Kunden-Datenblatt: {fg.datei}" + (f" – Modell {fg.modell}" if fg.modell else "")
         if fg.geraetetyp:
             kopf += f" – {', '.join(fg.geraetetyp)}"
-        zeilen = [kopf, werte or "Keine Werte gefunden."] + fg.hinweise
-        self.fremd_lbl.configure(text="\n".join(zeilen))
-        self.fremd_lbl.pack(fill="x", padx=12, pady=(6, 0), before=self.tv.master)
-        self.typ.set("automatisch")
-        self.eingabe.set(self.fremd_anfrage)
-        self.feld.focus_set()
-        self.feld.icursor("end")
-        if fg.leer():
-            self.info.configure(text="Keine Werte erkannt – bitte Spannung/Strom/Leistung von Hand ins Suchfeld eintragen.")
+        if aus_verlauf:
+            kopf += "  (aus dem Verlauf)"
+        self.fremd_lbl.configure(text="\n".join([kopf, werte or "Keine Werte gefunden."] + fg.hinweise))
+        self.fremd_lbl.pack(fill="x", padx=12, pady=(6, 0), before=self.tabelle_rahmen)
 
     # ------------------------------------------------------------------ Shopdaten
     def _status(self):
@@ -385,7 +639,7 @@ class App(tk.Tk):
         self.laedt = True
         self.knopf_laden.state(["disabled"])
         self.fortschritt.pack(fill="x", padx=12, before=self.info)
-        self.fortschritt.configure(value=0, maximum=100)
+        self.fortschritt.configure(value=0, maximum=100, mode="determinate")
         ergebnis: dict = {}
         meldungen: queue.Queue = queue.Queue()      # Tk darf nur aus dem Hauptthread angefasst werden
 
@@ -416,14 +670,27 @@ class App(tk.Tk):
             self.laedt = False
             self.knopf_laden.state(["!disabled"])
             self.fortschritt.pack_forget()
-            if "fehler" in ergebnis or not ergebnis.get("geraete"):
-                fehler = ergebnis.get("fehler", "keine Geräte gefunden")
+            if "fehler" in ergebnis:
+                fehler = ergebnis["fehler"]
                 self.info.configure(text=f"Shop konnte nicht gelesen werden: {fehler}")
                 if not still:
                     messagebox.showerror("Shop einlesen", f"Der Onlineshop konnte nicht gelesen werden:\n{fehler}\n\n"
                                                           "Internetverbindung prüfen. Die bisherigen Daten bleiben erhalten.")
                 return
-            self.geraete = ergebnis["geraete"]
+            neu = ergebnis.get("geraete") or []
+            grund = shop.pruefen(neu, self.geraete)
+            if grund:
+                try:                                      # zur Fehlersuche aufheben
+                    shop.speichern(neu, self.pfad.with_name("shopdaten_abgelehnt.json"))
+                except OSError:
+                    pass
+                alt = f"Die bisherigen Daten ({len(self.geraete)} Geräte) bleiben erhalten." if self.geraete else ""
+                if not messagebox.askyesno("Shop einlesen – Ergebnis unplausibel",
+                                           f"{grund}\n\n{alt}\n\nTrotzdem die neuen Daten übernehmen?",
+                                           icon="warning", default="no", parent=self):
+                    self.info.configure(text=f"Neue Shopdaten verworfen: {grund}")
+                    return
+            self.geraete = neu
             try:
                 shop.speichern(self.geraete, self.pfad)
             except OSError as e:
@@ -436,6 +703,81 @@ class App(tk.Tk):
 
         self.after(150, abfragen)
         threading.Thread(target=lauf, daemon=True).start()
+
+    # ------------------------------------------------------------------ Updates
+    def updates_suchen(self, still: bool = True):
+        ergebnis: dict = {}
+
+        def lauf():
+            ergebnis["neu"] = aktualisierung.neueste(timeout=8.0)
+            ergebnis["fertig"] = True
+
+        def abfragen():
+            if not ergebnis.get("fertig"):
+                self.after(200, abfragen)
+                return
+            neu = ergebnis.get("neu")
+            if not neu:
+                if not still:
+                    messagebox.showinfo("Updates", f"Version {__version__} ist aktuell "
+                                                   "(oder GitHub ist gerade nicht erreichbar).", parent=self)
+                return
+            version, url = neu
+            if not aktualisierung.ist_exe():
+                if messagebox.askyesno("Update verfügbar", f"Version {version} ist verfügbar (installiert: {__version__}).\n\n"
+                                                           "Download-Seite öffnen?", parent=self):
+                    webbrowser.open(aktualisierung.SEITE)
+                return
+            if messagebox.askyesno("Update verfügbar",
+                                   f"Version {version} ist verfügbar (installiert: {__version__}).\n\n"
+                                   "Jetzt automatisch aktualisieren?\n\nDie neue Version wird in den Programmordner geladen "
+                                   "und gestartet, die alte danach entfernt. Shopdaten und Verlauf bleiben erhalten.",
+                                   parent=self):
+                self._update_laden(version, url)
+
+        threading.Thread(target=lauf, daemon=True).start()
+        self.after(200, abfragen)
+
+    def _update_laden(self, version: str, url: str):
+        ziel = aktualisierung.zieldatei(aktualisierung.exe_pfad().parent, version)
+        stand: dict = {"geladen": 0, "gesamt": 0}
+        ergebnis: dict = {}
+        self.fortschritt.configure(mode="determinate", value=0, maximum=100)
+        self.fortschritt.pack(fill="x", padx=12, before=self.info)
+
+        def fortschritt(geladen, gesamt):
+            stand.update(geladen=geladen, gesamt=gesamt)
+
+        def lauf():
+            try:
+                aktualisierung.herunterladen(url, ziel, fortschritt)
+            except Exception as e:  # noqa: BLE001
+                ergebnis["fehler"] = e
+            ergebnis["fertig"] = True
+
+        def abfragen():
+            if stand["gesamt"]:
+                self.fortschritt.configure(value=stand["geladen"] * 100 / stand["gesamt"])
+            self.info.configure(text=f"Lade Version {version} … {stand['geladen'] // 1_000_000} MB")
+            if not ergebnis.get("fertig"):
+                self.after(200, abfragen)
+                return
+            self.fortschritt.pack_forget()
+            if "fehler" in ergebnis:
+                messagebox.showerror("Update", f"Das Update konnte nicht geladen werden:\n{ergebnis['fehler']}\n\n"
+                                               "Das Programm läuft normal weiter.", parent=self)
+                return
+            try:
+                aktualisierung.starten(ziel)
+            except OSError as e:
+                messagebox.showerror("Update", f"Neue Version geladen, konnte aber nicht gestartet werden:\n{e}\n\n{ziel}",
+                                     parent=self)
+                return
+            self.destroy()
+            os._exit(0)
+
+        threading.Thread(target=lauf, daemon=True).start()
+        self.after(200, abfragen)
 
 
 def main(argv: list[str] | None = None) -> int:

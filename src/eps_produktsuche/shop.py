@@ -27,6 +27,8 @@ KATEGORIEN = {"AC-DC": "AC/DC", "AC-AC": "AC/AC", "DC-AC": "DC/AC", "DC-DC": "DC
 LAST = "Elektronische Last"
 AC_AUSGANG = {"AC/AC", "DC/AC"}
 USER_AGENT = "EPS-Produktsuche (intern, EPS Stromversorgung GmbH)"
+DATENFORMAT = 2                     # 2: Frequenzen, Wasserkühlung, Rückspeisung (ältere Daten werden neu eingelesen)
+MINDESTANTEIL = 0.8                 # neues Einlesen muss mindestens 80 % der bisherigen Geräte liefern
 
 
 @dataclass
@@ -53,6 +55,12 @@ class Geraet:
     reihe: bool = False
     shop_url: str = ""
     pdf_url: str = ""
+    # Merkmale (Datenformat 2) – None = im Shop nicht angegeben
+    f_fest: list[float] = field(default_factory=list)              # Ausgangsfrequenz Standard (Hz)
+    f_bereiche: list[list[float]] = field(default_factory=list)    # einstellbar, z. B. [[15, 1000]]
+    f_option: list[float] = field(default_factory=list)            # als Option lieferbar
+    wasser: str = ""                # "ja" (wassergekühlt), "option", "" = Luft/keine Angabe
+    rueckspeisung: bool = False     # Netzrückspeisung / regenerativ
 
     @property
     def kann_senken(self) -> bool:
@@ -176,6 +184,48 @@ class Serie:
     parallel: bool = False
     parallel_max: int | None = None
     reihe: bool = False
+    f_fest: list[float] = field(default_factory=list)
+    f_bereiche: list[list[float]] = field(default_factory=list)
+    f_option: list[float] = field(default_factory=list)
+    wasser: str = ""
+    rueckspeisung: bool = False
+
+
+_EINGANG = re.compile(r"netz|eingang|input|mains|versorgung|supply|primär", re.I)
+_OPTION = re.compile(r"option|auf anfrage|on request|wahlweise|alternativ", re.I)
+
+
+def frequenzen(text: str) -> tuple[list[float], list[list[float]], list[float]]:
+    """Ausgangsfrequenzen aus Beschreibungstexten: (Standard-Festwerte, Bereiche, Optionen).
+    „Die Ausgangsfrequenz ist eine standardmäßige 400Hz Festfrequenz“ → [400]; „Option … 800Hz“ → Option;
+    „50 und 60Hz“ → 50, 60; „15-1000 Hz“ → Bereich. Sätze über den Netzeingang zählen nicht."""
+    fest, bereiche, option = [], [], []
+    for satz in re.split(r"(?<=[.!;])\s+|\n", text or ""):
+        if not re.search(r"\d\s*Hz", satz, re.I) or (_EINGANG.search(satz) and not re.search(r"ausgang|output", satz, re.I)):
+            continue
+        ziel = option if _OPTION.search(satz) else fest
+        for m in re.finditer(r"((?:\d+(?:[.,]\d+)?\s*(?:Hz)?\s*(?:,|/|und|and|oder|or)\s*)*)(\d+(?:[.,]\d+)?)"
+                             r"(?:\s*(?:-|–|bis|to|\.\.\.?)\s*(\d+(?:[.,]\d+)?))?\s*Hz", satz, re.I):
+            vorne = [_z(x) for x in re.findall(r"\d+(?:[.,]\d+)?", m.group(1) or "")]
+            a, b = _z(m.group(2)), (_z(m.group(3)) if m.group(3) else None)
+            if b is not None and b > a and not vorne:
+                if ziel is fest:
+                    bereiche.append([a, b])
+                else:
+                    option.extend([a, b])
+            else:
+                ziel.extend(vorne + [a] + ([b] if b is not None else []))
+    eindeutig = lambda xs: sorted(set(x for x in xs if 10 <= x <= 2000))  # noqa: E731
+    fest, option = eindeutig(fest), eindeutig(option)
+    return fest, bereiche, [o for o in option if o not in fest]
+
+
+def wasserkuehlung(name: str, serie: str, text: str) -> str:
+    if re.search(r"-WC\b|\bWC\b|wassergekühlt|wasserkühlung|water.?cooled", name + " " + serie, re.I):
+        return "ja"
+    if re.search(r"wassergekühlt|wasserkühlung|water.?cool", text or "", re.I):
+        return "option"
+    return ""
 
 
 def serie_lesen(seite: str, url: str) -> Serie:
@@ -194,6 +244,12 @@ def serie_lesen(seite: str, url: str) -> Serie:
     m = re.search(r"bis zu (\d+) (?:geräte|einheiten|module|units)", t)
     s.parallel_max = int(m.group(1)) if m and s.parallel else None
     s.reihe = bool(re.search(r"reihenschaltung (?:ist )?(?:ebenfalls )?möglich|in reihe geschaltet|serienschaltung möglich", t))
+    beschreibung = _text(seite[:ende if ende > 0 else len(seite)])
+    m = re.search(re.escape(s.titel) + r"(.*)", beschreibung) if s.titel else None
+    beschreibung = m.group(1) if m else beschreibung          # Navigation vor der Überschrift weglassen
+    s.f_fest, s.f_bereiche, s.f_option = frequenzen(beschreibung)
+    s.wasser = wasserkuehlung("", s.titel, beschreibung)
+    s.rueckspeisung = bool(re.search(r"rückspeis|regenerativ|regenerative|energy recovery", s.titel + " " + beschreibung, re.I))
     return s
 
 
@@ -227,6 +283,11 @@ def geraete_lesen(seite: str, serie: Serie) -> list[Geraet]:
                    parallel=serie.parallel or any("parallel" in z.lower() for z in beschreibung),
                    parallel_max=serie.parallel_max, reihe=serie.reihe)
         g.bidirektional = "bidirektional" in (felder.get("Betriebseigenschaft", "") + " " + name).lower()
+        beschr_text = "\n".join(beschreibung)
+        ff, fb, fo = frequenzen(beschr_text)
+        g.f_fest, g.f_bereiche, g.f_option = (ff, fb, fo) if (ff or fb) else (serie.f_fest, serie.f_bereiche, serie.f_option or fo)
+        g.wasser = wasserkuehlung(name, "", beschr_text) or serie.wasser
+        g.rueckspeisung = bool(re.search(r"rückspeis|regenerativ", name + " " + beschr_text, re.I)) or serie.rueckspeisung
         auswerten(g)
         out.append(g)
     return out
@@ -327,11 +388,37 @@ def einlesen(leser: Leser | None = None, fortschritt=None) -> list[Geraet]:
 # ------------------------------------------------------------------------ Zwischenspeicher
 
 def speichern(geraete: list[Geraet], pfad: Path) -> None:
+    """Speichert die Shopdaten; die bisherige Datei bleibt als „…_vorher.json“ erhalten."""
     pfad.parent.mkdir(parents=True, exist_ok=True)
     tmp = pfad.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"stand": datetime.now().isoformat(timespec="minutes"), "quelle": BASIS,
+    tmp.write_text(json.dumps({"stand": datetime.now().isoformat(timespec="minutes"), "quelle": BASIS, "format": DATENFORMAT,
                                "geraete": [asdict(g) for g in geraete]}, ensure_ascii=False, indent=1), encoding="utf-8")
+    if pfad.exists():
+        try:
+            pfad.replace(pfad.with_name(pfad.stem + "_vorher.json"))
+        except OSError:
+            pass
     tmp.replace(pfad)
+
+
+def datenformat(pfad: Path) -> int:
+    try:
+        return int(json.loads(pfad.read_text(encoding="utf-8")).get("format", 1))
+    except (OSError, ValueError):
+        return 0
+
+
+def pruefen(neu: list[Geraet], alt: list[Geraet]) -> str:
+    """Leerer Text = neue Daten sind plausibel. Sonst der Grund, warum die alten Daten behalten werden sollten
+    (Shop umgebaut, nur halb geladen, Verbindungsabbruch …)."""
+    if len(neu) < 50:
+        return f"Nur {len(neu)} Geräte gelesen (erwartet: mehrere Hundert)."
+    if alt and len(neu) < MINDESTANTEIL * len(alt):
+        return f"Nur {len(neu)} statt bisher {len(alt)} Geräte gelesen (weniger als {MINDESTANTEIL:.0%})."
+    mit_werten = sum(1 for g in neu if g.umax or g.pmax)
+    if mit_werten < 0.5 * len(neu):
+        return f"Nur {mit_werten} von {len(neu)} Geräten haben Spannung/Leistung – vermutlich hat sich der Shop-Aufbau geändert."
+    return ""
 
 
 def laden(pfad: Path) -> tuple[list[Geraet], str]:
@@ -341,7 +428,11 @@ def laden(pfad: Path) -> tuple[list[Geraet], str]:
     except (OSError, ValueError):
         return [], ""
     felder = Geraet.__dataclass_fields__
-    return [Geraet(**{k: v for k, v in g.items() if k in felder}) for g in d.get("geraete", [])], d.get("stand", "")
+    geraete = [Geraet(**{k: v for k, v in g.items() if k in felder}) for g in d.get("geraete", [])]
+    if d.get("format", 1) < 2:                    # ältere Daten: Wasserkühlung wenigstens aus dem Namen ableiten
+        for g in geraete:
+            g.wasser = g.wasser or wasserkuehlung(g.name, g.serie, "")
+    return geraete, d.get("stand", "")
 
 
 def veraltet(stand: str, tage: int = 7) -> bool:

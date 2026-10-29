@@ -36,8 +36,17 @@ def selbsttest(ziel: Path) -> int:
         except ImportError:
             zeilen.append("DnD fehlt")
             ok = False
+        from . import vergleich, verlauf, aktualisierung
+        tr = Q.suchen(g, Q.anfrage_lesen("Stromquelle 0-30V 1kA 30kW"))
+        pdf = vergleich.erzeugen(ziel / "vergleich.pdf", tr, Q.anfrage_lesen("Stromquelle 0-30V 1kA 30kW"))
+        zeilen.append(f"Gegenüberstellung: {pdf.stat().st_size} Bytes")
+        ok &= pdf.stat().st_size > 5000
+        verlauf.hinzufuegen(ziel / "verlauf.json", "30V 1kA", "Test")
+        ok &= len(verlauf.laden(ziel / "verlauf.json")) == 1
+        ok &= aktualisierung.neueste(releases=[{"tag_name": "produktsuche-v99.0.0", "assets": [
+            {"name": aktualisierung.ASSET, "browser_download_url": "x"}]}]) == ("99.0.0", "x")
         from .gui import App
-        app = App(pfad=ziel / "shopdaten.json", automatisch_laden=False)
+        app = App(pfad=ziel / "shopdaten.json", automatisch_laden=False, update_pruefen=False)
         app.eingabe.set("Stromquelle 0-30V 1kA 30kW")
         app.update()
         zeilen.append(f"GUI-Zeilen: {len(app.tv.get_children())}")
