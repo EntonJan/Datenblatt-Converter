@@ -638,8 +638,12 @@ class App(tk.Tk):
             return
         self.laedt = True
         self.knopf_laden.state(["disabled"])
+        self.knopf_laden.configure(text="Shop wird gelesen …")
         self.fortschritt.pack(fill="x", padx=12, before=self.info)
-        self.fortschritt.configure(value=0, maximum=100, mode="determinate")
+        self.fortschritt.configure(value=0, maximum=100, mode="indeterminate")   # bis die Serienliste steht
+        self.fortschritt.start(12)
+        grund_text = "automatisch" if still else "neu"
+        self.stand_lbl.configure(text=f"Shop wird {grund_text} eingelesen – verbinde …")
         ergebnis: dict = {}
         meldungen: queue.Queue = queue.Queue()      # Tk darf nur aus dem Hauptthread angefasst werden
 
@@ -657,8 +661,12 @@ class App(tk.Tk):
             try:
                 while True:
                     text, erledigt, gesamt = meldungen.get_nowait()
+                    if str(self.fortschritt.cget("mode")) == "indeterminate":
+                        self.fortschritt.stop()
+                        self.fortschritt.configure(mode="determinate")
                     self.fortschritt.configure(maximum=max(gesamt, 1), value=erledigt)
-                    self.info.configure(text=f"Lese Shop … {erledigt}/{gesamt}  {text}")
+                    # in der Kopfzeile: die Infozeile unten wird beim Tippen von der Suche überschrieben
+                    self.stand_lbl.configure(text=f"Shop wird eingelesen … Serie {erledigt}/{gesamt}")
             except queue.Empty:
                 pass
             if ergebnis.get("fertig"):
@@ -669,10 +677,15 @@ class App(tk.Tk):
         def fertig():
             self.laedt = False
             self.knopf_laden.state(["!disabled"])
+            self.knopf_laden.configure(text="Shop neu einlesen")
+            self.fortschritt.stop()
+            self.fortschritt.configure(mode="determinate")
             self.fortschritt.pack_forget()
+            self._status()
             if "fehler" in ergebnis:
                 fehler = ergebnis["fehler"]
-                self.info.configure(text=f"Shop konnte nicht gelesen werden: {fehler}")
+                self.info.configure(text=f"Shop nicht erreichbar ({fehler}) – es wird mit dem bisherigen Stand gesucht.")
+                self.stand_lbl.configure(text=self.stand_lbl.cget("text") + " · Shop nicht erreichbar")
                 if not still:
                     messagebox.showerror("Shop einlesen", f"Der Onlineshop konnte nicht gelesen werden:\n{fehler}\n\n"
                                                           "Internetverbindung prüfen. Die bisherigen Daten bleiben erhalten.")
@@ -689,6 +702,7 @@ class App(tk.Tk):
                                            f"{grund}\n\n{alt}\n\nTrotzdem die neuen Daten übernehmen?",
                                            icon="warning", default="no", parent=self):
                     self.info.configure(text=f"Neue Shopdaten verworfen: {grund}")
+                    self.stand_lbl.configure(text=self.stand_lbl.cget("text") + " · neues Einlesen verworfen")
                     return
             self.geraete = neu
             try:
