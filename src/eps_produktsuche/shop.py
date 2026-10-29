@@ -17,6 +17,7 @@ import json
 import re
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, asdict
 from datetime import date, datetime
 from pathlib import Path
@@ -329,15 +330,26 @@ def ist_hauptkategorie(url: str) -> bool:
 # ------------------------------------------------------------------------ Shop einlesen
 
 class Leser:
-    def __init__(self, pause: float = 0.15, timeout: float = 30):
+    """Holt Shopseiten. Kurzer Timeout + Wiederholung: ein hängender Seitenabruf bremst nicht das ganze Einlesen."""
+
+    def __init__(self, pause: float = 0.1, timeout: float = 12, versuche: int = 3):
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-        self.pause, self.timeout = pause, timeout
+        self.pause, self.timeout, self.versuche = pause, timeout, versuche
 
     def holen(self, url: str) -> str:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "de"})
-        with self.opener.open(req, timeout=self.timeout) as r:
-            daten = r.read()
-            cs = r.headers.get_content_charset() or "utf-8"
+        fehler: OSError | None = None
+        for versuch in range(self.versuche):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "de"})
+                with self.opener.open(req, timeout=self.timeout) as r:
+                    daten = r.read()
+                    cs = r.headers.get_content_charset() or "utf-8"
+                break
+            except OSError as e:                      # Timeout, Verbindungsabbruch, 5xx
+                fehler = e
+                time.sleep(1.0 * (versuch + 1))
+        else:
+            raise fehler
         time.sleep(self.pause)
         try:
             return daten.decode(cs)
@@ -345,41 +357,65 @@ class Leser:
             return daten.decode("latin-1")
 
 
-def einlesen(leser: Leser | None = None, fortschritt=None) -> list[Geraet]:
-    """Liest alle Serien des Shops. fortschritt(text, erledigt, gesamt) wird zwischendurch aufgerufen."""
+GLEICHZEITIG = 4                 # parallele Seitenabrufe (schont den Shop, aber viel schneller als einzeln)
+_SEITENANZEIGE = re.compile(r"Zeige\s*<strong>\d+</strong>\s*bis\s*<strong>(\d+)</strong>\s*\(von insgesamt\s*<strong>(\d+)")
+
+
+def _serie_einlesen(leser: Leser, url: str) -> list[Geraet]:
+    """Eine Serie inkl. Folgeseiten (…:2.html). Fehler → leere Liste (die Plausibilitätsprüfung fängt Lücken ab)."""
+    try:
+        seite = leser.holen(url)
+    except OSError:
+        return []
+    serie = serie_lesen(seite, url)
+    gefunden: list[Geraet] = []
+    seite_nr = 1
+    while True:
+        gefunden += geraete_lesen(seite, serie)
+        m = _SEITENANZEIGE.search(seite)
+        if not m or int(m.group(1)) >= int(m.group(2)) or seite_nr >= 20:
+            break
+        seite_nr += 1
+        try:
+            seite = leser.holen(url[:-5] + f":{seite_nr}.html")
+        except OSError:
+            break
+    return gefunden
+
+
+def einlesen(leser: Leser | None = None, fortschritt=None, gleichzeitig: int = GLEICHZEITIG) -> list[Geraet]:
+    """Liest alle Serien des Shops (mehrere gleichzeitig). fortschritt(text, erledigt, gesamt) – auch aus Worker-Threads."""
     leser = leser or Leser()
     start = leser.holen(BASIS)
     alle = links(start)
     haupt = sorted({u for u in alle if ist_hauptkategorie(u)})
     serien = [u for u in dict.fromkeys(alle) if ist_serie(u)]
-    for h in haupt:                                       # Unterkategorien, die nicht im Menü stehen
+
+    def unterkategorien(h: str) -> list[str]:            # Serien, die nicht im Menü stehen
         try:
-            for u in links(leser.holen(h)):
-                if ist_serie(u) and u not in serien:
-                    serien.append(u)
+            return [u for u in links(leser.holen(h)) if ist_serie(u)]
         except OSError:
-            continue
-    geraete: dict[str, Geraet] = {}
-    for n, url in enumerate(serien):
+            return []
+
+    with ThreadPoolExecutor(max_workers=max(1, gleichzeitig)) as pool:
+        for liste in pool.map(unterkategorien, haupt):
+            serien += [u for u in liste if u not in serien]
         if fortschritt:
-            fortschritt(url.rsplit("/", 1)[-1], n, len(serien))
-        try:
-            seite = leser.holen(url)
-        except OSError:
-            continue
-        serie = serie_lesen(seite, url)
-        seite_nr = 1
-        while True:
-            for g in geraete_lesen(seite, serie):
-                geraete.setdefault(g.bestellnummer + "|" + g.name, g)
-            m = re.search(r"Zeige\s*<strong>\d+</strong>\s*bis\s*<strong>(\d+)</strong>\s*\(von insgesamt\s*<strong>(\d+)", seite)
-            if not m or int(m.group(1)) >= int(m.group(2)) or seite_nr >= 20:
-                break
-            seite_nr += 1
-            try:
-                seite = leser.holen(url[:-5] + f":{seite_nr}.html")
-            except OSError:
-                break
+            fortschritt("Serien gefunden", 0, len(serien))
+        erledigt = [0]
+
+        def eine(url: str) -> list[Geraet]:
+            ergebnis = _serie_einlesen(leser, url)
+            erledigt[0] += 1
+            if fortschritt:
+                fortschritt(url.rsplit("/", 1)[-1], erledigt[0], len(serien))
+            return ergebnis
+
+        ergebnisse = list(pool.map(eine, serien))       # Reihenfolge wie bisher (stabile Duplikat-Auswahl)
+    geraete: dict[str, Geraet] = {}
+    for liste in ergebnisse:
+        for g in liste:
+            geraete.setdefault(g.bestellnummer + "|" + g.name, g)
     if fortschritt:
         fortschritt("fertig", len(serien), len(serien))
     return list(geraete.values())

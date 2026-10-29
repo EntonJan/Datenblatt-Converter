@@ -454,3 +454,46 @@ def test_nach_serie():
     tr = Q.suchen(_gemeinsame_geraete(), Q.anfrage_lesen("wassergekühlt 30V 1000A 30kW"))
     gruppen = Q.nach_serie(tr)
     assert [s for s, _ in gruppen] == ["TEST-Serie F"] and len(gruppen[0][1]) == 2
+
+
+def test_einlesen_parallel_und_wiederholung(monkeypatch):
+    """v1.2.1: 20 langsame Serienseiten werden gleichzeitig geholt; ein Timeout wird wiederholt statt die Serie zu verlieren."""
+    import threading
+    import time as _t
+    serien = [f"https://www.eps-germany.de/shop/AC-DC/Serie-{i}:::1_5{i:02d}.html" for i in range(20)]
+    start = "".join(f'<a href="{u}">S</a>' for u in serien)
+    seite = SERIENSEITE
+    versuche: dict[str, int] = {}
+    sperre = threading.Lock()
+
+    class Antwort:
+        def __init__(self, text):
+            self.text, self.headers = text.encode(), type("H", (), {"get_content_charset": lambda s: "utf-8"})()
+        def read(self):
+            return self.text
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    class Langsam:
+        def open(self, req, timeout):
+            url = req.full_url
+            with sperre:
+                versuche[url] = versuche.get(url, 0) + 1
+                n = versuche[url]
+            if url == serien[3] and n == 1:
+                raise TimeoutError("hängt")
+            schlafen(0.2)
+            return Antwort(start if url == S.BASIS else seite.replace("200360", f"9{serien.index(url):05d}") if url in serien else "")
+
+    schlafen = _t.sleep
+    monkeypatch.setattr(S.time, "sleep", lambda s: schlafen(min(s, 0.01)))
+    leser = S.Leser(pause=0)
+    leser.opener = Langsam()
+    t = _t.time()
+    g = S.einlesen(leser)
+    dauer = _t.time() - t
+    assert versuche[serien[3]] == 2                       # einmal wiederholt
+    assert len({x.bestellnummer for x in g}) >= 20        # keine Serie verloren
+    assert dauer < 0.2 * 21 / 2                           # deutlich schneller als nacheinander (≈ 4,2 s)
