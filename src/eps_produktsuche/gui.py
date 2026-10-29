@@ -633,6 +633,12 @@ class App(tk.Tk):
         else:
             self.stand_lbl.configure(text="Shopdaten: noch nicht eingelesen")
 
+    def _alter_stand(self) -> list[shop.Geraet]:
+        """Aktuelle Daten plus Geräte aus shopdaten_vorher.json, die darin fehlen (falls schon einmal etwas verloren ging)."""
+        vorher, _ = shop.laden(self.pfad.with_name("shopdaten_vorher.json"))
+        bekannt = {g.bestellnummer + "|" + g.name for g in self.geraete}
+        return self.geraete + [g for g in vorher if g.bestellnummer + "|" + g.name not in bekannt]
+
     def einlesen(self, still: bool = False):
         if self.laedt:
             return
@@ -652,7 +658,9 @@ class App(tk.Tk):
 
         def lauf():
             try:
-                ergebnis["geraete"] = shop.einlesen(fortschritt=melden)
+                fehlend: list[str] = []
+                ergebnis["geraete"] = shop.einlesen(fortschritt=melden, unvollstaendig=fehlend)
+                ergebnis["fehlend"] = fehlend
             except Exception as e:  # noqa: BLE001 – Netzwerkfehler o. Ä. sauber melden
                 ergebnis["fehler"] = e
             ergebnis["fertig"] = True
@@ -691,15 +699,20 @@ class App(tk.Tk):
                                                           "Internetverbindung prüfen. Die bisherigen Daten bleiben erhalten.")
                 return
             neu = ergebnis.get("geraete") or []
-            grund = shop.pruefen(neu, self.geraete)
+            fehlend = ergebnis.get("fehlend") or []
+            uebernommen = 0
+            alt = self._alter_stand()
+            if fehlend and alt:                     # nicht erreichbare Serien: alter Stand statt Lücke
+                neu, uebernommen = shop.ergaenzen(neu, alt, fehlend)
+            grund = shop.pruefen(neu, alt)
             if grund:
                 try:                                      # zur Fehlersuche aufheben
                     shop.speichern(neu, self.pfad.with_name("shopdaten_abgelehnt.json"))
                 except OSError:
                     pass
-                alt = f"Die bisherigen Daten ({len(self.geraete)} Geräte) bleiben erhalten." if self.geraete else ""
+                bleibt = f"Die bisherigen Daten ({len(self.geraete)} Geräte) bleiben erhalten." if self.geraete else ""
                 if not messagebox.askyesno("Shop einlesen – Ergebnis unplausibel",
-                                           f"{grund}\n\n{alt}\n\nTrotzdem die neuen Daten übernehmen?",
+                                           f"{grund}\n\n{bleibt}\n\nTrotzdem die neuen Daten übernehmen?",
                                            icon="warning", default="no", parent=self):
                     self.info.configure(text=f"Neue Shopdaten verworfen: {grund}")
                     self.stand_lbl.configure(text=self.stand_lbl.cget("text") + " · neues Einlesen verworfen")
@@ -711,6 +724,15 @@ class App(tk.Tk):
                 messagebox.showwarning("Shop einlesen", f"Daten gelesen, aber nicht gespeichert:\n{e}")
             self.stand = datetime.now().isoformat(timespec="minutes")
             self._status()
+            if fehlend:
+                self.stand_lbl.configure(text=self.stand_lbl.cget("text") + f" · {len(fehlend)} Serien unvollständig")
+                messagebox.showwarning(
+                    "Shop einlesen",
+                    f"{len(fehlend)} Serie(n) konnten nicht vollständig gelesen werden (Shop antwortet langsam).\n"
+                    + (f"Dafür wurden {uebernommen} Geräte aus dem letzten Stand übernommen.\n" if uebernommen else "")
+                    + "\nBitte später noch einmal „Shop neu einlesen“.\n\n"
+                    + "\n".join("• " + u.rsplit("/", 1)[-1].split(":::")[0].replace("-", " ") for u in fehlend[:12]),
+                    parent=self)
             self.suchen()
             if not self.eingabe.get().strip():
                 self.info.configure(text=f"Shop eingelesen: {len(self.geraete)} Geräte.")

@@ -357,16 +357,16 @@ class Leser:
             return daten.decode("latin-1")
 
 
-GLEICHZEITIG = 4                 # parallele Seitenabrufe (schont den Shop, aber viel schneller als einzeln)
+GLEICHZEITIG = 3                 # parallele Seitenabrufe (schont den Shop, aber viel schneller als einzeln)
 _SEITENANZEIGE = re.compile(r"Zeige\s*<strong>\d+</strong>\s*bis\s*<strong>(\d+)</strong>\s*\(von insgesamt\s*<strong>(\d+)")
 
 
-def _serie_einlesen(leser: Leser, url: str) -> list[Geraet]:
-    """Eine Serie inkl. Folgeseiten (…:2.html). Fehler → leere Liste (die Plausibilitätsprüfung fängt Lücken ab)."""
+def _serie_einlesen(leser: Leser, url: str) -> tuple[list[Geraet], bool]:
+    """Eine Serie inkl. Folgeseiten (…:2.html). → (Geräte, vollständig?)"""
     try:
         seite = leser.holen(url)
     except OSError:
-        return []
+        return [], False
     serie = serie_lesen(seite, url)
     gefunden: list[Geraet] = []
     seite_nr = 1
@@ -374,17 +374,20 @@ def _serie_einlesen(leser: Leser, url: str) -> list[Geraet]:
         gefunden += geraete_lesen(seite, serie)
         m = _SEITENANZEIGE.search(seite)
         if not m or int(m.group(1)) >= int(m.group(2)) or seite_nr >= 20:
-            break
+            return gefunden, True
         seite_nr += 1
         try:
             seite = leser.holen(url[:-5] + f":{seite_nr}.html")
         except OSError:
-            break
-    return gefunden
+            return gefunden, False
 
 
-def einlesen(leser: Leser | None = None, fortschritt=None, gleichzeitig: int = GLEICHZEITIG) -> list[Geraet]:
-    """Liest alle Serien des Shops (mehrere gleichzeitig). fortschritt(text, erledigt, gesamt) – auch aus Worker-Threads."""
+def einlesen(leser: Leser | None = None, fortschritt=None, gleichzeitig: int = GLEICHZEITIG,
+             unvollstaendig: list[str] | None = None) -> list[Geraet]:
+    """Liest alle Serien des Shops (mehrere gleichzeitig). fortschritt(text, erledigt, gesamt) – auch aus Worker-Threads.
+
+    Serien, die nicht (vollständig) geladen werden konnten, werden am Ende einzeln und langsamer erneut versucht.
+    Was dann noch fehlt, steht in `unvollstaendig` (Serien-URLs) – die Oberfläche übernimmt dafür den alten Stand."""
     leser = leser or Leser()
     start = leser.holen(BASIS)
     alle = links(start)
@@ -404,7 +407,7 @@ def einlesen(leser: Leser | None = None, fortschritt=None, gleichzeitig: int = G
             fortschritt("Serien gefunden", 0, len(serien))
         erledigt = [0]
 
-        def eine(url: str) -> list[Geraet]:
+        def eine(url: str) -> tuple[list[Geraet], bool]:
             ergebnis = _serie_einlesen(leser, url)
             erledigt[0] += 1
             if fortschritt:
@@ -412,13 +415,35 @@ def einlesen(leser: Leser | None = None, fortschritt=None, gleichzeitig: int = G
             return ergebnis
 
         ergebnisse = list(pool.map(eine, serien))       # Reihenfolge wie bisher (stabile Duplikat-Auswahl)
+
+    nochmal = [i for i, (_, ok) in enumerate(ergebnisse) if not ok]
+    if nochmal:                                            # zweiter Durchgang: einzeln, längere Wartezeit
+        geduldig = Leser(pause=max(leser.pause, 0.5), timeout=max(leser.timeout, 25), versuche=leser.versuche)
+        geduldig.opener = leser.opener
+        for n, i in enumerate(nochmal, 1):
+            if fortschritt:
+                fortschritt(f"Wiederhole {n}/{len(nochmal)}: " + serien[i].rsplit("/", 1)[-1], len(serien), len(serien))
+            neu = _serie_einlesen(geduldig, serien[i])
+            if neu[1] or len(neu[0]) > len(ergebnisse[i][0]):
+                ergebnisse[i] = neu
+    if unvollstaendig is not None:
+        unvollstaendig += [_ohne_sid(serien[i]) for i, (_, ok) in enumerate(ergebnisse) if not ok]
+
     geraete: dict[str, Geraet] = {}
-    for liste in ergebnisse:
+    for liste, _ in ergebnisse:
         for g in liste:
             geraete.setdefault(g.bestellnummer + "|" + g.name, g)
     if fortschritt:
         fortschritt("fertig", len(serien), len(serien))
     return list(geraete.values())
+
+
+def ergaenzen(neu: list[Geraet], alt: list[Geraet], serien_urls: list[str]) -> tuple[list[Geraet], int]:
+    """Für Serien, die diesmal nicht vollständig geladen wurden, die fehlenden Geräte aus dem alten Stand übernehmen."""
+    urls = {_ohne_sid(u) for u in serien_urls}
+    vorhanden = {g.bestellnummer + "|" + g.name for g in neu}
+    dazu = [g for g in alt if _ohne_sid(g.shop_url) in urls and g.bestellnummer + "|" + g.name not in vorhanden]
+    return neu + dazu, len(dazu)
 
 
 # ------------------------------------------------------------------------ Zwischenspeicher

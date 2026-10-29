@@ -484,6 +484,10 @@ def test_einlesen_parallel_und_wiederholung(monkeypatch):
                 n = versuche[url]
             if url == serien[3] and n == 1:
                 raise TimeoutError("hängt")
+            if url == serien[7] and n <= 3:              # erst im zweiten (langsamen) Durchgang erreichbar
+                raise TimeoutError("überlastet")
+            if url == serien[9]:                         # gar nicht erreichbar
+                raise TimeoutError("weg")
             schlafen(0.2)
             return Antwort(start if url == S.BASIS else seite.replace("200360", f"9{serien.index(url):05d}") if url in serien else "")
 
@@ -492,8 +496,15 @@ def test_einlesen_parallel_und_wiederholung(monkeypatch):
     leser = S.Leser(pause=0)
     leser.opener = Langsam()
     t = _t.time()
-    g = S.einlesen(leser)
+    fehlend = []
+    g = S.einlesen(leser, unvollstaendig=fehlend)
     dauer = _t.time() - t
     assert versuche[serien[3]] == 2                       # einmal wiederholt
-    assert len({x.bestellnummer for x in g}) >= 20        # keine Serie verloren
+    assert versuche[serien[7]] == 4                       # zweiter Durchgang hat sie geholt
+    assert fehlend == [serien[9]]
+    nummern = {x.bestellnummer for x in g}
+    assert len(nummern) >= 19 and "900007" in nummern and "900009" not in nummern
+    alt = [Geraet("900009", "ALT 9", shop_url=serien[9]), Geraet("900001", "ALT 1", shop_url=serien[1])]
+    ergaenzt, n = S.ergaenzen(g, alt, fehlend)
+    assert n == 1 and "900009" in {x.bestellnummer for x in ergaenzt}
     assert dauer < 0.2 * 21 / 2                           # deutlich schneller als nacheinander (≈ 4,2 s)

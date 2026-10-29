@@ -84,7 +84,7 @@ Eigenständiges Werkzeug für Kundenanfragen (innerbetrieblich, unabhängig vom 
 z. B. `Stromquelle 0-30V 1kA 30kW`, `E-Last 500V 100A`, `230VAC 3kVA`, oder einen Namen/eine Bestellnummer.
 
 - **Datenquelle:** der EPS-Onlineshop (www.eps-germany.de/shop). Beim ersten Start und danach wöchentlich liest das
-  Programm alle Serienseiten (ca. 750 Geräte, seit 1.2.1 vier Seiten gleichzeitig, meist unter 1 Minute) und speichert sie in `EPS-Produktsuche-Daten\shopdaten.json`
+  Programm alle Serienseiten (ca. 750 Geräte, seit 1.2.1 mehrere Seiten gleichzeitig; nicht erreichbare Serien werden einzeln wiederholt, sonst bleibt deren alter Stand – mit Hinweis) und speichert sie in `EPS-Produktsuche-Daten\shopdaten.json`
   neben der EXE; „Shop neu einlesen“ erzwingt das. Ohne Internet wird mit dem letzten Stand gesucht.
 - **Bewertung:** passt genau (≤ Wunsch +20 %, wie Konfigurator) · passt (größer) · n× parallel (nur Serien mit
   Parallelschaltung/Master-Slave laut Shop, bis zur dort genannten Gerätezahl) · n× in Reihe · knapp darunter (−10 %).
