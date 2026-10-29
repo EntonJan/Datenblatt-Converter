@@ -451,9 +451,17 @@ class App(tk.Tk):
             for serie, liste in gruppen:
                 erster = liste[0]
                 hinweis = erster.hinweis
+                # weitere Geräte der Serie, die ebenfalls genau passen (z. B. gleiche Ausgangswerte, anderer Eingang):
+                # nicht im zugeklappten Teil verstecken
+                gleich = [t for t in liste[1:] if t.kategorie == Q.PASST] if erster.kategorie == Q.PASST else []
                 if len(liste) > 1:
-                    hinweis = f"+{len(liste) - 1} weitere der Serie" + (f"; {hinweis}" if hinweis else "")
+                    hinweis = f"+{len(liste) - 1} weitere der Serie" + \
+                        (f", davon {len(gleich)} ebenfalls „passt genau“ (aufgeklappt)" if gleich else "") + \
+                        (self._eingang_hinweis([erster, *gleich], a) if gleich else "") + \
+                        (f"; {hinweis}" if hinweis else "")
                 eltern = self._zeile(erster.bewertung, erster.g, erster.reserve_text(), hinweis, (erster.kategorie,))
+                if gleich:
+                    self.tv.item(eltern, open=True)
                 for t in liste[1:]:
                     self._zeile(t.bewertung, t.g, t.reserve_text(), t.hinweis, (t.kategorie,), eltern=eltern)
             serien_text = f" in {len(gruppen)} Serien"
@@ -465,6 +473,14 @@ class App(tk.Tk):
         self.info.configure(text=f"{len(self.treffer)} Treffer{serien_text}: {n[Q.PASST]} passen genau, {n[Q.GROESSER]} größer, "
                                  f"{n[Q.PARALLEL] + n[Q.REIHE]} mit mehreren Geräten, {n[Q.KNAPP_DARUNTER]} knapp darunter"
                                  + (" – Gerätetyp auf „alle“ stellen?" if not self.treffer and a.geraetetyp else ""))
+
+    @staticmethod
+    def _eingang_hinweis(treffer: list[Q.Treffer], a: Q.Anfrage) -> str:
+        eingaenge = sorted({t.g.u_eingang for t in treffer if t.g.u_eingang})
+        if len(eingaenge) > 1 and not a.eingang:
+            return (" – unterscheiden sich im DC-Eingang (" + "/".join(f"{e:g}" for e in eingaenge) +
+                    " V): „Eingang …VDC“ ins Suchfeld schreiben")
+        return ""
 
     def _zeile(self, bew, g: shop.Geraet, reserve, hinweis, tags, eltern: str = "") -> str:
         iid = str(len(self.zeilen_geraete))
