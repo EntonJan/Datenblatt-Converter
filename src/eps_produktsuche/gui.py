@@ -526,8 +526,15 @@ class App(tk.Tk):
 
     def shopseite(self):
         sel = self._auswahl()
-        if sel and self.zeilen_geraete[sel[0]].shop_url:
-            webbrowser.open(self.zeilen_geraete[sel[0]].shop_url)
+        if not sel:
+            return
+        g = self.zeilen_geraete[sel[0]]
+        url = g.seite_url or g.shop_url
+        if url:
+            webbrowser.open(url)
+        if not g.seite_url:
+            self.info.configure(text="Shopdaten sind älter – es öffnet die Serienseite. Nach „Shop neu einlesen“ "
+                                     "springt der Link direkt zum Gerät.")
 
     def _alternative_zu(self) -> str:
         if self.fremd and self.eingabe.get().strip() == self.fremd_anfrage:

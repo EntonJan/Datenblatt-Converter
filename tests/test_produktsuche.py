@@ -611,3 +611,12 @@ def test_dc_eingangsspannung():
     assert datenblatt.dc_eingang("Input Voltage: 48 VDC nominal") == 48
     fg = datenblatt.Fremdgeraet("x.pdf", umax=400, imax=8.6, pmax=5960, ac=True, geraetetyp=["DC/AC"], eingang=125)
     assert fg.anfrage() == "DC/AC 400VAC 8,6A 5,96kW Eingang 125VDC"
+
+
+def test_shoplink_springt_zum_geraet():
+    url = "https://www.eps-germany.de/shop/E-Last/EPS-ELR-10000-3U-Elektronische-Last-Netzrueckspeisung-5-15kW:::76_504.html"
+    serie = S.serie_lesen(ECHTE_LAST, url)
+    g = S.geraete_lesen(ECHTE_LAST, serie)[0]
+    assert g.shop_url == url and g.seite_url == url + "#prod_desc3764"
+    folge = url[:-5] + ":2.html?MODsid=abc"
+    assert S.geraete_lesen(ECHTE_LAST, serie, folge)[0].seite_url == url[:-5] + ":2.html#prod_desc3764"

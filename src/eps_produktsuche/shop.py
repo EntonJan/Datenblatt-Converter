@@ -62,6 +62,7 @@ class Geraet:
     f_option: list[float] = field(default_factory=list)            # als Option lieferbar
     wasser: str = ""                # "ja" (wassergekühlt), "option", "" = Luft/keine Angabe
     rueckspeisung: bool = False     # Netzrückspeisung / regenerativ
+    seite_url: str = ""             # Shopseite, auf der das Gerät steht (Serie/Folgeseite) + Sprungmarke zur Zeile
     u_eingang: float | None = None  # DC-Nenneingangsspannung (Wechselrichter, DC/DC), aus der Typbezeichnung
 
     @property
@@ -255,8 +256,10 @@ def serie_lesen(seite: str, url: str) -> Serie:
     return s
 
 
-def geraete_lesen(seite: str, serie: Serie) -> list[Geraet]:
+def geraete_lesen(seite: str, serie: Serie, seite_url: str = "") -> list[Geraet]:
+    """Geräte einer Serienseite. seite_url: Adresse genau dieser Seite (bei Folgeseiten „…:2.html“)."""
     out = []
+    seite_url = _ohne_sid(seite_url or serie.url)
     bloecke = re.split(r'<div class="listingrow', seite)[1:]
     for b in bloecke:
         tm = re.search(r'class="lr_title[^"]*"[^>]*>(.*?)</div>', b, re.S)
@@ -269,6 +272,7 @@ def geraete_lesen(seite: str, serie: Serie) -> list[Geraet]:
         if not nr or not name:
             continue
         pm = re.search(r'href="([^"]*media/products/[^"]+\.pdf)', b)
+        km = re.search(r'id="(prod_desc\d+)"', b)          # einzige eindeutige Kennung der Zeile im Shop
         bm = re.search(r'itemprop="description"[^>]*>(.*?)</div>', b, re.S)
         beschreibung = [_text(z) for z in re.split(r"<br\s*/?>", bm.group(1))] if bm else []
         for feld, muster in (("Spannung", r"(?:last|ausgangs)?(?:gleich|wechsel)?spannung"),
@@ -281,6 +285,7 @@ def geraete_lesen(seite: str, serie: Serie) -> list[Geraet]:
                    spannung=felder.get("Spannung", ""), strom=felder.get("Strom", ""),
                    leistung=felder.get("Ausgangsleistung", "") or felder.get("Eingangsleistung", ""),
                    bauart=felder.get("Bauart", ""), shop_url=serie.url,
+                   seite_url=seite_url + (f"#{km.group(1)}" if km else ""),
                    pdf_url=urllib.request.urljoin(BASIS, _ohne_sid(pm.group(1))) if pm else "",
                    parallel=serie.parallel or any("parallel" in z.lower() for z in beschreibung),
                    parallel_max=serie.parallel_max, reihe=serie.reihe)
@@ -385,14 +390,16 @@ def _serie_einlesen(leser: Leser, url: str) -> tuple[list[Geraet], bool]:
     serie = serie_lesen(seite, url)
     gefunden: list[Geraet] = []
     seite_nr = 1
+    seite_url = url
     while True:
-        gefunden += geraete_lesen(seite, serie)
+        gefunden += geraete_lesen(seite, serie, seite_url)
         m = _SEITENANZEIGE.search(seite)
         if not m or int(m.group(1)) >= int(m.group(2)) or seite_nr >= 20:
             return gefunden, True
         seite_nr += 1
+        seite_url = url[:-5] + f":{seite_nr}.html"
         try:
-            seite = leser.holen(url[:-5] + f":{seite_nr}.html")
+            seite = leser.holen(seite_url)
         except OSError:
             return gefunden, False
 
