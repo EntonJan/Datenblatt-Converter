@@ -352,7 +352,7 @@ def ist_hauptkategorie(url: str) -> bool:
 class Leser:
     """Holt Shopseiten. Kurzer Timeout + Wiederholung: ein hängender Seitenabruf bremst nicht das ganze Einlesen."""
 
-    def __init__(self, pause: float = 0.1, timeout: float = 12, versuche: int = 3):
+    def __init__(self, pause: float = 0.1, timeout: float = 20, versuche: int = 3):
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         self.pause, self.timeout, self.versuche = pause, timeout, versuche
 
@@ -405,13 +405,21 @@ def _serie_einlesen(leser: Leser, url: str) -> tuple[list[Geraet], bool]:
 
 
 def einlesen(leser: Leser | None = None, fortschritt=None, gleichzeitig: int = GLEICHZEITIG,
-             unvollstaendig: list[str] | None = None) -> list[Geraet]:
+             unvollstaendig: list[str] | None = None, bekannte_serien: list[str] | None = None) -> list[Geraet]:
     """Liest alle Serien des Shops (mehrere gleichzeitig). fortschritt(text, erledigt, gesamt) – auch aus Worker-Threads.
 
     Serien, die nicht (vollständig) geladen werden konnten, werden am Ende einzeln und langsamer erneut versucht.
     Was dann noch fehlt, steht in `unvollstaendig` (Serien-URLs) – die Oberfläche übernimmt dafür den alten Stand."""
     leser = leser or Leser()
-    start = leser.holen(BASIS)
+    try:
+        start = leser.holen(BASIS)
+    except OSError:
+        if not bekannte_serien:
+            raise
+        # Startseite hängt (kommt vor) – dann die Serien aus dem letzten Stand direkt abrufen
+        if fortschritt:
+            fortschritt("Startseite antwortet nicht – lese die bekannten Serien direkt", 0, len(bekannte_serien))
+        start = "".join(f'<a href="{u}">S</a>' for u in bekannte_serien)
     alle = links(start)
     haupt = sorted({u for u in alle if ist_hauptkategorie(u)})
     serien = [u for u in dict.fromkeys(alle) if ist_serie(u)]

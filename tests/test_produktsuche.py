@@ -620,3 +620,19 @@ def test_shoplink_springt_zum_geraet():
     assert g.shop_url == url and g.seite_url == url + "#prod_desc3764"
     folge = url[:-5] + ":2.html?MODsid=abc"
     assert S.geraete_lesen(ECHTE_LAST, serie, folge)[0].seite_url == url[:-5] + ":2.html#prod_desc3764"
+
+
+def test_einlesen_ohne_startseite():
+    """Hängt die Startseite, werden die Serien aus dem letzten Stand direkt gelesen."""
+    url = "https://www.eps-germany.de/shop/AC-DC/E-PSI-10000-4U-Labornetzgeraet-30-1920-kW:::1_500.html"
+
+    class Attrappe(S.Leser):
+        def holen(self, u):
+            if u == S.BASIS:
+                raise TimeoutError("The read operation timed out")
+            return SERIENSEITE
+    with pytest.raises(OSError):
+        S.einlesen(Attrappe(pause=0))
+    meldungen = []
+    g = S.einlesen(Attrappe(pause=0), lambda *a: meldungen.append(a), bekannte_serien=[url])
+    assert len(g) == 2 and "Startseite" in meldungen[0][0]

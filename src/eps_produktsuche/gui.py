@@ -203,6 +203,13 @@ class VerlaufDialog(tk.Toplevel):
             self.fuellen()
 
 
+def _fehlertext(e: Exception) -> str:
+    t = str(e)
+    if "timed out" in t or isinstance(e, TimeoutError):
+        return "Zeitüberschreitung – der Shop hat nicht rechtzeitig geantwortet"
+    return t
+
+
 def programmordner() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -747,10 +754,16 @@ class App(tk.Tk):
         def melden(text, erledigt, gesamt):
             meldungen.put((text, erledigt, gesamt))
 
+        bekannte = self._alter_stand()
+
         def lauf():
             try:
                 fehlend: list[str] = []
-                ergebnis["geraete"] = shop.einlesen(fortschritt=melden, unvollstaendig=fehlend)
+                bekannt = sorted({g.shop_url for g in bekannte if g.shop_url})
+                neu = shop.einlesen(fortschritt=melden, unvollstaendig=fehlend, bekannte_serien=bekannt)
+                if bekannt and len(neu) < 50:          # praktisch nichts erreicht: nicht den alten Stand „neu“ nennen
+                    raise OSError(f"Der Shop antwortet nicht (nur {len(neu)} Geräte gelesen)")
+                ergebnis["geraete"] = neu
                 ergebnis["fehlend"] = fehlend
             except Exception as e:  # noqa: BLE001 – Netzwerkfehler o. Ä. sauber melden
                 ergebnis["fehler"] = e
@@ -783,11 +796,13 @@ class App(tk.Tk):
             self._status()
             if "fehler" in ergebnis:
                 fehler = ergebnis["fehler"]
-                self.info.configure(text=f"Shop nicht erreichbar ({fehler}) – es wird mit dem bisherigen Stand gesucht.")
+                self.info.configure(text=f"Shop nicht erreichbar ({_fehlertext(fehler)}) – es wird mit dem bisherigen Stand gesucht.")
                 self.stand_lbl.configure(text=self.stand_lbl.cget("text") + " · Shop nicht erreichbar")
                 if not still:
-                    messagebox.showerror("Shop einlesen", f"Der Onlineshop konnte nicht gelesen werden:\n{fehler}\n\n"
-                                                          "Internetverbindung prüfen. Die bisherigen Daten bleiben erhalten.")
+                    messagebox.showerror("Shop einlesen", f"Der Onlineshop konnte nicht gelesen werden:\n{_fehlertext(fehler)}\n\n"
+                                                          "Öffnet www.eps-germany.de/shop im Browser normal, ist der Shop "
+                                                          "gerade nur für Programme langsam – später noch einmal versuchen.\n"
+                                                          "Die bisherigen Daten bleiben erhalten.")
                 return
             neu = ergebnis.get("geraete") or []
             fehlend = ergebnis.get("fehlend") or []
