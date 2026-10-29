@@ -30,6 +30,12 @@ _TOKEN = re.compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)\s*(?:(?:-|–|bis|\.\.\.?|…
                     r"(VA|V|A|W)(AC|DC|ac|dc|rms|eff)?(?![a-zA-Z])")
 
 
+_EINGANG = re.compile(r"(?:eingang|input|\bu_?e\b|\buin\b)\s*[:=]?\s*"
+                      r"(?P<u>\d+(?:[.,]\d+)?)\s*v\s*(?:dc)?\b", re.I)
+_EINGANG_VOR = re.compile(r"(?P<u>\d+(?:[.,]\d+)?)\s*v\s*dc\s*(?:to|→|->|zu|nach|auf)\s*(?P<aus>\d+(?:[.,]\d+)?\s*v\s*ac)", re.I)
+EINGANG_TOLERANZ = 0.10
+
+
 def obergrenze(wunsch: float) -> float:
     """Wunsch + 20 %, aufgerundet: bis 100 in der 1-2-5-Reihe, darüber in 250er-Schritten (wie Produktkonfigurator)."""
     if wunsch <= 0:
@@ -69,6 +75,7 @@ class Anfrage:
     rueckspeisung: bool = False
     wasser: bool = False
     frequenzen: list[float] = field(default_factory=list)
+    eingang: float | None = None # DC-Eingangsspannung (Wechselrichter, DC/DC), z. B. „Eingang 125VDC“
 
     @property
     def leistung_bedarf(self) -> float | None:
@@ -85,7 +92,16 @@ class Anfrage:
 def anfrage_lesen(text: str) -> Anfrage:
     """„Stromquelle 0-30V 1kA 30kW“ → U 30 V, I 1000 A, P 30 kW, Quelle."""
     a = Anfrage(text=text or "")
-    for m in _TOKEN.finditer(a.text):
+    rest = a.text
+    # Eingangsspannung zuerst herausnehmen („Eingang 125VDC“, „UE=125V“, „125Vdc to 400Vac“), sonst würde sie
+    # als Ausgangsspannung gelesen
+    m = _EINGANG.search(rest) or _EINGANG_VOR.search(rest)
+    if m:
+        a.eingang = float(m.group("u").replace(",", "."))
+        rest = rest[:m.start()] + " " + rest[m.end():]
+        if m.re is _EINGANG_VOR:
+            rest = rest[:m.start()] + " " + m.group("aus") + " " + rest[m.start():]
+    for m in _TOKEN.finditer(rest):
         wert = float((m.group(2) or m.group(1)).replace(",", ".")) * _PRAEFIX.get(m.group(3), 1.0)
         einheit, art = m.group(4), (m.group(5) or "").upper()
         if einheit == "V":
@@ -112,6 +128,8 @@ def anfrage_lesen(text: str) -> Anfrage:
             a.geraetetyp = "AC/AC"
     if re.search(r"quelle|netzger|netzteil|stromversorgung|source|power supply", tl):
         a.quelle = True
+    if a.eingang and not a.geraetetyp and not a.last:   # DC-Eingang: Wechselrichter (AC-Ausgang) bzw. DC/DC
+        a.geraetetyp = "DC/AC" if a.ausgang == "AC" or re.search(r"\d\s*v\s*ac|vac|wechselrichter|inverter", tl) else "DC/DC"
     merkmale_lesen(a, tl)
     if a.spannung is not None:
         a.erkannt.append(f"U = {zahl_text(a.spannung, 'V')}")
@@ -131,6 +149,8 @@ def anfrage_lesen(text: str) -> Anfrage:
                                   ("Netzrückspeisung", a.rueckspeisung), ("wassergekühlt", a.wasser)) if ja]
     if a.frequenzen:
         a.erkannt.append(" / ".join(zahl_text(f, "Hz") for f in a.frequenzen))
+    if a.eingang:
+        a.erkannt.append(f"Eingang {zahl_text(a.eingang, 'V')} DC")
     return a
 
 
@@ -225,6 +245,12 @@ def merkmale_pruefen(g: Geraet, a: Anfrage) -> tuple[bool, list[str]]:
         if w == "option":
             hinweise.append("Wasserkühlung als Option")
         elif w != "ja":
+            return False, []
+    if a.eingang and g.geraetetyp in ("DC/AC", "DC/DC"):
+        ue = getattr(g, "u_eingang", None)
+        if ue is None:
+            hinweise.append("Eingangsspannung nicht im Shop angegeben – prüfen")
+        elif abs(ue - a.eingang) > EINGANG_TOLERANZ * a.eingang:
             return False, []
     if a.frequenzen:
         fest, bereiche, option = getattr(g, "f_fest", []), getattr(g, "f_bereiche", []), getattr(g, "f_option", [])

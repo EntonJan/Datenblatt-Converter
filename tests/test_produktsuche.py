@@ -585,3 +585,29 @@ def test_fremd_anfrage_geschaetzter_typ_und_bauform():
     assert fg.anfrage() == "Quelle 1200V 1A 1,2kW bidirektional"           # 19 Zoll nur Info
     fg.typ_geschaetzt = False
     assert fg.anfrage().startswith("AC/DC ")                               # aus dem Datenblatt erkannt → bleibt
+
+
+def test_dc_eingangsspannung():
+    """Wechselrichter-Varianten unterscheiden sich nur im DC-Eingang (CTP 6000-110-400 vs. 6000-125-400)."""
+    from eps_produktsuche import datenblatt
+    assert S.eingang_aus_name("EPS/CTP 6000-125-400 Sinus-Wechselrichter", "DC/AC") == 125
+    assert S.eingang_aus_name("EPS/CSI 1000-48-230 Sinus-Wechselrichter", "DC/AC") == 48
+    assert S.eingang_aus_name("EPS/S1600 Plus-124R Sinuswechselrichter", "DC/AC") == 24
+    assert S.eingang_aus_name("EPS/Sx400-212 Sinuswechselrichter", "DC/AC") == 12
+    assert S.eingang_aus_name("E/PS 10060-1000 4U", "AC/DC") is None
+    geraete = []
+    for nr, ue in (("T-110", 110), ("T-125", 125), ("T-048", 48)):
+        g = Geraet(nr, f"TEST CTP 6000-{ue}-400 Wechselrichter", geraetetyp="DC/AC", spannung="3x 400V AC (L-L)",
+                   strom="8,6A", leistung="6000 VA")
+        S.auswerten(g)
+        geraete.append(g)
+    a = Q.anfrage_lesen("DC/AC 400VAC 8,6A 5,96kW Eingang 125VDC")
+    assert a.eingang == 125 and a.spannung == 400
+    assert [t.g.bestellnummer for t in Q.suchen(geraete, a)] == ["T-125"]
+    a = Q.anfrage_lesen("125Vdc to 400Vac 6kVA")
+    assert (a.eingang, a.spannung, a.geraetetyp) == (125, 400, "DC/AC")
+    assert len(Q.suchen(geraete, Q.anfrage_lesen("DC/AC 400VAC 8,6A 5,96kW"))) == 3     # ohne Eingang: alle
+    assert datenblatt.dc_eingang("6000VA Inverter\n125Vdc to 400Vac, 3-phase") == 125
+    assert datenblatt.dc_eingang("Input Voltage: 48 VDC nominal") == 48
+    fg = datenblatt.Fremdgeraet("x.pdf", umax=400, imax=8.6, pmax=5960, ac=True, geraetetyp=["DC/AC"], eingang=125)
+    assert fg.anfrage() == "DC/AC 400VAC 8,6A 5,96kW Eingang 125VDC"

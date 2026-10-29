@@ -39,6 +39,7 @@ class Fremdgeraet:
     hinweise: list[str] = field(default_factory=list)
     merkmale: list[str] = field(default_factory=list)   # z. B. ["19Zoll", "bidirektional", "400Hz"] – Teil der Anfrage
     pflicht: list[str] = field(default_factory=list)    # markierte Stellen (Textmarker) = muss genau erfüllt sein
+    eingang: float | None = None                        # DC-Eingangsspannung (Wechselrichter, DC/DC)
     typ_geschaetzt: bool = False                        # Gerätetyp nur aus dem Text geraten → Suche nur „Quelle“/„Last“
 
     def anfrage(self) -> str:
@@ -59,11 +60,29 @@ class Fremdgeraet:
             teile.append(_z(self.imax) + "A")
         if self.pmax:
             teile.append(_z(self.pmax / 1000) + "kW" if self.pmax >= 1000 else _z(self.pmax) + "W")
+        if self.eingang:
+            teile.append(f"Eingang {_z(self.eingang)}VDC")
         # Bauform (19 Zoll, Desktop …) nur anzeigen, nicht suchen – sonst fallen gleichwertige Geräte anderer Bauart raus
         return " ".join(teile + [m for m in self.merkmale if m not in BAUFORM_MERKMALE])
 
     def leer(self) -> bool:
         return not (self.umax or self.imax or self.pmax)
+
+
+_DC_EINGANG = [
+    re.compile(r"(\d+(?:[.,]\d+)?)\s*v\s*dc\s*(?:to|→|->|zu|auf)\s*\d+(?:[.,]\d+)?\s*v\s*ac", re.I),
+    re.compile(r"(\d+(?:[.,]\d+)?)\s*v\s*dc\s*(?:nominal|nenn)", re.I),
+    re.compile(r"(?:input\s+voltage|eingangsspannung|nenneingangsspannung|dc\s+input)[^\n]{0,40}?(\d+(?:[.,]\d+)?)\s*v\s*dc", re.I),
+]
+
+
+def dc_eingang(text: str) -> float | None:
+    """DC-Nenneingangsspannung eines Wechselrichters/DC-DC-Wandlers aus dem Datenblatt („125Vdc to 400Vac“)."""
+    for muster in _DC_EINGANG:
+        m = muster.search(text or "")
+        if m:
+            return float(m.group(1).replace(",", "."))
+    return None
 
 
 BAUFORM_MERKMALE = {"19Zoll", "Desktop", "Schrank", "Einbau", "DIN-Rail", "Tower"}
@@ -185,6 +204,7 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
             l_l = re.search(r"L-L", fg.spannung) and not _strangspannung(fg.spannung)
             fg.pmax = round((3 ** 0.5 if l_l else 3) * fg.umax * fg.imax, -1)
             fg.hinweise.append(f"Leistung berechnet ({'√3 × U(L-L)' if l_l else '3 × U(L-N)'} × I = {_z(fg.pmax)} VA).")
+    _eingang_setzen(fg, volltext)
     fg.merkmale = merkmale(volltext, fg.ac)
     if fg.merkmale:
         fg.hinweise.append(_merkmal_hinweis(fg.merkmale, "Datenblatt"))
@@ -197,6 +217,20 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
         fg.hinweise.append("Ohne feste Bezeichnung erkannt (bitte kurz prüfen): " + ", ".join(ergaenzt) + ".")
     fg.pflicht = anforderung.pdf_markierungen(pfad)
     return _abschliessen(fg)
+
+
+def _eingang_setzen(fg: Fremdgeraet, text: str) -> None:
+    """Bei Wechselrichtern/DC-DC zählt die Eingangsspannung (24/48/110/125 V …) – sonst sind alle Varianten gleich."""
+    typen = set(fg.geraetetyp)
+    if typen and not typen & {"DC/AC", "DC/DC"} and not fg.typ_geschaetzt:
+        return
+    ue = dc_eingang(text)
+    if not ue:
+        return
+    fg.eingang = ue
+    if not typen or fg.typ_geschaetzt:
+        fg.geraetetyp, fg.typ_geschaetzt = (["DC/AC"] if fg.ac else ["DC/DC"]), False
+    fg.hinweise.append(f"DC-Eingangsspannung: {_z(ue)} V – nur Geräte mit passendem Eingang (±10 %).")
 
 
 def _abschliessen(fg: Fremdgeraet) -> Fremdgeraet:
@@ -227,6 +261,7 @@ def _word_lesen(pfad: Path, variante: allgemein.Variante | None) -> Fremdgeraet:
         fg.typ_geschaetzt = bool(fg.geraetetyp)
     if re.search(r"≥|>=|\bor better\b|\boder besser\b|mindestens|at least", doc.text, re.I):
         fg.hinweise.append("Anforderungen als Mindestwerte (≥) – gesucht wird ab diesen Werten.")
+    _eingang_setzen(fg, doc.text)
     fg.merkmale = merkmale(doc.text, fg.ac)
     if fg.merkmale:
         fg.hinweise.append(_merkmal_hinweis(fg.merkmale, "Dokument"))

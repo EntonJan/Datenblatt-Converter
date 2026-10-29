@@ -62,6 +62,7 @@ class Geraet:
     f_option: list[float] = field(default_factory=list)            # als Option lieferbar
     wasser: str = ""                # "ja" (wassergekühlt), "option", "" = Luft/keine Angabe
     rueckspeisung: bool = False     # Netzrückspeisung / regenerativ
+    u_eingang: float | None = None  # DC-Nenneingangsspannung (Wechselrichter, DC/DC), aus der Typbezeichnung
 
     @property
     def kann_senken(self) -> bool:
@@ -294,10 +295,24 @@ def geraete_lesen(seite: str, serie: Serie) -> list[Geraet]:
     return out
 
 
+_EINGAENGE = "12|24|36|48|60|72|96|110|125|220|250|300|360|600"
+
+
+def eingang_aus_name(name: str, geraetetyp: str) -> float | None:
+    """DC-Nenneingangsspannung aus der Typbezeichnung – nur bei Geräten mit DC-Eingang (DC/AC, DC/DC).
+    „CTP 6000-125-400“ / „CSI 1000-48-230“ → 125 / 48 (Leistung-Eingang-Ausgang);
+    „S1600 Plus-124R“ / „Sx400-212“ → 24 / 12 (Ausgangskennziffer 1/2 + Eingang)."""
+    if geraetetyp not in ("DC/AC", "DC/DC"):
+        return None
+    m = re.search(rf"\b\d{{3,5}}-({_EINGAENGE})-\d{{2,3}}\b", name) or re.search(rf"-[12]({_EINGAENGE})R?\b", name)
+    return float(m.group(1)) if m else None
+
+
 def auswerten(g: Geraet) -> None:
     """Zahlenwerte aus den Shop-Texten (und notfalls aus der Typbezeichnung) berechnen."""
     g.ac = g.geraetetyp in AC_AUSGANG or (bool(re.search(r"VAC|V AC|\bAC\b", g.spannung)) and "VDC" not in g.spannung)
     g.umin, g.umax, g.u_fest, g.u_bereiche = spannung_lesen(g.spannung, g.ac)
+    g.u_eingang = eingang_aus_name(g.name, g.geraetetyp)
     g.imax = maximum(g.strom, "A")
     g.pmax = maximum(re.sub(r"\d+(?:[.,]\d+)?\s*k?(?:VA|W)\s*,?\s*1\s*min", "", g.leistung), "W")   # Kurzzeitwerte („…VA 1 min“) nicht
     abgeleitet = []
@@ -490,9 +505,11 @@ def laden(pfad: Path) -> tuple[list[Geraet], str]:
         return [], ""
     felder = Geraet.__dataclass_fields__
     geraete = [Geraet(**{k: v for k, v in g.items() if k in felder}) for g in d.get("geraete", [])]
-    if d.get("format", 1) < 2:                    # ältere Daten: Wasserkühlung wenigstens aus dem Namen ableiten
-        for g in geraete:
+    for g in geraete:
+        if d.get("format", 1) < 2:                # ältere Daten: Wasserkühlung wenigstens aus dem Namen ableiten
             g.wasser = g.wasser or wasserkuehlung(g.name, g.serie, "")
+        if g.u_eingang is None:                   # Eingangsspannung kommt aus dem Namen – geht ohne neues Einlesen
+            g.u_eingang = eingang_aus_name(g.name, g.geraetetyp)
     return geraete, d.get("stand", "")
 
 
