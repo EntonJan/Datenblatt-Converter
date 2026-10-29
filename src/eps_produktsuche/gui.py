@@ -38,8 +38,8 @@ class VariantenDialog(tk.Toplevel):
         self.grab_set()
         self.ergebnis = None
         self.varianten = varianten
-        ttk.Label(self, text="Das Datenblatt enthält mehrere Varianten ohne Modellnamen.\n"
-                             "Welche hat der Kunde? (Werte aus der Variantentabelle)", padding=10).pack(anchor="w")
+        ttk.Label(self, text="Das Dokument enthält mehrere Varianten bzw. Ausbaustufen ohne Modellnamen.\n"
+                             "Welche braucht der Kunde?", padding=10).pack(anchor="w")
         fr = ttk.Frame(self, padding=(10, 0))
         fr.pack(fill="both", expand=True)
         self.lb = tk.Listbox(fr, height=min(16, len(varianten) + 1), width=52, activestyle="dotbox", font=("Segoe UI", 10))
@@ -70,6 +70,50 @@ class VariantenDialog(tk.Toplevel):
     def ohne(self):
         self.ergebnis = False
         self.destroy()
+
+
+class OffenePunkteDialog(tk.Toplevel):
+    """Warnung nach dem Einlesen einer Anfrage: Punkte, die das Programm nicht prüfen konnte – zum Abhaken/Kopieren."""
+
+    def __init__(self, master, punkte: list[str], datei: str = ""):
+        super().__init__(master)
+        self.title("Ungeklärte Punkte" + (f" – {datei}" if datei else ""))
+        self.transient(master)
+        self.geometry("900x460")
+        kopf = tk.Frame(self, bg="#FFF4D6")
+        kopf.pack(fill="x")
+        tk.Label(kopf, text=f"⚠  {len(punkte)} Punkte konnte das Programm nicht anhand der Shopdaten prüfen.\n"
+                            "Markierte Stellen (Pflicht) müssen genau erfüllt sein – vor dem Angebot im EPS-Datenblatt "
+                            "nachsehen oder mit der Technik/dem Hersteller klären.",
+                 bg="#FFF4D6", fg="#5A4300", justify="left", anchor="w", padx=12, pady=10).pack(fill="x")
+        fr = ttk.Frame(self, padding=10)
+        fr.pack(fill="both", expand=True)
+        self.vars: list[tk.BooleanVar] = []
+        leinwand = tk.Canvas(fr, highlightthickness=0)
+        sb = ttk.Scrollbar(fr, orient="vertical", command=leinwand.yview)
+        innen = ttk.Frame(leinwand)
+        innen.bind("<Configure>", lambda e: leinwand.configure(scrollregion=leinwand.bbox("all")))
+        leinwand.create_window((0, 0), window=innen, anchor="nw")
+        leinwand.configure(yscrollcommand=sb.set)
+        leinwand.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.punkte = punkte
+        for p in punkte:
+            v = tk.BooleanVar(value=False)
+            self.vars.append(v)
+            tk.Checkbutton(innen, text=p, variable=v, wraplength=820, justify="left", anchor="w",
+                           font=("Segoe UI", 10)).pack(anchor="w", fill="x", pady=2)
+        unten = ttk.Frame(self, padding=10)
+        unten.pack(fill="x")
+        ttk.Button(unten, text="Als Liste kopieren", command=self.kopieren).pack(side="left")
+        ttk.Button(unten, text="OK", command=self.destroy).pack(side="right")
+        self.bind("<Escape>", lambda e: self.destroy())
+        _zentrieren(self, master)
+
+    def kopieren(self):
+        text = "\n".join(("[x] " if v.get() else "[ ] ") + p for p, v in zip(self.punkte, self.vars))
+        self.clipboard_clear()
+        self.clipboard_append(text)
 
 
 class VerlaufDialog(tk.Toplevel):
@@ -248,11 +292,13 @@ class App(tk.Tk):
         self.typ_cb = ttk.Combobox(oben, textvariable=self.typ, state="readonly", width=20,
                                    values=["automatisch", "alle", *Q.GERAETETYPEN])
         self.typ_cb.pack(side="left", padx=(4, 0))
-        self.knopf_pdf = ttk.Button(oben, text="Kunden-Datenblatt (PDF) …", command=self.datenblatt_waehlen)
+        self.knopf_pdf = ttk.Button(oben, text="Kunden-Dokument (PDF/Word) …", command=self.datenblatt_waehlen)
         self.knopf_pdf.pack(side="left", padx=(12, 0))
 
         self.fremd_lbl = tk.Label(self, text="", anchor="w", justify="left", bg="#EEF4FA", fg="#1C2633",
-                                  padx=12, pady=6, wraplength=1250)
+                                  padx=12, pady=6, wraplength=1250, cursor="hand2")
+        self.fremd_lbl.bind("<Button-1>", lambda e: self.offene_punkte() and
+                            OffenePunkteDialog(self, self.offene_punkte(), self.fremd.datei))
 
         opt = ttk.Frame(self, padding=(12, 4, 12, 0))
         opt.pack(fill="x")
@@ -300,7 +346,7 @@ class App(tk.Tk):
         ttk.Button(unten, text="(EN)", width=5, command=lambda: self.kopieren("en")).pack(side="left", padx=4)
         ttk.Button(unten, text="Gegenüberstellung PDF (DE)", command=lambda: self.gegenueberstellung("de")).pack(side="left", padx=(18, 0))
         ttk.Button(unten, text="(EN)", width=5, command=lambda: self.gegenueberstellung("en")).pack(side="left", padx=4)
-        ttk.Label(unten, text="Enter: im Verlauf merken · Doppelklick: Datenblatt · Strg+C: Empfehlung · Strg+O: Kunden-PDF",
+        ttk.Label(unten, text="Enter: im Verlauf merken · Doppelklick: Datenblatt · Strg+C: Empfehlung · Strg+O: Kunden-Dokument",
                   foreground=GRAU).pack(side="right")
 
         self.eingabe.trace_add("write", lambda *a: self.suchen())
@@ -532,6 +578,8 @@ class App(tk.Tk):
         typ = e.get("typ") or "automatisch"
         self.typ.set(typ if typ in self.typ_cb["values"] else "automatisch")
         self.eingabe.set(e.get("anfrage", ""))
+        if f:
+            self._offene_punkte_zeigen(still=True)
         if e.get("geraete"):
             nummern = {g["bestellnummer"] for g in e["geraete"]}
             sel = [iid for iid, i in self.iid_index.items() if self.zeilen_geraete[i].bestellnummer in nummern]
@@ -553,7 +601,7 @@ class App(tk.Tk):
             pass
 
     def _drop(self, e):
-        pfade = [Path(p) for p in self.tk.splitlist(e.data) if p.lower().endswith(".pdf")]
+        pfade = [Path(p) for p in self.tk.splitlist(e.data) if p.lower().endswith((".pdf", ".docx", ".docm"))]
         if pfade:
             self.after(10, lambda: self.datenblatt_laden(pfade[0]))
         return "copy"
@@ -561,7 +609,8 @@ class App(tk.Tk):
     def datenblatt_waehlen(self):
         from tkinter import filedialog
         pfad = filedialog.askopenfilename(parent=self, title="Datenblatt des Kunden öffnen",
-                                          filetypes=[("PDF", "*.pdf"), ("Alle Dateien", "*.*")])
+                                          filetypes=[("PDF oder Word", "*.pdf *.docx *.docm"), ("PDF", "*.pdf"),
+                                                     ("Word", "*.docx *.docm"), ("Alle Dateien", "*.*")])
         if pfad:
             self.datenblatt_laden(Path(pfad))
 
@@ -605,16 +654,35 @@ class App(tk.Tk):
             if fg.leer():
                 self.info.configure(text="Keine Werte erkannt – bitte Spannung/Strom/Leistung von Hand ins Suchfeld eintragen.")
             self._merken("Kunden-Datenblatt")
+            self._offene_punkte_zeigen(still=False)
             if fertig_cb:
                 fertig_cb(fg)
 
         self._hintergrund(lambda: datenblatt.analysieren(pfad), nach_analyse, f"Lese {pfad.name} …")
 
+    def offene_punkte(self) -> list[str]:
+        from . import anforderung
+        if not self.fremd:
+            return []
+        hinweise = [t.hinweis for t in self.treffer[:3] if t.hinweis]
+        return anforderung.offene_punkte(self.fremd, hinweise)
+
+    def _offene_punkte_zeigen(self, still: bool = True):
+        """Warnung am Ende des Einlesens: was die Suche nicht selbst klären konnte."""
+        offen = self.offene_punkte()
+        if offen:
+            self.fremd_lbl.configure(text=self.fremd_lbl.cget("text") +
+                                     f"\n⚠ {len(offen)} ungeklärte Punkte – vor dem Angebot klären (hier klicken für die Liste)")
+        if offen and not still:
+            OffenePunkteDialog(self, offen, self.fremd.datei)
+
     def _fremd_anzeigen(self, fg, aus_verlauf: bool = False):
         self.fremd = fg
         self.fremd_anfrage = fg.anfrage()
         werte = " · ".join(f"{n}: {t}" for n, t in (("Spannung", fg.spannung), ("Strom", fg.strom), ("Leistung", fg.leistung)) if t)
-        kopf = f"Kunden-Datenblatt: {fg.datei}" + (f" – Modell {fg.modell}" if fg.modell else "")
+        word = fg.datei.lower().endswith((".docx", ".docm"))
+        kopf = (f"Kunden-Dokument: {fg.datei}" if word else f"Kunden-Datenblatt: {fg.datei}") + \
+            (f" – {'Ausbaustufe' if word else 'Modell'} {fg.modell}" if fg.modell else "")
         if fg.geraetetyp:
             kopf += f" – {', '.join(fg.geraetetyp)}"
         if aus_verlauf:

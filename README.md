@@ -112,5 +112,11 @@ z. B. `Stromquelle 0-30V 1kA 30kW`, `E-Last 500V 100A`, `230VAC 3kVA`, oder eine
   - *Selbst-Update* („Updates“, beim Start automatisch): lädt `EPS-Produktsuche-v<Version>.exe` in den Programmordner,
     startet sie, ältere EXE-Versionen werden danach entfernt. Keine Admin-Rechte nötig.
   - Kunden-PDFs werden im Hintergrund gelesen – das Fenster bleibt bedienbar.
+- **Neu in 1.3 – Anforderungsdokumente (Word/PDF):** „Kunden-Dokument (PDF/Word) …“ liest auch .docx-Lastenhefte
+  (Tabellen „Parameter | Anforderung“, „≥“ als Mindestwert, Ausbaustufen wie „500 A für 10 kW / 1000 A für 30 kW“
+  zur Auswahl). Markierte Stellen (Textmarker in Word, Hervorhebungen in PDFs) gelten als Pflicht. Am Ende kommt
+  eine Warnung „Ungeklärte Punkte“ mit allem, was die Suche nicht anhand der Shopdaten prüfen kann (z. B.
+  Regelgenauigkeit, Interlock, Schnittstellen) – zum Abhaken und Kopieren; erneut über einen Klick auf die
+  blaue Infozeile.
 - **Gemeinsame Testfälle** mit dem Produktkonfigurator: `tests/gemeinsame-suchfaelle.json` (in beiden Repos identisch).
 - Eigene Releases mit Tag `produktsuche-v<Version>` (stören das Selbst-Update des Converters nicht).

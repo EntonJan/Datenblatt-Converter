@@ -17,7 +17,7 @@ import pdfplumber
 from eps_converter import auslesen, importieren, pfade, katalog as K, regeln
 from eps_converter.modell import Datensatz, Wert, HERKUNFT_PDF
 
-from . import allgemein
+from . import allgemein, anforderung
 
 LAST = "Elektronische Last"
 
@@ -38,6 +38,7 @@ class Fremdgeraet:
     hersteller_typ: str = ""
     hinweise: list[str] = field(default_factory=list)
     merkmale: list[str] = field(default_factory=list)   # z. B. ["19Zoll", "bidirektional", "400Hz"] – Teil der Anfrage
+    pflicht: list[str] = field(default_factory=list)    # markierte Stellen (Textmarker) = muss genau erfüllt sein
 
     def anfrage(self) -> str:
         """Anfragetext für die Suche, z. B. „AC/DC 60V 1000A 30kW“."""
@@ -100,7 +101,14 @@ def _text(pfad: Path, max_seiten: int = 4) -> str:
         return "\n".join((p.extract_text() or "") for p in pdf.pages[:max_seiten])
 
 
+def ist_word(pfad: Path) -> bool:
+    return Path(pfad).suffix.lower() in (".docx", ".docm")
+
+
 def analysieren(pfad: Path) -> Analyse:
+    if ist_word(pfad):
+        text = anforderung.docx_lesen(Path(pfad)).text
+        return Analyse([], anforderung.ausbaustufen(text) or allgemein.erkennen(text).varianten, bool(text.strip()))
     erg, _, _ = auslesen.analysieren(Path(pfad), katalog())
     varianten = [] if erg.modelle or not erg.hat_text else allgemein.erkennen(_text(Path(pfad))).varianten
     return Analyse(erg.modelle, varianten, erg.hat_text)
@@ -115,6 +123,8 @@ def modelle(pfad: Path) -> tuple[list[auslesen.Modellspalte], bool]:
 def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
           variante: allgemein.Variante | None = None) -> Fremdgeraet:
     pfad = Path(pfad)
+    if ist_word(pfad):
+        return _word_lesen(pfad, variante)
     kat = katalog()
     erg = auslesen.auslesen(pfad, kat, modell)
     fg = Fremdgeraet(datei=pfad.name, modell=modell.label if modell else (variante.label if variante else ""),
@@ -165,10 +175,43 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
         fg.hersteller_typ = f"{name} ({variante.label})" if name and variante else (name or fg.hersteller_typ)
     if ergaenzt:
         fg.hinweise.append("Ohne feste Bezeichnung erkannt (bitte kurz prüfen): " + ", ".join(ergaenzt) + ".")
+    fg.pflicht = anforderung.pdf_markierungen(pfad)
+    return _abschliessen(fg)
+
+
+def _abschliessen(fg: Fremdgeraet) -> Fremdgeraet:
     fehlt = [n for n, v in (("Spannung", fg.umax), ("Strom", fg.imax), ("Leistung", fg.pmax)) if not v]
     if fehlt:
         fg.hinweise.append("Nicht gefunden: " + ", ".join(fehlt) + " – ggf. von Hand ergänzen.")
+    if fg.pflicht:
+        offen = sum(1 for p in fg.pflicht if not anforderung.ist_geprueft(p))
+        fg.hinweise.append(f"{len(fg.pflicht)} markierte Pflichtpunkte, davon {offen} nicht automatisch prüfbar "
+                           "(Liste nach dem Einlesen).")
     return fg
+
+
+def _word_lesen(pfad: Path, variante: allgemein.Variante | None) -> Fremdgeraet:
+    """Anforderungsdokument (Word): Werte über die allgemeine Erkennung, markierte Stellen als Pflichtpunkte."""
+    doc = anforderung.docx_lesen(pfad)
+    sprache = "de" if re.search(r"\b(und|oder|Spannung|Strom|Leistung)\b", doc.text) else "en"
+    fg = Fremdgeraet(datei=pfad.name, modell=variante.label if variante else "", sprache=sprache, pflicht=doc.markiert)
+    e = allgemein.erkennen(doc.text)
+    quelle = variante or e
+    fg.spannung, fg.strom, fg.leistung = quelle.spannung or e.spannung, quelle.strom or e.strom, quelle.leistung or e.leistung
+    fg.umax = quelle.umax or e.umax
+    fg.imax = quelle.imax or e.imax
+    fg.pmax = quelle.pmax or e.pmax
+    fg.ac = e.ac
+    if not fg.leer():
+        fg.geraetetyp = _typ_aus_text(doc.text, fg.ac)
+    if re.search(r"≥|>=|\bor better\b|\boder besser\b|mindestens|at least", doc.text, re.I):
+        fg.hinweise.append("Anforderungen als Mindestwerte (≥) – gesucht wird ab diesen Werten.")
+    fg.merkmale = merkmale(doc.text, fg.ac)
+    if fg.merkmale:
+        fg.hinweise.append("Merkmale aus dem Dokument: " + ", ".join(fg.merkmale) + " (im Suchfeld änderbar).")
+    name = _produktname(doc.text) or Path(pfad).stem.replace("_", " ")
+    fg.hersteller_typ = f"{name} ({variante.label})" if variante else name
+    return _abschliessen(fg)
 
 
 def _allgemein_ergaenzen(ds: Datensatz, kat: K.Katalog, e: allgemein.Erkennung,

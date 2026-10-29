@@ -508,3 +508,71 @@ def test_einlesen_parallel_und_wiederholung(monkeypatch):
     ergaenzt, n = S.ergaenzen(g, alt, fehlend)
     assert n == 1 and "900009" in {x.bestellnummer for x in ergaenzt}
     assert dauer < 0.2 * 21 / 2                           # deutlich schneller als nacheinander (≈ 4,2 s)
+
+
+# ---------------------------------------------------------------- v1.3: Anforderungsdokumente (Word) mit Markierungen
+def _docx(pfad, zeilen, titel="TEST Lastenheft Netzgerät"):
+    """Minimale Word-Datei: Tabelle mit (Nr, Parameter, Anforderung, markiert?)."""
+    import zipfile
+
+    def lauf(t, gelb=False):
+        rpr = '<w:rPr><w:highlight w:val="yellow"/></w:rPr>' if gelb else ""
+        return f'<w:r>{rpr}<w:t xml:space="preserve">{t}</w:t></w:r>'
+
+    def zelle(*laeufe):
+        return "<w:tc><w:tcPr/><w:p>" + "".join(laeufe) + "</w:p></w:tc>"
+    tr = "".join("<w:tr>" + zelle(lauf(nr)) + zelle(lauf(p, gelb == "beide")) +
+                 zelle(*(lauf(a, gelb in ("beide", "wert")) if isinstance(a, str) else lauf(a[0], True) for a in
+                         (anf if isinstance(anf, list) else [anf]))) + "</w:tr>"
+                 for nr, p, anf, gelb in zeilen)
+    xml = ('<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+           f'<w:body><w:p w:rsidR="1"/><w:p>{lauf(titel)}</w:p><w:tbl><w:tblPr/>{tr}</w:tbl></w:body></w:document>')
+    with zipfile.ZipFile(pfad, "w") as z:
+        z.writestr("word/document.xml", xml)
+    return pfad
+
+
+def test_word_anforderung(tmp_path):
+    from eps_produktsuche import datenblatt, anforderung as A
+    p = _docx(tmp_path / "lastenheft.docx", [
+        ("S. No.", "Parameter", "Requirement", ""),
+        ("1", "DC Output Voltage", "0 V to ≥60 V", "beide"),
+        ("2", "DC Output Current", "≥100 A for 3 kW configuration and up to ≥300 A for 9 kW configuration", ""),
+        ("3", "DC Output Power", "≥3 kW, expandable to ≥9 kW", ""),
+        ("4", "Interfaces", ["USB, Ethernet, ", ("SCPI and LabVIEW",)], ""),
+        ("5", "Safety & Interlock", "External emergency shutdown", "beide"),
+        ("6", "Display", "Colour touch display", ""),
+    ])
+    d = A.docx_lesen(p)
+    assert "DC Output Voltage: 0 V to ≥60 V" in d.text and not d.text.startswith("S. No")
+    assert d.markiert == ["DC Output Voltage: 0 V to ≥60 V", "Interfaces: SCPI and LabVIEW  (aus: USB, Ethernet, SCPI and LabVIEW)",
+                          "Safety & Interlock: External emergency shutdown"]
+    a = datenblatt.analysieren(p)
+    assert [v.label for v in a.varianten] == ["60 V / 100 A / 3 kW", "60 V / 300 A / 9 kW"]
+    fg = datenblatt.lesen(p, variante=a.varianten[1])
+    assert fg.anfrage() == "AC/DC 60V 300A 9kW" and fg.hersteller_typ.startswith("TEST Lastenheft")
+    offen = A.offene_punkte(fg, ["+2 weitere der Serie; Bauform nicht im Shop angegeben"])
+    assert offen == ["Pflicht (markiert): Interfaces: SCPI and LabVIEW  (aus: USB, Ethernet, SCPI and LabVIEW)",
+                     "Pflicht (markiert): Safety & Interlock: External emergency shutdown",
+                     "Beste Treffer: Bauform nicht im Shop angegeben"]       # Spannung prüft die Suche selbst
+    tr = Q.suchen(_gemeinsame_geraete(), Q.anfrage_lesen(fg.anfrage()))
+    assert tr[0].g.bestellnummer == "T-004"
+
+
+def test_word_ohne_markierung_und_pdf_ohne_anmerkungen(tmp_path):
+    from eps_produktsuche import anforderung as A
+    p = _docx(tmp_path / "x.docx", [("1", "Output voltage", "48 V", "")])
+    assert A.docx_lesen(p).markiert == []
+    assert A.pdf_markierungen(tmp_path / "gibtsnicht.pdf") == []
+
+
+def test_pdf_markierungen(tmp_path):
+    pytest.importorskip("reportlab")
+    from reportlab.pdfgen import canvas
+    from eps_produktsuche import anforderung as A
+    c = canvas.Canvas(str(tmp_path / "m.pdf"))
+    c.drawString(72, 700, "TEST Output voltage: 0-60 V")
+    c.drawString(72, 680, "TEST Safety interlock required")
+    c.highlightAnnotation("gelb", (70, 676, 260, 692))
+    c.save()
+    assert A.pdf_markierungen(tmp_path / "m.pdf") == ["TEST Safety interlock required"]
