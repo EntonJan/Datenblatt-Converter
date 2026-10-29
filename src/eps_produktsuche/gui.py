@@ -770,6 +770,10 @@ class App(tk.Tk):
             fehlend = ergebnis.get("fehlend") or []
             uebernommen = 0
             alt = self._alter_stand()
+            if alt and len(neu) >= 50:              # Serien, die diesmal gar nicht auftauchten (Link-Seite nicht geladen)
+                neu_serien = {g.shop_url for g in neu}
+                fehlend = fehlend + sorted({g.shop_url for g in alt if g.shop_url and g.shop_url not in neu_serien}
+                                           - set(fehlend))
             if fehlend and alt:                     # nicht erreichbare Serien: alter Stand statt Lücke
                 neu, uebernommen = shop.ergaenzen(neu, alt, fehlend)
             grund = shop.pruefen(neu, alt)
@@ -796,9 +800,11 @@ class App(tk.Tk):
                 self.stand_lbl.configure(text=self.stand_lbl.cget("text") + f" · {len(fehlend)} Serien unvollständig")
                 messagebox.showwarning(
                     "Shop einlesen",
-                    f"{len(fehlend)} Serie(n) konnten nicht vollständig gelesen werden (Shop antwortet langsam).\n"
+                    f"{len(fehlend)} Serie(n) konnten nicht vollständig gelesen werden (Shop langsam) "
+                    "oder wurden diesmal nicht gefunden.\n"
                     + (f"Dafür wurden {uebernommen} Geräte aus dem letzten Stand übernommen.\n" if uebernommen else "")
-                    + "\nBitte später noch einmal „Shop neu einlesen“.\n\n"
+                    + "\nBitte später noch einmal „Shop neu einlesen“. Bleibt eine Serie dauerhaft in dieser Liste, "
+                    "wurde sie vermutlich aus dem Shop genommen.\n\n"
                     + "\n".join("• " + u.rsplit("/", 1)[-1].split(":::")[0].replace("-", " ") for u in fehlend[:12]),
                     parent=self)
             self.suchen()

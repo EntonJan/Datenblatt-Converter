@@ -39,6 +39,7 @@ class Fremdgeraet:
     hinweise: list[str] = field(default_factory=list)
     merkmale: list[str] = field(default_factory=list)   # z. B. ["19Zoll", "bidirektional", "400Hz"] – Teil der Anfrage
     pflicht: list[str] = field(default_factory=list)    # markierte Stellen (Textmarker) = muss genau erfüllt sein
+    typ_geschaetzt: bool = False                        # Gerätetyp nur aus dem Text geraten → Suche nur „Quelle“/„Last“
 
     def anfrage(self) -> str:
         """Anfragetext für die Suche, z. B. „AC/DC 60V 1000A 30kW“."""
@@ -48,6 +49,8 @@ class Fremdgeraet:
             teile.append("Last")
         elif LAST in typen:
             teile.append("Last")                      # bidirektional: muss auch senken können
+        elif self.typ_geschaetzt and typen and not (typen & {"AC/AC", "DC/AC"}):
+            teile.append("Quelle")                    # geschätzt: nicht auf einen Gerätetyp festlegen
         elif len(typen) == 1:
             teile.append(next(iter(typen)))
         if self.umax:
@@ -56,10 +59,25 @@ class Fremdgeraet:
             teile.append(_z(self.imax) + "A")
         if self.pmax:
             teile.append(_z(self.pmax / 1000) + "kW" if self.pmax >= 1000 else _z(self.pmax) + "W")
-        return " ".join(teile + self.merkmale)
+        # Bauform (19 Zoll, Desktop …) nur anzeigen, nicht suchen – sonst fallen gleichwertige Geräte anderer Bauart raus
+        return " ".join(teile + [m for m in self.merkmale if m not in BAUFORM_MERKMALE])
 
     def leer(self) -> bool:
         return not (self.umax or self.imax or self.pmax)
+
+
+BAUFORM_MERKMALE = {"19Zoll", "Desktop", "Schrank", "Einbau", "DIN-Rail", "Tower"}
+
+
+def _merkmal_hinweis(merkmale: list[str], quelle: str) -> str:
+    gesucht = [m for m in merkmale if m not in BAUFORM_MERKMALE]
+    bauform = [m.replace("19Zoll", "19 Zoll") for m in merkmale if m in BAUFORM_MERKMALE]
+    teile = []
+    if gesucht:
+        teile.append(f"Merkmale aus dem {quelle}: {', '.join(gesucht)} (im Suchfeld änderbar)")
+    if bauform:
+        teile.append(f"Bauform laut {quelle}: {', '.join(bauform)} (nur Info – bei Bedarf ins Suchfeld schreiben)")
+    return ". ".join(teile) + "."
 
 
 def _tausender(text: str) -> str:
@@ -153,7 +171,9 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
     if not fg.geraetetyp and not fg.leer():
         fg.geraetetyp = _typ_aus_text(volltext, fg.ac)
         if fg.geraetetyp:
-            fg.hinweise.append(f"Gerätetyp geschätzt: {fg.geraetetyp[0]}.")
+            fg.typ_geschaetzt = True
+            fg.hinweise.append(f"Gerätetyp geschätzt: {fg.geraetetyp[0]} – gesucht wird allgemein nach "
+                               f"{'Lasten' if fg.geraetetyp == [LAST] else 'Quellen'}.")
     if fg.ac:
         u = _strangspannung(fg.spannung)
         if u:
@@ -167,7 +187,7 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
             fg.hinweise.append(f"Leistung berechnet ({'√3 × U(L-L)' if l_l else '3 × U(L-N)'} × I = {_z(fg.pmax)} VA).")
     fg.merkmale = merkmale(volltext, fg.ac)
     if fg.merkmale:
-        fg.hinweise.append("Merkmale aus dem Datenblatt: " + ", ".join(fg.merkmale) + " (im Suchfeld änderbar).")
+        fg.hinweise.append(_merkmal_hinweis(fg.merkmale, "Datenblatt"))
     ht = w.get("hersteller_typ") or w.get("typbezeichnung")
     fg.hersteller_typ = (ht.de or ht.en) if ht else fg.modell
     if variante or not fg.hersteller_typ:
@@ -204,11 +224,12 @@ def _word_lesen(pfad: Path, variante: allgemein.Variante | None) -> Fremdgeraet:
     fg.ac = e.ac
     if not fg.leer():
         fg.geraetetyp = _typ_aus_text(doc.text, fg.ac)
+        fg.typ_geschaetzt = bool(fg.geraetetyp)
     if re.search(r"≥|>=|\bor better\b|\boder besser\b|mindestens|at least", doc.text, re.I):
         fg.hinweise.append("Anforderungen als Mindestwerte (≥) – gesucht wird ab diesen Werten.")
     fg.merkmale = merkmale(doc.text, fg.ac)
     if fg.merkmale:
-        fg.hinweise.append("Merkmale aus dem Dokument: " + ", ".join(fg.merkmale) + " (im Suchfeld änderbar).")
+        fg.hinweise.append(_merkmal_hinweis(fg.merkmale, "Dokument"))
     name = _produktname(doc.text) or Path(pfad).stem.replace("_", " ")
     fg.hersteller_typ = f"{name} ({variante.label})" if variante else name
     return _abschliessen(fg)

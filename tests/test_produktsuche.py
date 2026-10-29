@@ -550,7 +550,7 @@ def test_word_anforderung(tmp_path):
     a = datenblatt.analysieren(p)
     assert [v.label for v in a.varianten] == ["60 V / 100 A / 3 kW", "60 V / 300 A / 9 kW"]
     fg = datenblatt.lesen(p, variante=a.varianten[1])
-    assert fg.anfrage() == "AC/DC 60V 300A 9kW" and fg.hersteller_typ.startswith("TEST Lastenheft")
+    assert fg.anfrage() == "Quelle 60V 300A 9kW" and fg.hersteller_typ.startswith("TEST Lastenheft")
     offen = A.offene_punkte(fg, ["+2 weitere der Serie; Bauform nicht im Shop angegeben"])
     assert offen == ["Pflicht (markiert): Interfaces: SCPI and LabVIEW  (aus: USB, Ethernet, SCPI and LabVIEW)",
                      "Pflicht (markiert): Safety & Interlock: External emergency shutdown",
@@ -576,3 +576,12 @@ def test_pdf_markierungen(tmp_path):
     c.highlightAnnotation("gelb", (70, 676, 260, 692))
     c.save()
     assert A.pdf_markierungen(tmp_path / "m.pdf") == ["TEST Safety interlock required"]
+
+
+def test_fremd_anfrage_geschaetzter_typ_und_bauform():
+    from eps_produktsuche import datenblatt
+    fg = datenblatt.Fremdgeraet("x.pdf", umax=1200, imax=1, pmax=1200, geraetetyp=["AC/DC"], typ_geschaetzt=True,
+                                merkmale=["19Zoll", "bidirektional"])
+    assert fg.anfrage() == "Quelle 1200V 1A 1,2kW bidirektional"           # 19 Zoll nur Info
+    fg.typ_geschaetzt = False
+    assert fg.anfrage().startswith("AC/DC ")                               # aus dem Datenblatt erkannt → bleibt
