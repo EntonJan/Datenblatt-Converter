@@ -636,3 +636,11 @@ def test_einlesen_ohne_startseite():
     meldungen = []
     g = S.einlesen(Attrappe(pause=0), lambda *a: meldungen.append(a), bekannte_serien=[url])
     assert len(g) == 2 and "Startseite" in meldungen[0][0]
+
+
+def test_netzrueckspeisung_nur_aus_name_und_serie():
+    assert S.ist_rueckspeisend("E/PSB 10060-340 3U Bidirektionales DC-Netzgerät+Netzrückspeisung", "")
+    assert S.ist_rueckspeisend("EPS/ACS 3000-PS AC/AC und DC Quelle rückspeisend", "")
+    assert S.ist_rueckspeisend("EPS/TSDCR 65012001200", "EPS/TSDCR Regeneratives DC Lastsystem 60kW-2,6MW")
+    assert not S.ist_rueckspeisend("EPS/CSI 1000-48-230 Sinus-Wechselrichter", "EPS/CSI DC/AC Wechselrichter 50-11000 VA")
+    assert not S.ist_rueckspeisend("E/PS 10060-1000 4U Labornetzgerät", "E/PS 10000 4U Labornetzgerät 30-1920 kW")
