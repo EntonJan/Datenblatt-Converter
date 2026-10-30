@@ -55,6 +55,9 @@ def selbsttest(ziel: Path) -> int:
             import extract_msg  # noqa: F401
             from . import outlook as OL
             zeilen.append(f"Outlook-Anbindung: {'verfügbar' if OL.verfuegbar() else 'nicht verfügbar'}")
+            if OL.verfuegbar():
+                import win32timezone  # noqa: F401 – braucht pywin32 für Datumswerte aus Outlook (ReceivedTime)
+                zeilen.append("win32timezone OK")
         except ImportError as ie:
             zeilen.append(f"Mail-Bibliotheken fehlen: {ie}")
             ok = False
