@@ -7,3 +7,4 @@ tkinterdnd2==0.6.4
 extract-msg==0.58.0
 pywin32==311; sys_platform == "win32"
 keyring==25.6.0
+customtkinter==5.2.2

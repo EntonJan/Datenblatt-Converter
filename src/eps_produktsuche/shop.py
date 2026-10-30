@@ -502,6 +502,40 @@ def speichern(geraete: list[Geraet], pfad: Path) -> None:
     tmp.replace(pfad)
 
 
+def aenderungen(alt: list[Geraet], neu: list[Geraet]) -> dict:
+    """Unterschied zwischen zwei Ständen (z. B. shopdaten_vorher.json → shopdaten.json):
+    {"neu": [Geraet], "weg": [Geraet], "geaendert": [(alt, neu, ["Spannung", …])]}. Schlüssel: Bestellnummer + Name."""
+    def schluessel(g: Geraet) -> str:
+        return (g.bestellnummer or "") + "|" + g.name
+    a = {schluessel(g): g for g in alt}
+    n = {schluessel(g): g for g in neu}
+    nach_nr = {g.bestellnummer: g for g in alt if g.bestellnummer}
+    ergebnis: dict = {"neu": [], "weg": [], "geaendert": []}
+    umbenannt: set[str] = set()
+    for k, g in n.items():
+        if k in a:
+            vorher = a[k]
+        elif g.bestellnummer and g.bestellnummer in nach_nr and schluessel(nach_nr[g.bestellnummer]) not in n:
+            vorher = nach_nr[g.bestellnummer]          # gleiche Bestellnummer, anderer Name
+            umbenannt.add(schluessel(vorher))
+        else:
+            ergebnis["neu"].append(g)
+            continue
+        felder = [name for name, f in (("Name", "name"), ("Spannung", "spannung"), ("Strom", "strom"),
+                                       ("Leistung", "leistung"), ("Serie", "serie")) if getattr(vorher, f) != getattr(g, f)]
+        if felder:
+            ergebnis["geaendert"].append((vorher, g, felder))
+    ergebnis["weg"] = [g for k, g in a.items() if k not in n and k not in umbenannt]
+    return ergebnis
+
+
+def stand_von(pfad: Path) -> str:
+    try:
+        return json.loads(Path(pfad).read_text(encoding="utf-8")).get("stand", "")
+    except (OSError, ValueError):
+        return ""
+
+
 def datenformat(pfad: Path) -> int:
     try:
         return int(json.loads(pfad.read_text(encoding="utf-8")).get("format", 1))

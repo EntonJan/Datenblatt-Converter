@@ -1,6 +1,7 @@
 # PyInstaller-Bauplan für die EPS-Produktsuche (eigenständiges Programm, wird von GitHub Actions verwendet)
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files
 ROOT = Path(SPECPATH).parent
 
 a = Analysis(
@@ -10,13 +11,14 @@ a = Analysis(
     datas=[(str(ROOT / "assets" / "icon.ico"), "assets"), (str(ROOT / "assets" / "logo.jpg"), "assets"),
            (str(ROOT / "assets" / "fonts" / "Carlito-Regular.ttf"), "assets/fonts"),
            (str(ROOT / "assets" / "fonts" / "Carlito-Bold.ttf"), "assets/fonts"),
-           (str(ROOT / "katalog" / "feldkatalog.xlsx"), "katalog")],
+           (str(ROOT / "katalog" / "feldkatalog.xlsx"), "katalog")] + collect_data_files("customtkinter"),
     hiddenimports=["eps_produktsuche.selbsttest", "eps_produktsuche.datenblatt", "eps_produktsuche.vergleich",
                    "eps_produktsuche.verlauf", "eps_produktsuche.anforderung",
                    "eps_produktsuche.anfragen", "eps_produktsuche.kunde", "eps_produktsuche.mail",
                    "eps_produktsuche.outlook", "eps_produktsuche.einstellungen", "eps_produktsuche._build", "eps_produktsuche.weclapp",
                    "eps_produktsuche.weclapp_attrappe", "eps_produktsuche.weclapp_dialog", "eps_produktsuche.zugang",
                    "eps_produktsuche.datenquelle", "eps_produktsuche.weclapp_felder",
+                   "eps_produktsuche.thema", "eps_produktsuche.seiten", "customtkinter", "darkdetect",
                    "keyring.backends.Windows", "win32ctypes.pywin32.win32cred", "extract_msg",
                    "win32com.client", "pythoncom", "win32timezone", "pywintypes", "eps_produktsuche.aktualisierung", "eps_converter.auslesen",
                    "eps_converter.importieren", "PIL._tkinter_finder", "tkinterdnd2"],

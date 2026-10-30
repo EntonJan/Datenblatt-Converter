@@ -34,6 +34,7 @@ class Einstellungen:
     interne_domains: list[str] = field(default_factory=lambda: ["eps-germany.de"])   # Weiterleitungen erkennen
     weclapp_adresse: str = ""                       # z. B. „eps.weclapp.com“; „demo“ = nachgebautes Weclapp
     datenquelle: str = "shop"                       # "shop" oder "weclapp" (Gerätedaten für die Suche)
+    dunkelmodus: bool = False
 
     @staticmethod
     def laden(pfad: Path) -> "Einstellungen":
@@ -43,7 +44,7 @@ class Einstellungen:
             return Einstellungen()
         e = Einstellungen()
         for k in ("experimentell", "ordner_erledigt", "ordner_in_bearbeitung", "preisfrist_monate", "interne_domains",
-                  "weclapp_adresse", "datenquelle"):
+                  "weclapp_adresse", "datenquelle", "dunkelmodus"):
             if k in d:
                 setattr(e, k, d[k])
         if isinstance(d.get("anfrageordner"), list):

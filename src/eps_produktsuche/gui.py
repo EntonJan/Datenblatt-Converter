@@ -1,7 +1,11 @@
-"""Oberfläche der EPS-Produktsuche (Tkinter, keine Installation nötig)."""
+"""Oberfläche der EPS-Produktsuche (CustomTkinter, hell/dunkel, keine Installation nötig).
+
+Aufbau ab 1.4: links eine Seitenleiste (Suche, Anfragen, Verlauf, Gegenüberstellungen, Einstellungen), rechts die
+jeweilige Seite. Auf der Suche stehen oben die drei besten Treffer aus verschiedenen Serien als Karten, darunter alle
+weiteren als Liste (nach Serie gruppiert, aufklappbar).
+"""
 from __future__ import annotations
 
-import json
 import os
 import queue
 import sys
@@ -11,15 +15,19 @@ import webbrowser
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox
 
-from . import __version__, shop, suche as Q, verlauf, aktualisierung
-from .einstellungen import Einstellungen, Anfrageordner
+import customtkinter as ctk
+
+from . import __version__, shop, suche as Q, verlauf, aktualisierung, thema as TH
+from .einstellungen import Einstellungen
 
 TESTVERSION = "dev" in __version__        # Test-Builds vom Branch: kein Selbst-Update, keine Aufräumaktion
 
 NAVY, CYAN, GRAU = "#35528C", "#52B4D7", "#6A7380"
-FARBEN = {Q.PASST: "#2E7D32", Q.GROESSER: "#1B4F72", Q.PARALLEL: "#8E5A00", Q.REIHE: "#8E5A00", Q.KNAPP_DARUNTER: "#8A8F98"}
+FARBEN = {k: v[0] for k, v in TH.BEWERTUNG.items()}
+TYPEN = ["automatisch", "alle", *Q.GERAETETYPEN]
+TASTEN = "Enter: im Verlauf merken · Doppelklick: Datenblatt · Strg+C: Empfehlung · Strg+O: Kunden-Dokument"
 BEISPIELE = ("z. B. „Stromquelle 0-30V 1kA 30kW“ · „E-Last 500V 100A“ · „230VAC 3kVA 400Hz“ · „19 Zoll bidirektional 80V 300A“"
              " · „ELR 10080“")
 
@@ -45,7 +53,7 @@ class VariantenDialog(tk.Toplevel):
                              "Welche braucht der Kunde?", padding=10).pack(anchor="w")
         fr = ttk.Frame(self, padding=(10, 0))
         fr.pack(fill="both", expand=True)
-        self.lb = tk.Listbox(fr, height=min(16, len(varianten) + 1), width=52, activestyle="dotbox", font=("Segoe UI", 10))
+        self.lb = tk.Listbox(fr, height=min(16, len(varianten) + 1), width=52, activestyle="dotbox", font=(TH.SCHRIFT, 10))
         sb = ttk.Scrollbar(fr, command=self.lb.yview)
         self.lb.configure(yscrollcommand=sb.set)
         for v in varianten:
@@ -75,285 +83,41 @@ class VariantenDialog(tk.Toplevel):
         self.destroy()
 
 
-class OffenePunkteDialog(tk.Toplevel):
+class OffenePunkteDialog(ctk.CTkToplevel):
     """Warnung nach dem Einlesen einer Anfrage: Punkte, die das Programm nicht prüfen konnte – zum Abhaken/Kopieren."""
 
     def __init__(self, master, punkte: list[str], datei: str = ""):
-        super().__init__(master)
+        super().__init__(master, fg_color=TH.BG)
         self.title("Ungeklärte Punkte" + (f" – {datei}" if datei else ""))
         self.transient(master)
-        self.geometry("900x460")
-        kopf = tk.Frame(self, bg="#FFF4D6")
-        kopf.pack(fill="x")
-        tk.Label(kopf, text=f"⚠  {len(punkte)} Punkte konnte das Programm nicht anhand der Shopdaten prüfen.\n"
-                            "Markierte Stellen (Pflicht) müssen genau erfüllt sein – vor dem Angebot im EPS-Datenblatt "
-                            "nachsehen oder mit der Technik/dem Hersteller klären.",
-                 bg="#FFF4D6", fg="#5A4300", justify="left", anchor="w", padx=12, pady=10).pack(fill="x")
-        fr = ttk.Frame(self, padding=10)
-        fr.pack(fill="both", expand=True)
+        self.geometry("900x480")
+        kopf = ctk.CTkFrame(self, fg_color=TH.GELB, corner_radius=10)
+        kopf.pack(fill="x", padx=12, pady=(12, 6))
+        TH.text(kopf, f"⚠  {len(punkte)} Punkte konnte das Programm nicht anhand der Gerätedaten prüfen.\n"
+                      "Markierte Stellen (Pflicht) müssen genau erfüllt sein – vor dem Angebot im EPS-Datenblatt "
+                      "nachsehen oder mit der Technik/dem Hersteller klären.",
+                farbe=TH.GELB_TEXT, justify="left", anchor="w", wraplength=840).pack(fill="x", padx=12, pady=10)
+        innen = ctk.CTkScrollableFrame(self, fg_color=TH.FLAECHE, corner_radius=10)
+        innen.pack(fill="both", expand=True, padx=12)
         self.vars: list[tk.BooleanVar] = []
-        leinwand = tk.Canvas(fr, highlightthickness=0)
-        sb = ttk.Scrollbar(fr, orient="vertical", command=leinwand.yview)
-        innen = ttk.Frame(leinwand)
-        innen.bind("<Configure>", lambda e: leinwand.configure(scrollregion=leinwand.bbox("all")))
-        leinwand.create_window((0, 0), window=innen, anchor="nw")
-        leinwand.configure(yscrollcommand=sb.set)
-        leinwand.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
         self.punkte = punkte
         for p in punkte:
             v = tk.BooleanVar(value=False)
             self.vars.append(v)
-            tk.Checkbutton(innen, text=p, variable=v, wraplength=820, justify="left", anchor="w",
-                           font=("Segoe UI", 10)).pack(anchor="w", fill="x", pady=2)
-        unten = ttk.Frame(self, padding=10)
-        unten.pack(fill="x")
-        ttk.Button(unten, text="Als Liste kopieren", command=self.kopieren).pack(side="left")
-        ttk.Button(unten, text="OK", command=self.destroy).pack(side="right")
+            ctk.CTkCheckBox(innen, text=p, variable=v, font=TH.schrift(12), text_color=TH.TEXT,
+                            fg_color=TH.AKZENT).pack(anchor="w", fill="x", pady=3, padx=6)
+        unten = ctk.CTkFrame(self, fg_color="transparent")
+        unten.pack(fill="x", padx=12, pady=12)
+        TH.knopf(unten, "Als Liste kopieren", self.kopieren).pack(side="left")
+        TH.knopf(unten, "OK", self.destroy, haupt=True).pack(side="right")
         self.bind("<Escape>", lambda e: self.destroy())
         _zentrieren(self, master)
+        self.after(50, self.lift)
 
     def kopieren(self):
         text = "\n".join(("[x] " if v.get() else "[ ] ") + p for p, v in zip(self.punkte, self.vars))
         self.clipboard_clear()
         self.clipboard_append(text)
-
-
-class EinstellungenDialog(tk.Toplevel):
-    def __init__(self, app: "App"):
-        super().__init__(app)
-        self.app = app
-        self.title("Einstellungen")
-        self.transient(app)
-        self.grab_set()
-        e = app.einstellungen
-        fr = ttk.Frame(self, padding=14)
-        fr.pack(fill="both", expand=True)
-        self.experimentell = tk.BooleanVar(value=e.experimentell)
-        ttk.Checkbutton(fr, text="Experimentelle Funktionen: Kundenanfragen aus Outlook (Testphase)",
-                        variable=self.experimentell).grid(row=0, column=0, columnspan=3, sticky="w")
-        ttk.Label(fr, text="Anfrage-Ordner im klassischen Outlook (Pfad wie in der Ordnerliste, mit „/“ getrennt; "
-                           "gemeinsames Postfach: dessen Name vorn, z. B. „vertrieb@eps-germany.de/Posteingang/Anfragen“):",
-                  wraplength=640, foreground=GRAU).grid(row=1, column=0, columnspan=3, sticky="w", pady=(12, 4))
-        ttk.Label(fr, text="Ordner").grid(row=2, column=0, sticky="w")
-        ttk.Label(fr, text="Art").grid(row=2, column=1, sticky="w")
-        ttk.Label(fr, text="gemeinsam").grid(row=2, column=2, sticky="w")
-        self.zeilen = []
-        ordner = list(e.anfrageordner) + [Anfrageordner("", "pruefen")] * max(0, 4 - len(e.anfrageordner))
-        for i, o in enumerate(ordner[:6]):
-            pfad, art, gem = tk.StringVar(value=o.pfad), tk.StringVar(value="Automatisch" if o.art == "automatisch"
-                                                                      else "Selbst prüfen"), tk.BooleanVar(value=o.gemeinsam)
-            ttk.Entry(fr, textvariable=pfad, width=58).grid(row=3 + i, column=0, sticky="we", pady=2)
-            ttk.Combobox(fr, textvariable=art, values=["Automatisch", "Selbst prüfen"], state="readonly",
-                         width=14).grid(row=3 + i, column=1, padx=6)
-            ttk.Checkbutton(fr, variable=gem).grid(row=3 + i, column=2)
-            ttk.Button(fr, text="Aus Outlook wählen …", command=lambda v=pfad: self.waehlen(v)).grid(row=3 + i, column=3,
-                                                                                                padx=(6, 0))
-            self.zeilen.append((pfad, art, gem))
-        r = 3 + len(self.zeilen)
-        ttk.Label(fr, text="Erledigte Mails nach (Name = Unterordner, mit „/“ = fester Ordner):").grid(row=r, column=0, sticky="w", pady=(12, 2))
-        self.erledigt = tk.StringVar(value=e.ordner_erledigt)
-        ttk.Entry(fr, textvariable=self.erledigt, width=20).grid(row=r, column=1, columnspan=2, sticky="w", pady=(12, 2))
-        ttk.Label(fr, text="„In Bearbeitung“ (gemeinsame Postfächer; Name oder Pfad):").grid(row=r + 1, column=0, sticky="w")
-        self.bearbeitung = tk.StringVar(value=e.ordner_in_bearbeitung)
-        ttk.Entry(fr, textvariable=self.bearbeitung, width=20).grid(row=r + 1, column=1, columnspan=2, sticky="w")
-        ttk.Label(fr, text="Einkaufspreis gilt als zu alt nach (Monaten, für Weclapp):").grid(row=r + 2, column=0, sticky="w")
-        self.frist = tk.IntVar(value=e.preisfrist_monate)
-        ttk.Spinbox(fr, from_=1, to=36, width=5, textvariable=self.frist).grid(row=r + 2, column=1, sticky="w")
-        ttk.Label(fr, text="Eigene Domains (Mails von dort = Weiterleitung, Kunde steht darunter):").grid(
-            row=r + 3, column=0, sticky="w")
-        self.domains = tk.StringVar(value=", ".join(e.interne_domains))
-        ttk.Entry(fr, textvariable=self.domains, width=30).grid(row=r + 3, column=1, columnspan=3, sticky="w")
-        ttk.Separator(fr).grid(row=r + 4, column=0, columnspan=4, sticky="we", pady=10)
-        ttk.Label(fr, text="Weclapp-Adresse (z. B. „firma.weclapp.com“, „demo“ = nachgebautes Weclapp zum Ausprobieren):"
-                  ).grid(row=r + 5, column=0, sticky="w")
-        self.weclapp = tk.StringVar(value=e.weclapp_adresse)
-        ttk.Entry(fr, textvariable=self.weclapp, width=30).grid(row=r + 5, column=1, columnspan=2, sticky="w")
-        ttk.Label(fr, text="Gerätedaten für die Suche aus:").grid(row=r + 7, column=0, sticky="w", pady=(6, 0))
-        self.quelle = tk.StringVar(value="Weclapp" if e.datenquelle == "weclapp" else "Shop")
-        ttk.Combobox(fr, textvariable=self.quelle, values=["Shop", "Weclapp"], state="readonly", width=12).grid(
-            row=r + 7, column=1, sticky="w", pady=(6, 0))
-        wk = ttk.Frame(fr)
-        wk.grid(row=r + 6, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        ttk.Button(wk, text="Token eintragen …", command=self.token_eintragen).pack(side="left")
-        ttk.Button(wk, text="Verbindung testen", command=self.verbindung_testen).pack(side="left", padx=6)
-        self.weclapp_status = ttk.Label(wk, text="", foreground=GRAU)
-        self.weclapp_status.pack(side="left", padx=6)
-        bf = ttk.Frame(self, padding=(14, 0, 14, 14))
-        bf.pack(fill="x")
-        ttk.Button(bf, text="Speichern", command=self.speichern).pack(side="right")
-        ttk.Button(bf, text="Abbrechen", command=self.destroy).pack(side="right", padx=6)
-        self.bind("<Escape>", lambda ev: self.destroy())
-        _zentrieren(self, app)
-
-    def token_eintragen(self):
-        from . import zugang
-        adresse = self.weclapp.get().strip()
-        if not adresse or adresse.lower() == "demo":
-            messagebox.showinfo("Weclapp", "Erst die Weclapp-Adresse eintragen (für „demo“ ist kein Token nötig).",
-                                parent=self)
-            return
-        token = simpledialog.askstring("Weclapp-Token", "API-Token aus Weclapp (Meine Einstellungen → API).\n"
-                                       "Wird nur in der Windows-Anmeldeinformationsverwaltung gespeichert:",
-                                       show="*", parent=self)
-        if token:
-            dauerhaft = zugang.speichern(adresse, token.strip())
-            self.weclapp_status.configure(text="Token gespeichert." if dauerhaft else
-                                          "Token nur für diese Sitzung (keine Windows-Anmeldeinformationsverwaltung).")
-
-    def verbindung_testen(self):
-        from . import weclapp_dialog
-        from .einstellungen import Einstellungen
-        e = Einstellungen(weclapp_adresse=self.weclapp.get().strip())
-        self.weclapp_status.configure(text="Teste …")
-
-        def arbeit():
-            return weclapp_dialog.verbindung(e, self.app.geraete).verbindung_testen()
-
-        def fertig(text, fehler):
-            self.weclapp_status.configure(text=str(fehler) if fehler else text)
-        weclapp_dialog._hintergrund(self, arbeit, fertig)
-
-    def waehlen(self, var: tk.StringVar):
-        """Outlook-Ordnerdialog (im Hintergrund, Outlook braucht einen eigenen COM-Thread)."""
-        from . import outlook
-        if not outlook.verfuegbar():
-            messagebox.showinfo("Einstellungen", "Klassisches Outlook ist auf diesem Rechner nicht verfügbar.", parent=self)
-            return
-        ergebnis: dict = {}
-
-        def lauf():
-            try:
-                with outlook.Outlook() as ol:
-                    ergebnis["pfad"] = ol.ordner_waehlen()
-            except Exception as ex:  # noqa: BLE001
-                ergebnis["fehler"] = ex
-            ergebnis["fertig"] = True
-
-        def abfragen():
-            if not ergebnis.get("fertig"):
-                self.after(150, abfragen)
-                return
-            if "fehler" in ergebnis:
-                messagebox.showerror("Einstellungen", f"Outlook: {ergebnis['fehler']}", parent=self)
-            elif ergebnis.get("pfad"):
-                var.set(ergebnis["pfad"])
-
-        threading.Thread(target=lauf, daemon=True).start()
-        self.after(150, abfragen)
-
-    def speichern(self):
-        e = self.app.einstellungen
-        e.experimentell = self.experimentell.get()
-        e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "Automatisch" else "pruefen",
-                                         g.get()) for p, a, g in self.zeilen if p.get().strip()]
-        e.ordner_erledigt = self.erledigt.get().strip() or "Erledigt"
-        e.weclapp_adresse = self.weclapp.get().strip()
-        alte_quelle = e.datenquelle
-        e.datenquelle = "weclapp" if self.quelle.get() == "Weclapp" and e.weclapp_adresse else "shop"
-        e.interne_domains = [d.strip().lower().lstrip("@") for d in self.domains.get().replace(";", ",").split(",")
-                             if d.strip()] or ["eps-germany.de"]
-        e.ordner_in_bearbeitung = self.bearbeitung.get().strip() or "In Bearbeitung"
-        try:
-            e.preisfrist_monate = max(1, int(self.frist.get()))
-        except (tk.TclError, ValueError):
-            pass
-        try:
-            e.speichern(self.app.einstellungen_pfad)
-        except OSError as ex:
-            messagebox.showerror("Einstellungen", f"Konnte nicht gespeichert werden:\n{ex}", parent=self)
-            return
-        self.app._experimentell_zeigen()
-        if e.datenquelle != alte_quelle:
-            self.app.datenquelle_wechseln()
-        self.destroy()
-
-
-class VerlaufDialog(tk.Toplevel):
-    """Letzte Anfragen: Doppelklick/„Übernehmen“ holt Anfrage und Kunden-Datenblatt zurück."""
-
-    def __init__(self, app: "App"):
-        super().__init__(app)
-        self.app = app
-        self.title("Verlauf der Anfragen")
-        self.geometry("1100x520")
-        self.transient(app)
-        oben = ttk.Frame(self, padding=(10, 10, 10, 4))
-        oben.pack(fill="x")
-        ttk.Label(oben, text="Suchen:").pack(side="left")
-        self.filter = tk.StringVar()
-        e = ttk.Entry(oben, textvariable=self.filter, width=40)
-        e.pack(side="left", padx=6)
-        self.anzahl = ttk.Label(oben, text="", foreground=GRAU)
-        self.anzahl.pack(side="right")
-        sp = [("zeit", "Zeit", 115), ("anfrage", "Anfrage", 300), ("datei", "Kunden-Datenblatt", 220),
-              ("geraete", "Empfohlene Geräte", 280), ("aktion", "Aktion", 130), ("notiz", "Notiz", 200)]
-        fr = ttk.Frame(self, padding=(10, 0))
-        fr.pack(fill="both", expand=True)
-        self.tv = ttk.Treeview(fr, columns=[x[0] for x in sp], show="headings", selectmode="browse")
-        for k, t, b in sp:
-            self.tv.heading(k, text=t)
-            self.tv.column(k, width=b, stretch=k in ("anfrage", "geraete", "notiz"))
-        sb = ttk.Scrollbar(fr, orient="vertical", command=self.tv.yview)
-        self.tv.configure(yscrollcommand=sb.set)
-        self.tv.pack(side="left", fill="both", expand=True)
-        sb.pack(side="left", fill="y")
-        unten = ttk.Frame(self, padding=10)
-        unten.pack(fill="x")
-        ttk.Button(unten, text="Übernehmen", command=self.uebernehmen).pack(side="left")
-        ttk.Button(unten, text="Notiz …", command=self.notiz).pack(side="left", padx=6)
-        ttk.Button(unten, text="Eintrag löschen", command=self.loeschen).pack(side="left", padx=6)
-        ttk.Button(unten, text="Schließen", command=self.destroy).pack(side="right")
-        self.tv.bind("<Double-1>", lambda ev: self.uebernehmen())
-        self.tv.bind("<Return>", lambda ev: self.uebernehmen())
-        self.filter.trace_add("write", lambda *a: self.fuellen())
-        self.bind("<Escape>", lambda ev: self.destroy())
-        e.focus_set()
-        self.fuellen()
-
-    def fuellen(self):
-        self.eintraege = verlauf.laden(self.app.verlauf_pfad)
-        self.tv.delete(*self.tv.get_children())
-        n = 0
-        for i, e in enumerate(self.eintraege):
-            if not verlauf.passt(e, self.filter.get()):
-                continue
-            f = e.get("fremd") or {}
-            try:
-                zeit = datetime.fromisoformat(e["zeit"]).strftime("%d.%m.%Y %H:%M")
-            except (KeyError, ValueError):
-                zeit = e.get("zeit", "")
-            geraete = ", ".join(f"{g['bestellnummer']} {g['name']}" for g in e.get("geraete", []))
-            self.tv.insert("", "end", iid=str(i), values=[zeit, e.get("anfrage", ""), f.get("datei", ""), geraete,
-                                                          ", ".join(e.get("aktionen", [])), e.get("notiz", "")])
-            n += 1
-        self.anzahl.configure(text=f"{n} von {len(self.eintraege)} Einträgen")
-
-    def _gewaehlt(self) -> int | None:
-        sel = self.tv.selection()
-        return int(sel[0]) if sel else None
-
-    def uebernehmen(self):
-        i = self._gewaehlt()
-        if i is not None:
-            self.app.verlauf_uebernehmen(self.eintraege[i])
-            self.destroy()
-
-    def notiz(self):
-        i = self._gewaehlt()
-        if i is None:
-            return
-        neu = simpledialog.askstring("Notiz", "Notiz zu dieser Anfrage (z. B. Kunde, Angebotsnummer):",
-                                     initialvalue=self.eintraege[i].get("notiz", ""), parent=self)
-        if neu is not None:
-            verlauf.notiz_setzen(self.app.verlauf_pfad, i, neu)
-            self.fuellen()
-
-    def loeschen(self):
-        i = self._gewaehlt()
-        if i is not None and messagebox.askyesno("Verlauf", "Diesen Eintrag löschen?", parent=self):
-            verlauf.loeschen(self.app.verlauf_pfad, i)
-            self.fuellen()
 
 
 def _fehlertext(e: Exception) -> str:
@@ -385,20 +149,106 @@ def datei_oeffnen(pfad: Path) -> None:
         webbrowser.open(Path(pfad).resolve().as_uri())
 
 
-class App(tk.Tk):
+def _prozent(f: float | None) -> str:
+    if f is None:
+        return "–"
+    d = (f - 1) * 100
+    return "±0 %" if abs(d) < 0.5 else f"{'+' if d > 0 else '−'}{abs(d):.0f} %"
+
+
+class TrefferKarte(ctk.CTkFrame):
+    """Eine der drei Top-Karten: Bewertung, Nr., Name, U/I/P mit Abweichung, Merkmale, Auswählen/Datenblatt."""
+
+    def __init__(self, master, app: "App", nr: int):
+        super().__init__(master, fg_color=TH.FLAECHE, border_color=TH.RAND, border_width=1, corner_radius=12)
+        self.app, self.nr, self.t = app, nr, None
+        oben = ctk.CTkFrame(self, fg_color="transparent")
+        oben.pack(fill="x", padx=14, pady=(12, 0))
+        self.badge = ctk.CTkLabel(oben, text="", font=TH.schrift(12, True), corner_radius=10, height=24, padx=10)
+        self.badge.pack(side="left")
+        self.nummer = TH.text(oben, "", 12, farbe=TH.GRAU)
+        self.nummer.pack(side="right")
+        self.name = TH.text(self, "", 15, True, anchor="w", justify="left", wraplength=320)
+        self.name.pack(fill="x", padx=14, pady=(6, 6))
+        kacheln = ctk.CTkFrame(self, fg_color="transparent")
+        kacheln.pack(fill="x", padx=14)
+        self.werte = []
+        for i in range(3):
+            k = ctk.CTkFrame(kacheln, fg_color=TH.KACHEL, corner_radius=10)
+            k.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 6, 0))
+            kacheln.columnconfigure(i, weight=1, uniform="k")
+            w = TH.text(k, "", 16, True)
+            w.pack(pady=(6, 0))
+            d = TH.text(k, "", 11, farbe=TH.GRAU)
+            d.pack(pady=(0, 6))
+            self.werte.append((w, d))
+        self.info = TH.text(self, "", 11, farbe=TH.GRAU, anchor="w", justify="left", wraplength=320)
+        self.info.pack(fill="x", padx=14, pady=(8, 0))
+        self.serie = TH.text(self, "", 11, farbe=TH.LINK, anchor="w", cursor="hand2")
+        self.serie.pack(fill="x", padx=14)
+        self.serie.bind("<Button-1>", lambda e: self.app.serie_zeigen(self.t))
+        self.hinweis = TH.text(self, "", 11, farbe=TH.ORANGE, anchor="w", justify="left", wraplength=320)
+        knoepfe = ctk.CTkFrame(self, fg_color="transparent")
+        knoepfe.pack(fill="x", padx=14, pady=(8, 12), side="bottom")
+        self.knopf = TH.knopf(knoepfe, "Auswählen", lambda: self.app.karte_waehlen(self.nr), haupt=True, width=110, height=32)
+        self.knopf.pack(side="left")
+        TH.knopf(knoepfe, "Datenblatt", lambda: self.app.datenblatt_oeffnen(self.t.g), width=100, height=32
+                 ).pack(side="left", padx=6)
+        self.bind("<Configure>", self._breite)
+
+    def _breite(self, e):
+        w = max(200, e.width - 30)
+        for lbl in (self.name, self.info, self.hinweis):
+            lbl.configure(wraplength=w)
+
+    def zeigen(self, t: Q.Treffer, weitere: int, gleich: int, gewaehlt: bool):
+        self.t = t
+        g = t.g
+        genau = t.kategorie == Q.PASST
+        self.badge.configure(text=t.bewertung,
+                             fg_color=TH.GRUEN_BG if genau else (TH.GELB if t.kategorie in (Q.PARALLEL, Q.REIHE) else TH.CHIP),
+                             text_color=TH.GRUEN if genau else (TH.ORANGE if t.kategorie in (Q.PARALLEL, Q.REIHE)
+                                                                 else TH.CHIP_TEXT))
+        self.nummer.configure(text=f"Nr. {g.bestellnummer}")
+        self.name.configure(text=g.name)
+        werte = [(Q.zahl_text(g.umax, "V") if g.umax else (g.spannung or "–"), t.reserve.get("U")),
+                 (Q.zahl_text(g.imax, "A") if g.imax else (g.strom or "–"), t.reserve.get("I")),
+                 (Q.zahl_text(g.pmax, "W") if g.pmax else (g.leistung or "–"), t.reserve.get("P"))]
+        for (w, d), (wert, res) in zip(self.werte, werte):
+            w.configure(text=wert)
+            d.configure(text=_prozent(res) if res is not None else "nicht gefragt")
+        merkmale = [g.geraetetyp + (" bidirektional" if g.bidirektional and g.geraetetyp != shop.LAST else "")]
+        merkmale += [x for x in (g.bauart, "wassergekühlt" if g.wasser == "ja" else "", "Netzrückspeisung" if g.rueckspeisung
+                                 else "", f"bis {g.parallel_max} parallel" if g.parallel_max else "") if x]
+        self.info.configure(text=" · ".join(merkmale))
+        serie = f"▸ +{weitere} weitere der Serie" if weitere else ""
+        if gleich:
+            serie += f" · davon {gleich}× ebenfalls passt genau"
+        self.serie.configure(text=serie)
+        hinweis = t.hinweis
+        self.hinweis.configure(text=hinweis)
+        if hinweis:
+            self.hinweis.pack(fill="x", padx=14, after=self.serie)
+        else:
+            self.hinweis.pack_forget()
+        rand = TH.AKZENT if gewaehlt else (TH.GRUEN_RAND if genau else TH.RAND)
+        self.configure(border_color=rand, border_width=3 if gewaehlt else (2 if genau else 1))
+        self.knopf.configure(text="✓ Ausgewählt" if gewaehlt else "Auswählen")
+
+
+class App(ctk.CTk):
     def __init__(self, pfad: Path | None = None, automatisch_laden: bool = True, update_pruefen: bool | None = None):
-        super().__init__()
-        self.title(f"EPS-Produktsuche {__version__}")
-        self.geometry("1320x740")
-        self.minsize(1000, 540)
-        try:
-            self.iconbitmap(str(ressource("icon.ico")))
-        except tk.TclError:
-            pass
         self.pfad = pfad or datenpfad()
         self.verlauf_pfad = self.pfad.parent / "verlauf.json"
         self.einstellungen_pfad = self.pfad.parent / "einstellungen.json"
         self.einstellungen = Einstellungen.laden(self.einstellungen_pfad)
+        TH.modus_setzen(self.einstellungen.dunkelmodus)
+        super().__init__(fg_color=TH.BG)
+        self.title(f"EPS-Produktsuche {__version__}")
+        self.geometry("1440x900")
+        self.minsize(1100, 680)
+        if sys.platform == "win32":                 # CustomTkinter setzt kurz nach dem Start sein eigenes Symbol
+            self.after(300, self._symbol)
         self.vorgang = None                     # aktuelle Kundenanfrage aus Outlook/Mail (kunde.Erkennung + Mail)
         self.shop_pfad = self.pfad                # Shopdaten (auch Grundlage für den Weclapp-Demo-Modus)
         if self.einstellungen.datenquelle == "weclapp":
@@ -407,11 +257,17 @@ class App(tk.Tk):
         self.treffer: list[Q.Treffer] = []
         self.zeilen_geraete: list[shop.Geraet] = []
         self.iid_index: dict[str, int] = {}
+        self.karten_treffer: list[tuple[Q.Treffer, int, int]] = []     # (Treffer, weitere der Serie, davon genau)
+        self.karten_gewaehlt: set[int] = set()
+        self.karten_index: list[int] = []
+        self.serie_iid: dict[str, str] = {}
         self.fremd = None
         self.fremd_anfrage = ""
         self.laedt = False
         self.beschaeftigt = False
-        self._stil()
+        self.tabellen: list[ttk.Treeview] = []
+        self.seiten: dict[str, ctk.CTkFrame] = {}
+        TH.tabellen_stil(self)
         self._aufbauen()
         self._status()
         self.suchen()
@@ -427,118 +283,237 @@ class App(tk.Tk):
         if update_pruefen:
             self.after(2500, lambda: self.updates_suchen(still=True))
 
-    # ------------------------------------------------------------------ Aufbau
-    def _stil(self):
-        s = ttk.Style(self)
+    def _symbol(self):
         try:
-            s.theme_use("vista" if sys.platform == "win32" else "clam")
+            self.iconbitmap(str(ressource("icon.ico")))
         except tk.TclError:
             pass
-        s.configure("Treeview", rowheight=24)
-        s.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
 
+    def _cursor(self, name: str):
+        tk.Tk.configure(self, cursor=name)
+
+    # ------------------------------------------------------------------ Aufbau
     def _aufbauen(self):
-        kopf = tk.Frame(self, bg=NAVY)
-        kopf.pack(fill="x")
-        tk.Label(kopf, text="EPS-Produktsuche", fg="white", bg=NAVY, font=("Segoe UI", 15, "bold")).pack(side="left", padx=14, pady=10)
-        tk.Label(kopf, text=f"Version {__version__} · intern" + (f" · TESTVERSION Build {aktualisierung.build()}"
-                                                                  if TESTVERSION else ""),
-                 fg="#FFD54F" if TESTVERSION else CYAN, bg=NAVY).pack(side="left")
-        self.knopf_laden = ttk.Button(kopf, text=self._quelle("Shop neu einlesen", "Weclapp neu laden"),
-                                      command=lambda: self.einlesen(still=False))
-        self.knopf_laden.pack(side="right", padx=(4, 10))
-        ttk.Button(kopf, text="Updates", command=lambda: self.updates_suchen(still=False)).pack(side="right", padx=4)
-        ttk.Button(kopf, text="Verlauf …", command=lambda: VerlaufDialog(self)).pack(side="right", padx=4)
-        ttk.Button(kopf, text="Einstellungen …", command=lambda: EinstellungenDialog(self)).pack(side="right", padx=4)
-        self.knopf_anfragen = ttk.Button(kopf, text="Anfragen (Outlook) …", command=self.anfragen_oeffnen)
-        self.kopf = kopf
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
+        self._seitenleiste()
+        haupt = ctk.CTkFrame(self, fg_color="transparent")
+        haupt.grid(row=0, column=1, sticky="nsew")
+        haupt.rowconfigure(1, weight=1)
+        haupt.columnconfigure(0, weight=1)
+        self.haupt = haupt
+        self.fortschritt = TH.Fortschritt(haupt)
+        inhalt = ctk.CTkFrame(haupt, fg_color="transparent")
+        inhalt.grid(row=1, column=0, sticky="nsew", padx=24, pady=(16, 16))
+        self.inhalt = inhalt
+        self._suchseite(inhalt)
+        from .anfragen import AnfragenSeite
+        from .seiten import VerlaufSeite, GegenueberstellungSeite, EinstellungenSeite
+        self.seiten["anfragen"] = AnfragenSeite(inhalt, self)
+        self.seiten["verlauf"] = VerlaufSeite(inhalt, self)
+        self.seiten["vergleich"] = GegenueberstellungSeite(inhalt, self)
+        self.seiten["einstellungen"] = EinstellungenSeite(inhalt, self)
         self._experimentell_zeigen()
-        self.stand_lbl = tk.Label(kopf, text="", fg="white", bg=NAVY)
-        self.stand_lbl.pack(side="right", padx=10)
-
-        oben = ttk.Frame(self, padding=(12, 10, 12, 0))
-        oben.pack(fill="x")
-        ttk.Label(oben, text="Kundenanfrage:", font=("Segoe UI", 10, "bold"), foreground=NAVY).pack(side="left")
-        self.eingabe = tk.StringVar()
-        self.feld = ttk.Entry(oben, textvariable=self.eingabe, font=("Segoe UI", 13))
-        self.feld.pack(side="left", fill="x", expand=True, padx=8)
-        ttk.Label(oben, text="Gerätetyp:").pack(side="left")
-        self.typ = tk.StringVar(value="automatisch")
-        self.typ_cb = ttk.Combobox(oben, textvariable=self.typ, state="readonly", width=20,
-                                   values=["automatisch", "alle", *Q.GERAETETYPEN])
-        self.typ_cb.pack(side="left", padx=(4, 0))
-        self.knopf_pdf = ttk.Button(oben, text="Kunden-Dokument (PDF/Word) …", command=self.datenblatt_waehlen)
-        self.knopf_pdf.pack(side="left", padx=(12, 0))
-
-        self.fremd_lbl = tk.Label(self, text="", anchor="w", justify="left", bg="#EEF4FA", fg="#1C2633",
-                                  padx=12, pady=6, wraplength=1250, cursor="hand2")
-        self.fremd_lbl.bind("<Button-1>", lambda e: self.offene_punkte() and
-                            OffenePunkteDialog(self, self.offene_punkte(), self.fremd.datei))
-
-        opt = ttk.Frame(self, padding=(12, 4, 12, 0))
-        opt.pack(fill="x")
-        self.erkannt = ttk.Label(opt, text=BEISPIELE, foreground=GRAU)
-        self.erkannt.pack(side="left")
-        self.max_par = tk.IntVar(value=10)
-        ttk.Spinbox(opt, from_=1, to=64, width=4, textvariable=self.max_par, command=self.suchen).pack(side="right")
-        ttk.Label(opt, text="max. Geräte parallel/in Reihe:").pack(side="right", padx=(16, 4))
-        self.knapp = tk.BooleanVar(value=True)
-        ttk.Checkbutton(opt, text="auch knapp darunter (bis −10 %)", variable=self.knapp, command=self.suchen).pack(side="right")
-        self.gruppieren = tk.BooleanVar(value=True)
-        ttk.Checkbutton(opt, text="nach Serie gruppieren", variable=self.gruppieren, command=self.suchen).pack(side="right", padx=12)
-
-        sp = [("bew", "Bewertung", 100), ("nr", "Bestellnr.", 70), ("name", "Gerät", 270), ("typ", "Gerätetyp", 105),
-              ("u", "Spannung", 115), ("i", "Strom", 85), ("p", "Leistung", 115), ("res", "Reserve", 150), ("hin", "Hinweis", 230)]
-        tf = ttk.Frame(self, padding=(12, 8, 12, 0))
-        tf.pack(fill="both", expand=True)
-        self.tabelle_rahmen = tf
-        self.tv = ttk.Treeview(tf, columns=[x[0] for x in sp], show="tree headings", selectmode="extended")
-        self.tv.column("#0", width=28, minwidth=28, stretch=False)
-        for k, t, b in sp:
-            self.tv.heading(k, text=t)
-            self.tv.column(k, width=b, minwidth=50, stretch=k in ("name", "hin"))
-        for kat, farbe in FARBEN.items():
-            self.tv.tag_configure(kat, foreground=farbe)
-        self.tv.tag_configure("serie", font=("Segoe UI", 9, "bold"))
-        sy = ttk.Scrollbar(tf, orient="vertical", command=self.tv.yview)
-        sx = ttk.Scrollbar(tf, orient="horizontal", command=self.tv.xview)
-        self.tv.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
-        self.tv.grid(row=0, column=0, sticky="nsew")
-        sy.grid(row=0, column=1, sticky="ns")
-        sx.grid(row=1, column=0, sticky="ew")
-        tf.rowconfigure(0, weight=1)
-        tf.columnconfigure(0, weight=1)
-
-        self.info = ttk.Label(self, text="", foreground=GRAU, padding=(12, 4, 12, 0))
-        self.info.pack(fill="x")
-        self.fortschritt = ttk.Progressbar(self, mode="determinate")
-
-        unten = ttk.Frame(self, padding=12)
-        unten.pack(fill="x")
-        ttk.Button(unten, text="Datenblatt (PDF)", command=self.pdf).pack(side="left")
-        ttk.Button(unten, text="Shopseite", command=self.shopseite).pack(side="left", padx=6)
-        ttk.Button(unten, text="Empfehlung kopieren (DE)", command=lambda: self.kopieren("de")).pack(side="left", padx=(18, 0))
-        ttk.Button(unten, text="(EN)", width=5, command=lambda: self.kopieren("en")).pack(side="left", padx=4)
-        ttk.Button(unten, text="Gegenüberstellung PDF (DE)", command=lambda: self.gegenueberstellung("de")).pack(side="left", padx=(18, 0))
-        ttk.Button(unten, text="(EN)", width=5, command=lambda: self.gegenueberstellung("en")).pack(side="left", padx=4)
-        self.knopf_weclapp = ttk.Button(unten, text="In Weclapp vorbereiten …", command=self.weclapp_vorbereiten)
-        self._experimentell_zeigen()
-        ttk.Label(unten, text="Enter: im Verlauf merken · Doppelklick: Datenblatt · Strg+C: Empfehlung · Strg+O: Kunden-Dokument",
-                  foreground=GRAU).pack(side="right")
+        self.seite_zeigen("suche")
 
         self.eingabe.trace_add("write", lambda *a: self.suchen())
-        self.typ_cb.bind("<<ComboboxSelected>>", lambda e: self.suchen())
         self.max_par.trace_add("write", lambda *a: self.after_idle(self.suchen))
         self.tv.bind("<Double-1>", self._doppelklick)
         self.tv.bind("<Return>", lambda e: self.pdf())
         self.tv.bind("<<TreeviewSelect>>", lambda e: self._details())
-        self.bind_all("<Control-c>", lambda e: self.kopieren("de") if self.focus_get() is not self.feld else None)
+        self.bind_all("<Control-c>", lambda e: self.kopieren("de") if self._auf_suche_ohne_eingabefokus() else None)
         self.feld.bind("<Escape>", lambda e: self.eingabe.set(""))
         self.feld.bind("<Down>", lambda e: self._in_liste())
         self.feld.bind("<Return>", lambda e: self._merken("Suche"))
         self.bind_all("<Control-o>", lambda e: (self.datenblatt_waehlen(), "break")[1])
         self._dnd_einrichten()
         self.feld.focus_set()
+
+    def _auf_suche_ohne_eingabefokus(self) -> bool:
+        fokus = self.focus_get()
+        return self.aktive_seite == "suche" and not isinstance(fokus, (tk.Entry, tk.Text))
+
+    def _seitenleiste(self):
+        leiste = ctk.CTkFrame(self, fg_color=TH.SEITE, corner_radius=0, width=232, border_width=0)
+        leiste.grid(row=0, column=0, sticky="nsw")
+        leiste.grid_propagate(False)
+        leiste.pack_propagate(False)
+        ctk.CTkFrame(self, fg_color=TH.RAND, width=1, corner_radius=0).grid(row=0, column=0, sticky="nse")
+        logo = ctk.CTkFrame(leiste, fg_color="transparent")
+        logo.pack(fill="x", padx=16, pady=(20, 18))
+        ctk.CTkLabel(logo, text="EPS", width=38, height=38, corner_radius=9, fg_color=NAVY, text_color="#FFFFFF",
+                     font=TH.schrift(13, True)).pack(side="left")
+        namen = ctk.CTkFrame(logo, fg_color="transparent")
+        namen.pack(side="left", padx=10)
+        TH.text(namen, "Produktsuche", 15, True, anchor="w").pack(anchor="w")
+        TH.text(namen, f"Version {__version__.split('.dev')[0]}" + (f" · TEST {aktualisierung.build()}" if TESTVERSION
+                                                                     else " · intern"),
+                11, farbe=TH.TEST if TESTVERSION else TH.GRAU, anchor="w").pack(anchor="w")
+        self.nav: dict[str, ctk.CTkButton] = {}
+        self.nav_rahmen = ctk.CTkFrame(leiste, fg_color="transparent")
+        self.nav_rahmen.pack(fill="x", padx=12)
+        for key, titel in (("suche", "Suche"), ("anfragen", "Anfragen"), ("verlauf", "Verlauf"),
+                           ("vergleich", "Gegenüberstellungen"), ("einstellungen", "Einstellungen")):
+            b = ctk.CTkButton(self.nav_rahmen, text=titel, anchor="w", height=40, corner_radius=8, font=TH.schrift(14),
+                              fg_color="transparent", hover_color=TH.KNOPF_HOVER, text_color=TH.TEXT,
+                              command=lambda k=key: self.seite_zeigen(k))
+            b.pack(fill="x", pady=1)
+            self.nav[key] = b
+        self.badge = ctk.CTkLabel(self.nav["anfragen"], text="", fg_color=CYAN, text_color="#0B2A3A", corner_radius=9,
+                                  height=20, width=26, font=TH.schrift(11, True))
+
+        unten = ctk.CTkFrame(leiste, fg_color="transparent")
+        unten.pack(side="bottom", fill="x", padx=12, pady=14)
+        self.dunkel_var = tk.BooleanVar(value=self.einstellungen.dunkelmodus)
+        zeile = ctk.CTkFrame(unten, fg_color="transparent")
+        zeile.pack(fill="x", pady=(0, 10))
+        TH.text(zeile, "Dunkelmodus", 13, farbe=TH.GRAU).pack(side="left", padx=4)
+        ctk.CTkSwitch(zeile, text="", variable=self.dunkel_var, width=46, progress_color=(CYAN, CYAN),
+                      command=lambda: self.dunkel_setzen(self.dunkel_var.get())).pack(side="right")
+        box = ctk.CTkFrame(unten, fg_color=TH.BG, corner_radius=10)
+        box.pack(fill="x")
+        self.stand_lbl = TH.text(box, "", 11, farbe=TH.GRAU, anchor="w", justify="left", wraplength=180)
+        self.stand_lbl.pack(fill="x", padx=12, pady=(10, 6))
+        self.knopf_laden = TH.knopf(box, self._quelle("Shop neu einlesen", "Weclapp neu laden"),
+                                    lambda: self.einlesen(still=False), height=30)
+        self.knopf_laden.pack(fill="x", padx=10)
+        ctk.CTkButton(box, text="Nach Updates suchen", height=26, fg_color="transparent", hover_color=TH.KNOPF_HOVER,
+                      text_color=TH.LINK, font=TH.schrift(12), command=lambda: self.updates_suchen(still=False)
+                      ).pack(fill="x", padx=10, pady=(4, 8))
+
+    def _suchseite(self, master):
+        seite = ctk.CTkFrame(master, fg_color="transparent")
+        self.seiten["suche"] = seite
+        such = TH.karte(seite)
+        such.pack(fill="x")
+        self.such_karte = such
+        z1 = ctk.CTkFrame(such, fg_color="transparent")
+        z1.pack(fill="x", padx=16, pady=(14, 6))
+        self.eingabe = tk.StringVar()
+        self.feld = ctk.CTkEntry(z1, textvariable=self.eingabe, height=46, font=TH.schrift(18), fg_color=TH.EINGABE,
+                                 border_color=TH.AKZENT, border_width=2, text_color=TH.TEXT, corner_radius=8,
+                                 placeholder_text="Kundenanfrage, z. B. Stromquelle 0-30V 1kA 30kW")
+        self.feld.pack(side="left", fill="x", expand=True)
+        self.typ = tk.StringVar(value="automatisch")
+        self.typ_cb = TH.auswahl(z1, TYPEN, self.typ, lambda v: self.suchen(), breite=200)
+        self.typ_cb.pack(side="left", padx=(10, 0))
+        self.knopf_pdf = TH.knopf(z1, "Kunden-Dokument …", self.datenblatt_waehlen, height=46)
+        self.knopf_pdf.pack(side="left", padx=(10, 0))
+        z2 = ctk.CTkFrame(such, fg_color="transparent")
+        z2.pack(fill="x", padx=16, pady=(0, 12))
+        self.chips = ctk.CTkFrame(z2, fg_color="transparent")
+        self.chips.pack(side="left", fill="x", expand=True)
+        self.erkannt = TH.text(self.chips, BEISPIELE, 12, farbe=TH.GRAU, anchor="w")
+        self.zusammenfassung = TH.text(z2, "", 12, farbe=TH.GRAU)
+        self.zusammenfassung.pack(side="right")
+
+        self.fremd_rahmen = ctk.CTkFrame(seite, fg_color=TH.CHIP, corner_radius=10)
+        self.fremd_lbl = TH.text(self.fremd_rahmen, "", 12, farbe=TH.TEXT, anchor="w", justify="left", wraplength=1100,
+                                 cursor="hand2")
+        self.fremd_lbl.pack(fill="x", padx=14, pady=8)
+        self.fremd_lbl.bind("<Button-1>", lambda e: self.offene_punkte() and
+                            OffenePunkteDialog(self, self.offene_punkte(), self.fremd.datei))
+
+        self.top_kopf = ctk.CTkFrame(seite, fg_color="transparent")
+        TH.text(self.top_kopf, "Top 3", 16, True).pack(side="left")
+        TH.text(self.top_kopf, "die besten Treffer aus verschiedenen Serien", 12, farbe=TH.GRAU).pack(side="left", padx=10)
+        self.top_rahmen = ctk.CTkFrame(seite, fg_color="transparent")
+        self.karten = []
+        for i in range(3):
+            k = TrefferKarte(self.top_rahmen, self, i)
+            self.top_rahmen.columnconfigure(i, weight=1, uniform="karte")
+            self.karten.append(k)
+
+        self.liste_kopf = ctk.CTkFrame(seite, fg_color="transparent")
+        self.liste_titel = TH.text(self.liste_kopf, "Weitere Treffer", 16, True)
+        self.liste_titel.pack(side="left")
+        self.liste_unter = TH.text(self.liste_kopf, "", 12, farbe=TH.GRAU)
+        self.liste_unter.pack(side="left", padx=10)
+        self.max_par = tk.StringVar(value="10")
+        ctk.CTkComboBox(self.liste_kopf, values=["1", "2", "4", "6", "10", "16", "32", "64"], variable=self.max_par,
+                        width=70, height=28, fg_color=TH.EINGABE, border_color=TH.RAND, button_color=TH.RAND,
+                        text_color=TH.TEXT, dropdown_fg_color=TH.FLAECHE, dropdown_text_color=TH.TEXT,
+                        command=lambda v: self.suchen()).pack(side="right")
+        TH.text(self.liste_kopf, "max. parallel/in Reihe", 12, farbe=TH.GRAU).pack(side="right", padx=(16, 6))
+        self.knapp = tk.BooleanVar(value=True)
+        TH.schalter(self.liste_kopf, "knapp darunter (−10 %)", self.knapp, self.suchen).pack(side="right", padx=(16, 0))
+        self.gruppieren = tk.BooleanVar(value=True)
+        TH.schalter(self.liste_kopf, "nach Serie gruppieren", self.gruppieren, self.suchen).pack(side="right")
+
+        sp = [("bew", "Bewertung", 110), ("nr", "Nr.", 70), ("name", "Gerät", 300), ("typ", "Gerätetyp", 105),
+              ("u", "Spannung", 115), ("i", "Strom", 90), ("p", "Leistung", 115), ("res", "Reserve", 170),
+              ("hin", "Hinweis", 240)]
+        self.tabelle_rahmen, self.tv = TH.tabelle(seite, sp, baum=True, mehrfach=True, dehnen=("name", "hin"))
+        self.tabellen.append(self.tv)
+
+        self.info = TH.text(seite, "", 12, farbe=TH.GRAU, anchor="w")
+        unten = ctk.CTkFrame(seite, fg_color="transparent")
+        self.knopf_weclapp = TH.knopf(unten, "In Weclapp vorbereiten …", self.weclapp_vorbereiten, haupt=True)
+        self.unten_links = ctk.CTkFrame(unten, fg_color="transparent")
+        self.unten_links.pack(side="left")
+        TH.knopf(self.unten_links, "Gegenüberstellung …", self.gegenueberstellung_oeffnen).pack(side="left")
+        TH.knopf(self.unten_links, "Empfehlung kopieren (DE)", lambda: self.kopieren("de")).pack(side="left", padx=(8, 0))
+        TH.knopf(self.unten_links, "EN", lambda: self.kopieren("en"), width=44).pack(side="left", padx=(4, 0))
+        TH.knopf(self.unten_links, "Datenblatt", self.pdf, width=96).pack(side="left", padx=(8, 0))
+        TH.knopf(self.unten_links, "Shopseite", self.shopseite, width=96).pack(side="left", padx=(8, 0))
+        self.unten = unten
+        self._suche_packen()
+
+    def _suche_packen(self, karten: bool = False):
+        """Reihenfolge der Suchseite: Suchkarte, (Dokument), (Top 3), Liste, Info, Knöpfe."""
+        for w in (self.top_kopf, self.top_rahmen, self.liste_kopf, self.tabelle_rahmen, self.info, self.unten):
+            w.pack_forget()
+        if karten:
+            self.top_kopf.pack(fill="x", pady=(14, 6))
+            self.top_rahmen.pack(fill="x")
+        self.liste_kopf.pack(fill="x", pady=(14, 6))
+        self.unten.pack(fill="x", side="bottom", pady=(8, 0))
+        self.info.pack(fill="x", side="bottom", pady=(6, 0))
+        self.tabelle_rahmen.pack(fill="both", expand=True)
+
+    def seite_zeigen(self, key: str):
+        for k, s in self.seiten.items():
+            if k != key:
+                s.pack_forget()
+        self.seiten[key].pack(fill="both", expand=True)
+        for k, b in self.nav.items():
+            aktiv = k == key
+            b.configure(fg_color=TH.CHIP if aktiv else "transparent", text_color=TH.LINK if aktiv else TH.TEXT,
+                        font=TH.schrift(14, aktiv))
+        self.aktive_seite = key
+        zeigen = getattr(self.seiten[key], "zeigen", None)
+        if zeigen:
+            zeigen()
+        if key == "suche":
+            self.feld.focus_set()
+
+    def anfragen_anzahl(self, n: int | None):
+        if n:
+            self.badge.configure(text=str(n))
+            self.badge.place(relx=1.0, rely=0.5, x=-10, anchor="e")
+        else:
+            self.badge.place_forget()
+
+    def dunkel_setzen(self, an: bool):
+        self.dunkel_var.set(an)
+        TH.modus_setzen(an)
+        TH.tabellen_stil(self)
+        for tv in self.tabellen:
+            TH.tabelle_tags(tv)
+        self.einstellungen.dunkelmodus = an
+        try:
+            self.einstellungen.speichern(self.einstellungen_pfad)
+        except OSError:
+            pass
+        e = self.seiten.get("einstellungen")
+        if e is not None:
+            e.dunkel_var.set(an)
+
+    def _balken(self, an: bool):
+        if an:
+            self.fortschritt.grid(row=0, column=0, sticky="ew", padx=24, pady=(10, 0))
+        else:
+            self.fortschritt.grid_remove()
 
     def _in_liste(self):
         k = self.tv.get_children()
@@ -558,12 +533,12 @@ class App(tk.Tk):
         """arbeit() läuft in einem Thread, fertig(wert, fehler) danach im Hauptthread (Tk ist nicht threadsicher)."""
         ergebnis: dict = {}
         self.beschaeftigt = True
-        self.knopf_pdf.state(["disabled"])
+        self.knopf_pdf.configure(state="disabled")
         self.info.configure(text=text)
         self.fortschritt.configure(mode="indeterminate")
-        self.fortschritt.pack(fill="x", padx=12, before=self.info)
+        self._balken(True)
         self.fortschritt.start(12)
-        self.configure(cursor="watch")
+        self._cursor("watch")
 
         def lauf():
             try:
@@ -578,9 +553,9 @@ class App(tk.Tk):
                 return
             self.fortschritt.stop()
             self.fortschritt.configure(mode="determinate")
-            self.fortschritt.pack_forget()
-            self.configure(cursor="")
-            self.knopf_pdf.state(["!disabled"])
+            self._balken(False)
+            self._cursor("")
+            self.knopf_pdf.configure(state="normal")
             self.beschaeftigt = False
             fertig(ergebnis.get("wert"), ergebnis.get("fehler"))
 
@@ -597,39 +572,71 @@ class App(tk.Tk):
             a.geraetetyp, a.last = wahl, wahl == shop.LAST
         return a
 
+    def _erkannt_zeigen(self, text: str = "", chips: list[str] | None = None):
+        for w in self.chips.winfo_children():
+            if w is not self.erkannt:
+                w.destroy()
+        self.erkannt.pack_forget()
+        if chips:
+            TH.text(self.chips, "Erkannt:", 12, farbe=TH.GRAU).pack(side="left", padx=(0, 6))
+            for c in chips:
+                ctk.CTkLabel(self.chips, text=c, fg_color=TH.CHIP, text_color=TH.CHIP_TEXT, corner_radius=12, height=26,
+                             font=TH.schrift(12), padx=10).pack(side="left", padx=(0, 6))
+        else:
+            self.erkannt.configure(text=text)
+            self.erkannt.pack(side="left")
+
     def suchen(self):
         self.tv.delete(*self.tv.get_children())
-        self.treffer, self.zeilen_geraete, self.iid_index = [], [], {}
+        self.treffer, self.zeilen_geraete, self.iid_index, self.serie_iid = [], [], {}, {}
+        self.karten_treffer, self.karten_gewaehlt = [], set()
         text = self.eingabe.get().strip()
         a = self.anfrage()
+        self.zusammenfassung.configure(text="")
         if not self.geraete:
-            self.erkannt.configure(text="Noch keine Shopdaten – „Shop neu einlesen“ (dauert ca. 1–3 Minuten).")
+            self._erkannt_zeigen("Noch keine Shopdaten – „Shop neu einlesen“ (dauert ca. 1–3 Minuten).")
+            self._karten_zeigen()
             return
         if self.fremd and text != self.fremd_anfrage:
             self.fremd_lbl.configure(text=self.fremd_lbl.cget("text").split("  ·  Anfrage geändert")[0]
                                      + "  ·  Anfrage geändert")
         if a.leer():
-            self.erkannt.configure(text=BEISPIELE if not text else "Keine V/A/W erkannt – Suche nach Name/Bestellnummer:")
+            self._erkannt_zeigen(BEISPIELE if not text else "Keine V/A/W erkannt – Suche nach Name/Bestellnummer")
+            self._karten_zeigen()
+            self.liste_titel.configure(text="Geräte")
             if text:
                 for g in Q.textsuche(self.geraete, text)[:300]:
                     self._zeile("", g, "", "", ())
-                self.info.configure(text=f"{len(self.zeilen_geraete)} Geräte mit „{text}“")
+                self.liste_unter.configure(text=f"{len(self.zeilen_geraete)} mit „{text}“")
             else:
-                self.info.configure(text=f"{len(self.geraete)} Geräte aus dem Shop durchsuchbar.")
+                self.liste_unter.configure(text=f"{len(self.geraete)} Geräte durchsuchbar")
+            self.info.configure(text=TASTEN)
             return
-        self.erkannt.configure(text="Erkannt: " + " · ".join(a.erkannt))
+        self._erkannt_zeigen(chips=a.erkannt)
         try:
             maxp = max(1, int(self.max_par.get()))
         except (tk.TclError, ValueError):
             maxp = 10
         self.treffer = Q.suchen(self.geraete, a, self.knapp.get(), maxp)
+        gruppen = Q.nach_serie(self.treffer)
+        # Top 3: bester Treffer der drei besten Serien (ohne „knapp darunter“, solange es Besseres gibt)
+        gute = [(s, l) for s, l in gruppen if l[0].kategorie != Q.KNAPP_DARUNTER] or gruppen
+        for serie, liste in gute[:3]:
+            erster = liste[0]
+            gleich = sum(1 for t in liste[1:] if t.kategorie == Q.PASST) if erster.kategorie == Q.PASST else 0
+            self.karten_treffer.append((erster, len(liste) - 1, gleich))
+        oben = {id(t.g) for t, _, _ in self.karten_treffer}
+        self.karten_index = []
+        for t, _, _ in self.karten_treffer:                 # Kartengeräte zählen für Auswahl/Aktionen mit
+            self.karten_index.append(len(self.zeilen_geraete))
+            self.zeilen_geraete.append(t.g)
+        rest = [t for t in self.treffer if id(t.g) not in oben]
         if self.gruppieren.get():
-            gruppen = Q.nach_serie(self.treffer)
-            for serie, liste in gruppen:
+            rest_gruppen = Q.nach_serie(rest)
+            for serie, liste in rest_gruppen:
                 erster = liste[0]
                 hinweis = erster.hinweis
-                # weitere Geräte der Serie, die ebenfalls genau passen (z. B. gleiche Ausgangswerte, anderer Eingang):
-                # nicht im zugeklappten Teil verstecken
+                # weitere Geräte der Serie, die ebenfalls genau passen: nicht im zugeklappten Teil verstecken
                 gleich = [t for t in liste[1:] if t.kategorie == Q.PASST] if erster.kategorie == Q.PASST else []
                 if len(liste) > 1:
                     hinweis = f"+{len(liste) - 1} weitere der Serie" + \
@@ -637,19 +644,67 @@ class App(tk.Tk):
                         (self._eingang_hinweis([erster, *gleich], a) if gleich else "") + \
                         (f"; {hinweis}" if hinweis else "")
                 eltern = self._zeile(erster.bewertung, erster.g, erster.reserve_text(), hinweis, (erster.kategorie,))
+                self.serie_iid[serie] = eltern
                 if gleich:
                     self.tv.item(eltern, open=True)
                 for t in liste[1:]:
                     self._zeile(t.bewertung, t.g, t.reserve_text(), t.hinweis, (t.kategorie,), eltern=eltern)
-            serien_text = f" in {len(gruppen)} Serien"
+            unter = "nach Serie gruppiert · aufklappbar"
         else:
-            for t in self.treffer:
+            for t in rest:
                 self._zeile(t.bewertung, t.g, t.reserve_text(), t.hinweis, (t.kategorie,))
-            serien_text = ""
+            unter = "alle Geräte einzeln"
+        self._karten_zeigen()
+        self.liste_titel.configure(text="Weitere Treffer" if self.karten_treffer else "Treffer")
+        self.liste_unter.configure(text=unter)
         n = {k: sum(1 for t in self.treffer if t.kategorie == k) for k in FARBEN}
-        self.info.configure(text=f"{len(self.treffer)} Treffer{serien_text}: {n[Q.PASST]} passen genau, {n[Q.GROESSER]} größer, "
-                                 f"{n[Q.PARALLEL] + n[Q.REIHE]} mit mehreren Geräten, {n[Q.KNAPP_DARUNTER]} knapp darunter"
-                                 + (" – Gerätetyp auf „alle“ stellen?" if not self.treffer and a.geraetetyp else ""))
+        self.zusammenfassung.configure(
+            text=f"{len(self.treffer)} Treffer in {len(gruppen)} Serien · {n[Q.PASST]} genau · {n[Q.GROESSER]} größer · "
+                 f"{n[Q.PARALLEL] + n[Q.REIHE]} mit mehreren Geräten"
+                 + (f" · {n[Q.KNAPP_DARUNTER]} knapp darunter" if n[Q.KNAPP_DARUNTER] else ""))
+        self.info.configure(text="Keine Treffer – Gerätetyp auf „alle“ stellen?" if not self.treffer and a.geraetetyp else TASTEN)
+
+    def _karten_zeigen(self):
+        for i, k in enumerate(self.karten):
+            if i < len(self.karten_treffer):
+                t, weitere, gleich = self.karten_treffer[i]
+                k.zeigen(t, weitere, gleich, i in self.karten_gewaehlt)
+                k.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 14, 0))
+            else:
+                k.grid_forget()
+        self._suche_packen(karten=bool(self.karten_treffer))
+
+    def karte_waehlen(self, nr: int):
+        if nr in self.karten_gewaehlt:
+            self.karten_gewaehlt.discard(nr)
+        else:
+            self.karten_gewaehlt.add(nr)
+        t, weitere, gleich = self.karten_treffer[nr]
+        self.karten[nr].zeigen(t, weitere, gleich, nr in self.karten_gewaehlt)
+        self._details()
+
+    def serie_zeigen(self, t: Q.Treffer | None):
+        """„+n weitere der Serie“ auf einer Karte: die übrigen Geräte der Serie in der Liste zeigen."""
+        if t is None:
+            return
+        serie = t.g.serie or t.g.name
+        iid = self.serie_iid.get(serie)
+        if iid:
+            self.tv.item(iid, open=True)
+            kinder = [iid, *self.tv.get_children(iid)]
+        else:
+            kinder = [i for i, n in self.iid_index.items() if self.tv.exists(i) and
+                      (self.zeilen_geraete[n].serie or self.zeilen_geraete[n].name) == serie]
+        if kinder:
+            self.tv.selection_set(kinder)
+            self.tv.see(kinder[-1])
+            self.tv.see(kinder[0])
+            self.tv.focus_set()
+
+    def datenblatt_oeffnen(self, g: shop.Geraet):
+        url = g.pdf_url or g.shop_url
+        if url:
+            webbrowser.open(url)
 
     @staticmethod
     def _eingang_hinweis(treffer: list[Q.Treffer], a: Q.Anfrage) -> str:
@@ -670,7 +725,8 @@ class App(tk.Tk):
         return iid
 
     def _auswahl(self) -> list[int]:
-        return [self.iid_index[i] for i in self.tv.selection() if i in self.iid_index]
+        karten = [self.karten_index[i] for i in sorted(self.karten_gewaehlt) if i < len(self.karten_index)]
+        return karten + [self.iid_index[i] for i in self.tv.selection() if i in self.iid_index]
 
     def _treffer_zu(self, g: shop.Geraet) -> Q.Treffer:
         return next((t for t in self.treffer if t.g is g), None) or Q.Treffer(g, Q.PASST)
@@ -679,6 +735,8 @@ class App(tk.Tk):
         sel = self._auswahl()
         if sel:
             return [self._treffer_zu(self.zeilen_geraete[i]) for i in sel]
+        if self.karten_treffer:
+            return [t for t, _, _ in self.karten_treffer][:standard]
         genau = [t for t in self.treffer if t.kategorie == Q.PASST]
         return (genau or [t for t in self.treffer if t.kategorie != Q.KNAPP_DARUNTER])[:standard]
 
@@ -693,17 +751,19 @@ class App(tk.Tk):
             self.info.configure(text=" · ".join(x for x in teile if x))
         elif sel:
             self.info.configure(text=f"{len(sel)} Geräte ausgewählt – Empfehlung und Gegenüberstellung übernehmen alle.")
+        else:
+            self.info.configure(text=TASTEN)
 
     # ------------------------------------------------------------------ Aktionen
     def pdf(self):
         sel = self._auswahl()
         if sel:
-            g = self.zeilen_geraete[sel[0]]
-            webbrowser.open(g.pdf_url or g.shop_url)
+            self.datenblatt_oeffnen(self.zeilen_geraete[sel[0]])
 
     def shopseite(self):
         sel = self._auswahl()
         if not sel:
+            self.info.configure(text="Bitte zuerst ein Gerät auswählen.")
             return
         g = self.zeilen_geraete[sel[0]]
         url = g.seite_url or g.shop_url
@@ -718,8 +778,8 @@ class App(tk.Tk):
             return self.fremd.hersteller_typ or self.fremd.modell
         return ""
 
-    def kopieren(self, sprache: str):
-        tr = self._ausgewaehlte_treffer()
+    def kopieren(self, sprache: str, treffer: list[Q.Treffer] | None = None):
+        tr = treffer or self._ausgewaehlte_treffer()
         if not tr:
             self.info.configure(text="Bitte zuerst ein oder mehrere Geräte auswählen (Strg/Umschalt + Klick).")
             return
@@ -728,15 +788,28 @@ class App(tk.Tk):
         self.info.configure(text=f"Empfehlung mit {len(tr)} Gerät(en) in die Zwischenablage kopiert ({sprache.upper()}).")
         self._merken(f"Empfehlung {sprache.upper()}", tr)
 
-    def gegenueberstellung(self, sprache: str):
+    def gegenueberstellung_oeffnen(self):
         from . import vergleich
         tr = self._ausgewaehlte_treffer(standard=3)[:vergleich.MAX_VORSCHLAEGE]
         if not tr:
-            self.info.configure(text="Bitte zuerst bis zu vier Geräte auswählen (Strg + Klick).")
+            self.info.configure(text="Bitte zuerst bis zu vier Geräte auswählen (Karten „Auswählen“ oder Strg + Klick).")
             return
-        a = self.anfrage()
         fremd = self.fremd if self._alternative_zu() else None
-        ordner = self.pfad.parent / "Gegenueberstellungen"
+        self.seiten["vergleich"].setzen(tr, self.anfrage(), fremd, self._kunde_name())
+        self.seite_zeigen("vergleich")
+
+    def gegenueberstellung(self, sprache: str, tr: list[Q.Treffer] | None = None, a: Q.Anfrage | None = None,
+                           fremd=None) -> Path | None:
+        """Gegenüberstellung als PDF speichern und öffnen."""
+        from . import vergleich
+        if tr is None:
+            tr = self._ausgewaehlte_treffer(standard=3)[:vergleich.MAX_VORSCHLAEGE]
+            a = self.anfrage()
+            fremd = self.fremd if self._alternative_zu() else None
+        if not tr:
+            return None
+        a = a or self.anfrage()
+        ordner = self.gegenueberstellungen_ordner()
         ziel = ordner / vergleich.dateiname(fremd, a, sprache)
         for n in range(2, 50):
             try:
@@ -746,75 +819,84 @@ class App(tk.Tk):
                 ziel = ziel.with_name(f"{ziel.stem.rsplit('_(', 1)[0]}_({n}).pdf")
         else:
             messagebox.showerror("Gegenüberstellung", "Das PDF konnte nicht gespeichert werden.", parent=self)
-            return
+            return None
         self.info.configure(text=f"Gegenüberstellung gespeichert: {ziel}")
-        self._merken(f"Gegenüberstellung {sprache.upper()}", tr)
+        self._merken(f"Gegenüberstellung {sprache.upper()}", tr, anfrage_text=a.text)
         try:
             datei_oeffnen(ziel)
         except OSError:
             pass
+        return ziel
+
+    def gegenueberstellungen_ordner(self) -> Path:
+        return self.pfad.parent / "Gegenueberstellungen"
 
     # ------------------------------------------------------------------ Verlauf
-    def _merken(self, aktion: str, treffer: list[Q.Treffer] | None = None):
-        text = self.eingabe.get().strip()
+    def _kunde_name(self) -> str:
+        if not self.vorgang:
+            return ""
+        k = self.vorgang[1].kunde
+        return k.firmenname or k.email or ""
+
+    def _merken(self, aktion: str, treffer: list[Q.Treffer] | None = None, anfrage_text: str | None = None):
+        text = (anfrage_text if anfrage_text is not None else self.eingabe.get()).strip()
         if not text:
             return
         fremd = asdict(self.fremd) if self.fremd and text == self.fremd_anfrage else None
         geraete = [{"bestellnummer": t.g.bestellnummer, "name": t.g.name} for t in (treffer or [])]
         try:
-            verlauf.hinzufuegen(self.verlauf_pfad, text, aktion, geraete, self.typ.get(), fremd)
+            verlauf.hinzufuegen(self.verlauf_pfad, text, aktion, geraete, self.typ.get(), fremd, kunde=self._kunde_name())
         except OSError:
             pass
 
-    # ------------------------------------------------------------------ Anfragen (experimentell)
+    # ------------------------------------------------------------------ Anfragen / Weclapp (experimentell)
     def _experimentell_zeigen(self):
-        if self.einstellungen.experimentell:
-            self.knopf_anfragen.pack(side="right", padx=4)
+        e = self.einstellungen
+        if e.experimentell:
+            self.nav["anfragen"].pack(fill="x", pady=1, after=self.nav["suche"])
         else:
-            self.knopf_anfragen.pack_forget()
-        knopf = getattr(self, "knopf_weclapp", None)          # entsteht erst mit der unteren Leiste
-        if knopf is None:
-            return
-        if self.einstellungen.experimentell and self.einstellungen.weclapp_adresse:
-            knopf.pack(side="left", padx=(18, 0))
+            self.nav["anfragen"].pack_forget()
+            if getattr(self, "aktive_seite", "") == "anfragen":
+                self.seite_zeigen("suche")
+        if e.experimentell and e.weclapp_adresse:
+            self.knopf_weclapp.pack(side="left", padx=(0, 12), before=self.unten_links)
         else:
-            knopf.pack_forget()
+            self.knopf_weclapp.pack_forget()
+        vg = self.seiten.get("vergleich")
+        if vg is not None:
+            vg.weclapp_zeigen(e.experimentell and bool(e.weclapp_adresse))
 
-    def weclapp_vorbereiten(self):
+    def weclapp_vorbereiten(self, geraete_liste: list[shop.Geraet] | None = None):
         """Ausgewählte Geräte + Kunde der übernommenen Anfrage → Plan in Weclapp (Angebot, ggf. Herstelleranfrage)."""
         from .weclapp_dialog import WeclappDialog
-        sel = self._auswahl()
-        if not sel:
+        auswahl = geraete_liste if geraete_liste is not None else [self.zeilen_geraete[i] for i in self._auswahl()]
+        if not auswahl:
             messagebox.showinfo("Weclapp", "Bitte zuerst das Gerät bzw. die Geräte für das Angebot auswählen "
-                                           "(Strg + Klick für mehrere).", parent=self)
+                                           "(Karte „Auswählen“ oder Strg + Klick in der Liste).", parent=self)
             return
         if not self.vorgang:
-            messagebox.showinfo("Weclapp", "Bitte zuerst eine Kundenanfrage übernehmen (Anfragen (Outlook) … → "
+            messagebox.showinfo("Weclapp", "Bitte zuerst eine Kundenanfrage übernehmen (Anfragen → "
                                            "„In Suche übernehmen“) – daraus kommt der Kunde.", parent=self)
             return
         mail, erk = self.vorgang
         menge = erk.menge or 1
         geraete = []
-        for i in sel:
-            g = self.zeilen_geraete[i]
+        for g in auswahl:
             if g.bestellnummer not in [x[0] for x in geraete]:
                 geraete.append((g.bestellnummer, g.name, menge))
+        self._merken("In Weclapp vorbereitet", [self._treffer_zu(g) for g in auswahl])
         WeclappDialog(self, erk.kunde, geraete, erk.termin, notiz=(f"Anfrage: {mail.betreff}" if mail.betreff else ""))
 
     def anfragen_oeffnen(self):
-        fenster = getattr(self, "_anfragen_fenster", None)
-        if fenster is not None and fenster.winfo_exists():
-            fenster.lift()
-            return
-        from .anfragen import AnfragenFenster
-        self._anfragen_fenster = AnfragenFenster(self)
+        self.seite_zeigen("anfragen")
 
     def vorgang_uebernehmen(self, mail, erkennung):
-        """Anfrage aus dem Anfragen-Fenster in die Suche holen. Anhang (PDF/Word) hat Vorrang vor dem Mailtext."""
+        """Anfrage von der Anfragen-Seite in die Suche holen. Anhang (PDF/Word) hat Vorrang vor dem Mailtext."""
         self.vorgang = (mail, erkennung)
         self.fremd, self.fremd_anfrage = None, ""
-        self.fremd_lbl.pack_forget()
+        self.fremd_rahmen.pack_forget()
         self.typ.set("automatisch")
+        self.seite_zeigen("suche")
         if mail.anhaenge:
             self.datenblatt_laden(mail.anhaenge[0])
         else:
@@ -826,20 +908,25 @@ class App(tk.Tk):
 
     def verlauf_uebernehmen(self, e: dict):
         from . import datenblatt
+        self.seite_zeigen("suche")
         f = e.get("fremd")
         if f:
             felder = datenblatt.Fremdgeraet.__dataclass_fields__
             self._fremd_anzeigen(datenblatt.Fremdgeraet(**{k: v for k, v in f.items() if k in felder}), aus_verlauf=True)
         else:
             self.fremd, self.fremd_anfrage = None, ""
-            self.fremd_lbl.pack_forget()
+            self.fremd_rahmen.pack_forget()
         typ = e.get("typ") or "automatisch"
-        self.typ.set(typ if typ in self.typ_cb["values"] else "automatisch")
+        self.typ.set(typ if typ in TYPEN else "automatisch")
         self.eingabe.set(e.get("anfrage", ""))
         if f:
             self._offene_punkte_zeigen(still=True)
         if e.get("geraete"):
             nummern = {g["bestellnummer"] for g in e["geraete"]}
+            for nr, (t, weitere, gleich) in enumerate(self.karten_treffer):
+                if t.g.bestellnummer in nummern:
+                    self.karten_gewaehlt.add(nr)
+            self._karten_zeigen()
             sel = [iid for iid, i in self.iid_index.items() if self.zeilen_geraete[i].bestellnummer in nummern]
             for iid in sel:
                 self.tv.see(iid)
@@ -848,19 +935,26 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------ Kunden-Datenblatt
     def _dnd_einrichten(self):
-        """PDF ins Fenster ziehen (tkinterdnd2; fehlt die Bibliothek, gibt es nur den Button)."""
+        """PDF/Word (Suche) bzw. .msg/.eml (Anfragen) ins Fenster ziehen (tkinterdnd2; fehlt sie, gibt es die Knöpfe)."""
         try:
             from tkinterdnd2 import TkinterDnD, DND_FILES
             TkinterDnD._require(self)
-            for w in (self, self.tv, self.feld):
+            for w in (self, self.tv, self.feld._entry):
                 w.drop_target_register(DND_FILES)
                 w.dnd_bind("<<Drop>>", self._drop)
         except Exception:  # noqa: BLE001
             pass
 
     def _drop(self, e):
-        pfade = [Path(p) for p in self.tk.splitlist(e.data) if p.lower().endswith((".pdf", ".docx", ".docm"))]
+        alle = [Path(p) for p in self.tk.splitlist(e.data)]
+        mails = [p for p in alle if p.suffix.lower() in (".msg", ".eml")]
+        if mails and self.einstellungen.experimentell:
+            self.seite_zeigen("anfragen")
+            self.after(10, lambda: self.seiten["anfragen"].dateien_laden(mails))
+            return "copy"
+        pfade = [p for p in alle if p.suffix.lower() in (".pdf", ".docx", ".docm")]
         if pfade:
+            self.seite_zeigen("suche")
             self.after(10, lambda: self.datenblatt_laden(pfade[0]))
         return "copy"
 
@@ -931,6 +1025,8 @@ class App(tk.Tk):
         if offen:
             self.fremd_lbl.configure(text=self.fremd_lbl.cget("text") +
                                      f"\n⚠ {len(offen)} ungeklärte Punkte – vor dem Angebot klären (hier klicken für die Liste)")
+            self.fremd_rahmen.configure(fg_color=TH.GELB)
+            self.fremd_lbl.configure(text_color=TH.GELB_TEXT)
         if offen and not still:
             OffenePunkteDialog(self, offen, self.fremd.datei)
 
@@ -945,8 +1041,9 @@ class App(tk.Tk):
             kopf += f" – {', '.join(fg.geraetetyp)}"
         if aus_verlauf:
             kopf += "  (aus dem Verlauf)"
-        self.fremd_lbl.configure(text="\n".join([kopf, werte or "Keine Werte gefunden."] + fg.hinweise))
-        self.fremd_lbl.pack(fill="x", padx=12, pady=(6, 0), before=self.tabelle_rahmen)
+        self.fremd_rahmen.configure(fg_color=TH.CHIP)
+        self.fremd_lbl.configure(text="\n".join([kopf, werte or "Keine Werte gefunden."] + fg.hinweise), text_color=TH.TEXT)
+        self.fremd_rahmen.pack(fill="x", pady=(10, 0), after=self.such_karte)
 
     # ------------------------------------------------------------------ Shopdaten
     def datenquelle_wechseln(self):
@@ -966,10 +1063,10 @@ class App(tk.Tk):
     def _status(self):
         if self.stand:
             try:
-                st = datetime.fromisoformat(self.stand).strftime("%d.%m.%Y %H:%M")
+                st = datetime.fromisoformat(self.stand).strftime("%d.%m.%Y, %H:%M")
             except ValueError:
                 st = self.stand
-            self.stand_lbl.configure(text=f"{self._quelle('Shopdaten', 'Weclapp')}: {len(self.geraete)} Geräte · Stand {st}")
+            self.stand_lbl.configure(text=f"{self._quelle('Shopdaten', 'Weclapp')}: {len(self.geraete)} Geräte\nStand {st}")
         else:
             self.stand_lbl.configure(text=self._quelle("Shopdaten: noch nicht eingelesen", "Weclapp: noch nicht geladen"))
 
@@ -983,9 +1080,8 @@ class App(tk.Tk):
         if self.laedt:
             return
         self.laedt = True
-        self.knopf_laden.state(["disabled"])
-        self.knopf_laden.configure(text=self._quelle("Shop wird gelesen …", "Weclapp wird gelesen …"))
-        self.fortschritt.pack(fill="x", padx=12, before=self.info)
+        self.knopf_laden.configure(state="disabled", text=self._quelle("Shop wird gelesen …", "Weclapp wird gelesen …"))
+        self._balken(True)
         self.fortschritt.configure(value=0, maximum=100, mode="indeterminate")   # bis die Serienliste steht
         self.fortschritt.start(12)
         grund_text = "automatisch" if still else "neu"
@@ -1030,9 +1126,8 @@ class App(tk.Tk):
                         self.fortschritt.stop()
                         self.fortschritt.configure(mode="determinate")
                     self.fortschritt.configure(maximum=max(gesamt, 1), value=erledigt)
-                    # in der Kopfzeile: die Infozeile unten wird beim Tippen von der Suche überschrieben
-                    self.stand_lbl.configure(text=f"{self._quelle('Shop wird eingelesen … Serie', 'Weclapp wird gelesen … Artikel')} "
-                                                  f"{erledigt}/{gesamt}")
+                    was = self._quelle("Shop wird eingelesen …\nSerie", "Weclapp wird gelesen …\nArtikel")
+                    self.stand_lbl.configure(text=f"{was} {erledigt}/{gesamt}")
             except queue.Empty:
                 pass
             if ergebnis.get("fertig"):
@@ -1042,16 +1137,15 @@ class App(tk.Tk):
 
         def fertig():
             self.laedt = False
-            self.knopf_laden.state(["!disabled"])
-            self.knopf_laden.configure(text=self._quelle("Shop neu einlesen", "Weclapp neu laden"))
+            self.knopf_laden.configure(state="normal", text=self._quelle("Shop neu einlesen", "Weclapp neu laden"))
             self.fortschritt.stop()
             self.fortschritt.configure(mode="determinate")
-            self.fortschritt.pack_forget()
+            self._balken(False)
             self._status()
             if "fehler" in ergebnis:
                 fehler = ergebnis["fehler"]
                 self.info.configure(text=f"Shop nicht erreichbar ({_fehlertext(fehler)}) – es wird mit dem bisherigen Stand gesucht.")
-                self.stand_lbl.configure(text=self.stand_lbl.cget("text") + " · Shop nicht erreichbar")
+                self.stand_lbl.configure(text=self.stand_lbl.cget("text") + "\nShop nicht erreichbar")
                 if not still:
                     messagebox.showerror("Shop einlesen", f"Der Onlineshop konnte nicht gelesen werden:\n{_fehlertext(fehler)}\n\n"
                                                           "Öffnet www.eps-germany.de/shop im Browser normal, ist der Shop "
@@ -1079,7 +1173,7 @@ class App(tk.Tk):
                                            f"{grund}\n\n{bleibt}\n\nTrotzdem die neuen Daten übernehmen?",
                                            icon="warning", default="no", parent=self):
                     self.info.configure(text=f"Neue Shopdaten verworfen: {grund}")
-                    self.stand_lbl.configure(text=self.stand_lbl.cget("text") + " · neues Einlesen verworfen")
+                    self.stand_lbl.configure(text=self.stand_lbl.cget("text") + "\nneues Einlesen verworfen")
                     return
             self.geraete = neu
             try:
@@ -1089,7 +1183,7 @@ class App(tk.Tk):
             self.stand = datetime.now().isoformat(timespec="minutes")
             self._status()
             if fehlend:
-                self.stand_lbl.configure(text=self.stand_lbl.cget("text") + f" · {len(fehlend)} Serien unvollständig")
+                self.stand_lbl.configure(text=self.stand_lbl.cget("text") + f"\n{len(fehlend)} Serien unvollständig")
                 messagebox.showwarning(
                     "Shop einlesen",
                     f"{len(fehlend)} Serie(n) konnten nicht vollständig gelesen werden (Shop langsam) "
@@ -1101,7 +1195,8 @@ class App(tk.Tk):
                     parent=self)
             self.suchen()
             if not self.eingabe.get().strip():
-                self.info.configure(text=f"Shop eingelesen: {len(self.geraete)} Geräte.")
+                self.info.configure(text=f"Shop eingelesen: {len(self.geraete)} Geräte. Änderungen: Verlauf → "
+                                         "„Shop-Änderungen anzeigen“.")
 
         self.after(150, abfragen)
         threading.Thread(target=lauf, daemon=True).start()
@@ -1176,7 +1271,7 @@ class App(tk.Tk):
         stand: dict = {"geladen": 0, "gesamt": 0}
         ergebnis: dict = {}
         self.fortschritt.configure(mode="determinate", value=0, maximum=100)
-        self.fortschritt.pack(fill="x", padx=12, before=self.info)
+        self._balken(True)
 
         def lauf():
             try:
@@ -1192,7 +1287,7 @@ class App(tk.Tk):
             if not ergebnis.get("fertig"):
                 self.after(200, abfragen)
                 return
-            self.fortschritt.pack_forget()
+            self._balken(False)
             if "fehler" in ergebnis:
                 messagebox.showerror("Update", f"Die Testversion konnte nicht aktualisiert werden:\n{ergebnis['fehler']}",
                                      parent=self)
@@ -1213,7 +1308,7 @@ class App(tk.Tk):
         stand: dict = {"geladen": 0, "gesamt": 0}
         ergebnis: dict = {}
         self.fortschritt.configure(mode="determinate", value=0, maximum=100)
-        self.fortschritt.pack(fill="x", padx=12, before=self.info)
+        self._balken(True)
 
         def fortschritt(geladen, gesamt):
             stand.update(geladen=geladen, gesamt=gesamt)
@@ -1232,7 +1327,7 @@ class App(tk.Tk):
             if not ergebnis.get("fertig"):
                 self.after(200, abfragen)
                 return
-            self.fortschritt.pack_forget()
+            self._balken(False)
             if "fehler" in ergebnis:
                 messagebox.showerror("Update", f"Das Update konnte nicht geladen werden:\n{ergebnis['fehler']}\n\n"
                                                "Das Programm läuft normal weiter.", parent=self)

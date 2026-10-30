@@ -1,4 +1,4 @@
-"""Fenster „Anfragen (Outlook)“ – experimentell (Einstellungen → Experimentelle Funktionen).
+"""Seite „Anfragen“ (Outlook) – experimentell (Einstellungen → Experimentelle Funktionen).
 
 Links die Mails der Anfrage-Ordner (klassisches Outlook) bzw. geöffnete .msg/.eml-Dateien, rechts was erkannt wurde:
 Kunde mit Stammdaten (änderbar, Unsicheres gelb), Menge, Wunschtermin, Suchtext, Nachricht und Anhänge.
@@ -14,9 +14,11 @@ import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import ttk, messagebox, filedialog
+from tkinter import messagebox, filedialog
 
-from . import kunde as K, outlook
+import customtkinter as ctk
+
+from . import kunde as K, outlook, thema as TH
 from .einstellungen import Anfrageordner
 from .mail import Mail, datei_lesen
 
@@ -28,19 +30,24 @@ FELDER = [("firma", "Firma"), ("rechtsform", "Rechtsform"), ("anrede", "Anrede")
 DATEIEN = "– geöffnete Mail-Dateien –"
 
 
-class AnfragenFenster(tk.Toplevel):
-    def __init__(self, app):
-        super().__init__(app)
+class AnfragenSeite(ctk.CTkFrame):
+    def __init__(self, master, app):
+        super().__init__(master, fg_color="transparent")
         self.app = app
-        self.title("Kundenanfragen (Outlook) – Testphase")
-        self.geometry("1280x720")
         self.anhang_ordner = Path(tempfile.mkdtemp(prefix="eps-anfragen-"))
         self.mails: list[Mail] = []
         self.erkennungen: dict[int, K.Erkennung] = {}
         self.ordner_von: dict[int, Anfrageordner | None] = {}
         self.aktuell: int | None = None
+        self.geladen = False
         self._aufbauen()
         self._dnd()
+
+    def zeigen(self):
+        """Beim ersten Öffnen der Seite den ersten Ordner lesen (Outlook wird erst dann angesprochen)."""
+        if self.geladen:
+            return
+        self.geladen = True
         if self.app.einstellungen.anfrageordner and outlook.verfuegbar():
             self.after(100, self.laden)
         else:
@@ -48,85 +55,113 @@ class AnfragenFenster(tk.Toplevel):
             self.status.configure(text="Klassisches Outlook nicht verfügbar – Mails als .msg/.eml öffnen oder hineinziehen."
                                   if not outlook.verfuegbar() else "Keine Anfrage-Ordner eingestellt (Einstellungen).")
 
+    def ordner_aktualisieren(self):
+        werte = [o.anzeige for o in self.app.einstellungen.anfrageordner] + [DATEIEN]
+        self.ordner_cb.configure(values=werte)
+        if self.ordner_cb.get() not in werte:
+            self.ordner_cb.set(werte[0])
+
     # ---------------------------------------------------------------- Aufbau
     def _aufbauen(self):
-        oben = ttk.Frame(self, padding=(10, 10, 10, 4))
-        oben.pack(fill="x")
-        ttk.Label(oben, text="Ordner:").pack(side="left")
-        self.ordner_cb = ttk.Combobox(oben, state="readonly", width=70,
-                                      values=[o.anzeige for o in self.app.einstellungen.anfrageordner] + [DATEIEN])
-        if self.app.einstellungen.anfrageordner:
-            self.ordner_cb.current(0)
-        self.ordner_cb.pack(side="left", padx=6)
-        self.ordner_cb.bind("<<ComboboxSelected>>", lambda e: self.laden())
-        ttk.Button(oben, text="Aktualisieren", command=self.laden).pack(side="left")
-        ttk.Button(oben, text="Mail-Datei öffnen …", command=self.datei_waehlen).pack(side="left", padx=6)
-        self.status = ttk.Label(oben, text="", foreground="#6A7380")
-        self.status.pack(side="left", padx=10)
+        kopf = ctk.CTkFrame(self, fg_color="transparent")
+        kopf.pack(fill="x", pady=(0, 14))
+        TH.text(kopf, "Anfragen", 24, True, anchor="w").pack(anchor="w")
+        self.status = TH.text(kopf, "", 13, farbe=TH.GRAU, anchor="w")
+        self.status.pack(anchor="w")
 
-        teil = ttk.PanedWindow(self, orient="horizontal")
-        teil.pack(fill="both", expand=True, padx=10, pady=4)
-        links = ttk.Frame(teil)
-        sp = [("zeit", "Eingang", 110), ("von", "Absender", 170), ("betreff", "Betreff", 230), ("art", "Art", 70),
-              ("anh", "Anh.", 40)]
-        self.tv = ttk.Treeview(links, columns=[x[0] for x in sp], show="headings", selectmode="browse")
-        for k, t, b in sp:
-            self.tv.heading(k, text=t)
-            self.tv.column(k, width=b, stretch=k == "betreff")
-        sb = ttk.Scrollbar(links, orient="vertical", command=self.tv.yview)
-        self.tv.configure(yscrollcommand=sb.set)
-        self.tv.pack(side="left", fill="both", expand=True)
-        sb.pack(side="left", fill="y")
+        teil = ctk.CTkFrame(self, fg_color="transparent")
+        teil.pack(fill="both", expand=True)
+        teil.columnconfigure(0, weight=2, uniform="t")
+        teil.columnconfigure(1, weight=3, uniform="t")
+        teil.rowconfigure(0, weight=1)
+
+        links = TH.karte(teil)
+        links.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        oben = ctk.CTkFrame(links, fg_color="transparent")
+        oben.pack(fill="x", padx=12, pady=(12, 6))
+        werte = [o.anzeige for o in self.app.einstellungen.anfrageordner] + [DATEIEN]
+        self.ordner_cb = TH.auswahl(oben, werte, command=lambda v: self.laden(), breite=260)
+        self.ordner_cb.set(werte[0])
+        self.ordner_cb.pack(side="left", fill="x", expand=True)
+        TH.knopf(oben, "Aktualisieren", self.laden, height=34, width=110).pack(side="left", padx=(6, 0))
+        sp = [("zeit", "Eingang", 95), ("von", "Absender", 150), ("betreff", "Betreff", 220), ("art", "Art", 75)]
+        t_rahmen, self.tv = TH.tabelle(links, sp, dehnen=("betreff",))
+        t_rahmen.configure(border_width=0)
+        t_rahmen.pack(fill="both", expand=True, padx=4)
+        self.app.tabellen.append(self.tv)
         self.tv.bind("<<TreeviewSelect>>", lambda e: self.auswaehlen())
-        self.tv.tag_configure("formular", foreground="#2E7D32")
-        teil.add(links, weight=2)
+        ablage = ctk.CTkButton(links, text="Mail-Datei öffnen … oder .msg / .eml hierher ziehen", height=44,
+                               fg_color="transparent", hover_color=TH.KNOPF_HOVER, text_color=TH.GRAU,
+                               border_color=TH.RAND, border_width=1, corner_radius=10, font=TH.schrift(12),
+                               command=self.datei_waehlen)
+        ablage.pack(fill="x", padx=12, pady=12)
+        self.ablage = ablage
 
-        rechts = ttk.Frame(teil, padding=(10, 0, 0, 0))
-        teil.add(rechts, weight=3)
-        ttk.Label(rechts, text="Kunde / Interessent", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, columnspan=4,
-                                                                                        sticky="w")
+        rechts = ctk.CTkFrame(teil, fg_color="transparent")
+        rechts.grid(row=0, column=1, sticky="nsew")
+        kunde = TH.karte(rechts)
+        kunde.pack(fill="x")
+        kk = ctk.CTkFrame(kunde, fg_color="transparent")
+        kk.pack(fill="x", padx=16, pady=(12, 4))
+        TH.text(kk, "Kunde", 16, True).pack(side="left")
+        self.herkunft = ctk.CTkLabel(kk, text="", fg_color=TH.CHIP, text_color=TH.CHIP_TEXT, corner_radius=12, height=24,
+                                     padx=10, font=TH.schrift(12))
+        TH.text(kk, "gelb = bitte prüfen", 11, farbe=TH.GRAU).pack(side="right")
+        raster = ctk.CTkFrame(kunde, fg_color="transparent")
+        raster.pack(fill="x", padx=16, pady=(0, 6))
         self.vars: dict[str, tk.StringVar] = {}
-        self.entries: dict[str, tk.Entry] = {}
+        self.entries: dict[str, ctk.CTkEntry] = {}
         for i, (key, label) in enumerate(FELDER):
-            r, c = 1 + i // 2, (i % 2) * 2
-            ttk.Label(rechts, text=label + ":").grid(row=r, column=c, sticky="e", padx=(0, 4), pady=1)
+            r, c = (i // 4) * 2, i % 4
+            raster.columnconfigure(c, weight=1, uniform="f")
+            TH.text(raster, label, 11, farbe=TH.GRAU, anchor="w").grid(row=r, column=c, sticky="w", padx=(0, 8))
             v = tk.StringVar()
-            e = tk.Entry(rechts, textvariable=v, width=30, relief="solid", borderwidth=1)
-            e.grid(row=r, column=c + 1, sticky="we", pady=1, padx=(0, 10))
+            e = TH.eingabe(raster, textvariable=v, height=30)
+            e.grid(row=r + 1, column=c, sticky="we", padx=(0, 8), pady=(0, 6))
             self.vars[key], self.entries[key] = v, e
-        r = 2 + len(FELDER) // 2
-        self.unsicher = tk.Label(rechts, text="", bg=GELB, fg="#5A4300", justify="left", anchor="w", wraplength=560)
-        self.unsicher.grid(row=r, column=0, columnspan=4, sticky="we", pady=(6, 2))
-        ttk.Label(rechts, text="Menge:").grid(row=r + 1, column=0, sticky="e")
-        self.menge = tk.StringVar()
-        ttk.Entry(rechts, textvariable=self.menge, width=8).grid(row=r + 1, column=1, sticky="w")
-        ttk.Label(rechts, text="Wunschtermin:").grid(row=r + 1, column=2, sticky="e")
-        self.termin = tk.StringVar()
-        ttk.Entry(rechts, textvariable=self.termin, width=20).grid(row=r + 1, column=3, sticky="w")
-        ttk.Label(rechts, text="Suchtext:").grid(row=r + 2, column=0, sticky="e", pady=(6, 0))
-        self.suchtext = tk.StringVar()
-        ttk.Entry(rechts, textvariable=self.suchtext, font=("Segoe UI", 11)).grid(row=r + 2, column=1, columnspan=3,
-                                                                                sticky="we", pady=(6, 0))
-        self.anh_lbl = ttk.Label(rechts, text="", foreground="#1B4F72", wraplength=560)
-        self.anh_lbl.grid(row=r + 3, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        self.text = tk.Text(rechts, height=10, wrap="word", font=("Segoe UI", 9), relief="solid", borderwidth=1)
-        self.text.grid(row=r + 4, column=0, columnspan=4, sticky="nsew", pady=(6, 0))
-        rechts.rowconfigure(r + 4, weight=1)
-        rechts.columnconfigure(1, weight=1)
-        rechts.columnconfigure(3, weight=1)
+        self.unsicher = ctk.CTkLabel(kunde, text="", fg_color="transparent", text_color=TH.GELB_TEXT, corner_radius=8,
+                                     anchor="w", justify="left", wraplength=640, font=TH.schrift(12))
+        self.unsicher.pack(fill="x", padx=16, pady=(0, 12))
 
-        unten = ttk.Frame(self, padding=10)
-        unten.pack(fill="x")
-        self.knopf_suche = ttk.Button(unten, text="In Suche übernehmen", command=self.uebernehmen)
+        such = TH.karte(rechts)
+        such.pack(fill="x", pady=(12, 0))
+        sz = ctk.CTkFrame(such, fg_color="transparent")
+        sz.pack(fill="x", padx=16, pady=12)
+        sz.columnconfigure(0, weight=1)
+        TH.text(sz, "Suchtext", 11, farbe=TH.GRAU, anchor="w").grid(row=0, column=0, sticky="w")
+        TH.text(sz, "Menge", 11, farbe=TH.GRAU, anchor="w").grid(row=0, column=1, sticky="w", padx=(10, 0))
+        TH.text(sz, "Wunschtermin", 11, farbe=TH.GRAU, anchor="w").grid(row=0, column=2, sticky="w", padx=(10, 0))
+        self.suchtext = tk.StringVar()
+        ctk.CTkEntry(sz, textvariable=self.suchtext, height=40, font=TH.schrift(15), fg_color=TH.EINGABE,
+                     border_color=TH.AKZENT, border_width=2, text_color=TH.TEXT, corner_radius=8
+                     ).grid(row=1, column=0, sticky="we")
+        self.menge = tk.StringVar()
+        TH.eingabe(sz, textvariable=self.menge, width=70, height=40).grid(row=1, column=1, padx=(10, 0))
+        self.termin = tk.StringVar()
+        TH.eingabe(sz, textvariable=self.termin, width=140, height=40).grid(row=1, column=2, padx=(10, 0))
+
+        nachricht = TH.karte(rechts)
+        nachricht.pack(fill="both", expand=True, pady=(12, 0))
+        self.anh_lbl = TH.text(nachricht, "", 12, farbe=TH.LINK, anchor="w", justify="left", wraplength=640)
+        self.anh_lbl.pack(fill="x", padx=16, pady=(10, 0))
+        self.text = ctk.CTkTextbox(nachricht, wrap="word", font=TH.schrift(12), fg_color="transparent",
+                                   text_color=TH.TEXT, height=120)
+        self.text.pack(fill="both", expand=True, padx=10, pady=(4, 10))
+
+        unten = ctk.CTkFrame(rechts, fg_color="transparent")
+        unten.pack(fill="x", pady=(12, 0))
+        self.knopf_suche = TH.knopf(unten, "In Suche übernehmen", self.uebernehmen, haupt=True)
         self.knopf_suche.pack(side="left")
-        self.knopf_erledigt = ttk.Button(unten, text="Erledigt (in Unterordner verschieben)", command=self.erledigt)
-        self.knopf_erledigt.pack(side="left", padx=8)
-        ttk.Label(unten, text="Angelegt wird hier noch nichts – Weclapp folgt.", foreground="#6A7380").pack(side="right")
+        self.knopf_bearbeitung = TH.knopf(unten, "Nach „In Bearbeitung“", self.in_bearbeitung)
+        self.knopf_bearbeitung.pack(side="left", padx=(8, 0))
+        self.knopf_erledigt = TH.knopf(unten, "Erledigt", self.erledigt)
+        self.knopf_erledigt.pack(side="left", padx=(8, 0))
+        TH.text(unten, "Angelegt wird hier nichts.", 11, farbe=TH.GRAU).pack(side="right")
 
     def _dnd(self):
         try:
             from tkinterdnd2 import DND_FILES
-            for w in (self, self.tv):
+            for w in (self.tv, self.ablage):
                 w.drop_target_register(DND_FILES)
                 w.dnd_bind("<<Drop>>", self._drop)
         except Exception:  # noqa: BLE001
@@ -142,7 +177,7 @@ class AnfragenFenster(tk.Toplevel):
     def _im_hintergrund(self, arbeit, fertig, text: str):
         ergebnis: dict = {}
         self.status.configure(text=text)
-        self.configure(cursor="watch")
+        tk.Tk.configure(self.app, cursor="watch")
 
         def lauf():
             try:
@@ -157,16 +192,15 @@ class AnfragenFenster(tk.Toplevel):
                 return
             if not self.winfo_exists():
                 return
-            self.configure(cursor="")
+            tk.Tk.configure(self.app, cursor="")
             fertig(ergebnis.get("wert"), ergebnis.get("fehler"))
 
         threading.Thread(target=lauf, daemon=True).start()
         self.after(120, abfragen)
 
     def _gewaehlter_ordner(self) -> Anfrageordner | None:
-        i = self.ordner_cb.current()
-        ordner = self.app.einstellungen.anfrageordner
-        return ordner[i] if 0 <= i < len(ordner) else None
+        wahl = self.ordner_cb.get()
+        return next((o for o in self.app.einstellungen.anfrageordner if o.anzeige == wahl), None)
 
     # ---------------------------------------------------------------- Laden
     def laden(self):
@@ -185,6 +219,7 @@ class AnfragenFenster(tk.Toplevel):
                 return
             self._anzeigen(mails or [], o)
             self.status.configure(text=f"{len(mails)} Mails in „{o.pfad}“")
+            self.app.anfragen_anzahl(len(mails or []))
 
         self._im_hintergrund(arbeit, fertig, f"Lese „{o.pfad}“ …")
 
@@ -220,7 +255,7 @@ class AnfragenFenster(tk.Toplevel):
                                    "Formular" if e.formular else "Mail", len(m.anhaenge) or ""])
         self._leeren()
         kinder = self.tv.get_children()
-        if kinder:
+        if kinder and self.app.aktive_seite == "anfragen":     # Öffnen kann eine Mail verschieben – nur sichtbar
             self.tv.selection_set(kinder[0])
 
     # ---------------------------------------------------------------- Auswahl
@@ -232,8 +267,12 @@ class AnfragenFenster(tk.Toplevel):
         self.suchtext.set("")
         self.text.delete("1.0", "end")
         self.anh_lbl.configure(text="")
-        self.unsicher.configure(text="", bg=self.cget("bg"))
-        self.knopf_erledigt.state(["disabled"])
+        self.unsicher.configure(text="", fg_color="transparent")
+        self.herkunft.pack_forget()
+        for e in self.entries.values():
+            e.configure(fg_color=TH.EINGABE)
+        self.knopf_erledigt.configure(state="disabled")
+        self.knopf_bearbeitung.configure(state="disabled")
 
     def _formular_lesen(self):
         if self.aktuell is None:
@@ -262,7 +301,7 @@ class AnfragenFenster(tk.Toplevel):
             leer = not getattr(e.kunde, key, "")
             fraglich = label.split(" ")[0].lower() in unsicher_felder or (key in ("strasse", "plz") and "adresse" in
                                                                           unsicher_felder)
-            self.entries[key].configure(bg=GELB if (leer or fraglich) else "white")
+            self.entries[key].configure(fg_color=TH.GELB if (leer or fraglich) else TH.EINGABE)
         self.menge.set(str(e.menge or ""))
         self.termin.set(e.termin)
         self.suchtext.set(e.suchtext)
@@ -280,9 +319,14 @@ class AnfragenFenster(tk.Toplevel):
                    else "") + (("Bitte prüfen: " + " · ".join(e.unsicher)) if e.unsicher else "")
         hinweis = hinweis or \
             ("Homepage-Formular – vollständig erkannt" if e.formular else "")
-        self.unsicher.configure(text=hinweis, bg=GELB if e.unsicher else ("#E8F5E9" if hinweis else self.cget("bg")))
+        self.unsicher.configure(text=hinweis, fg_color=TH.GELB if e.unsicher else (TH.GRUEN_BG if hinweis else "transparent"),
+                                text_color=TH.GELB_TEXT if e.unsicher else TH.GRUEN)
+        self.herkunft.configure(text="Homepage-Formular" if e.formular else ("weitergeleitet" if e.weitergeleitet_von
+                                                                            else "aus Mail/Signatur"))
+        self.herkunft.pack(side="left", padx=10)
         o = self.ordner_von.get(i)
-        self.knopf_erledigt.state(["!disabled"] if o else ["disabled"])
+        self.knopf_erledigt.configure(state="normal" if o else "disabled")
+        self.knopf_bearbeitung.configure(state="normal" if o and not getattr(m, "_in_bearbeitung", False) else "disabled")
         if o and o.gemeinsam and not getattr(m, "_in_bearbeitung", False):
             self._in_bearbeitung(i, o)
 
@@ -300,17 +344,22 @@ class AnfragenFenster(tk.Toplevel):
                                        parent=self)
                 return
             m.quelle, m._in_bearbeitung = neue_id, True
+            if self.aktuell == i:
+                self.knopf_bearbeitung.configure(state="disabled")
             self.status.configure(text=f"Nach „{ziel}“ verschoben – andere sehen, dass du sie bearbeitest.")
 
         self._im_hintergrund(arbeit, fertig, "Verschiebe nach „In Bearbeitung“ …")
 
     # ---------------------------------------------------------------- Aktionen
+    def in_bearbeitung(self):
+        if self.aktuell is not None and self.ordner_von.get(self.aktuell):
+            self._in_bearbeitung(self.aktuell, self.ordner_von[self.aktuell])
+
     def uebernehmen(self):
         if self.aktuell is None:
             return
         self._formular_lesen()
         self.app.vorgang_uebernehmen(self.mails[self.aktuell], self.erkennungen[self.aktuell])
-        self.app.lift()
 
     def erledigt(self):
         if self.aktuell is None:
@@ -333,6 +382,7 @@ class AnfragenFenster(tk.Toplevel):
                 return
             self.tv.delete(str(i))
             self.aktuell = None
+            self.app.anfragen_anzahl(len(self.tv.get_children()))
             self._leeren()
             self.status.configure(text=f"Nach „{ziel}“ verschoben.")
             rest = self.tv.get_children()

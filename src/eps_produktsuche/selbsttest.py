@@ -78,8 +78,15 @@ def selbsttest(ziel: Path) -> int:
         app = App(pfad=ziel / "shopdaten.json", automatisch_laden=False, update_pruefen=False)
         app.eingabe.set("Stromquelle 0-30V 1kA 30kW")
         app.update()
-        zeilen.append(f"GUI-Zeilen: {len(app.tv.get_children())}")
-        ok &= len(app.tv.get_children()) == 1
+        zeilen.append(f"GUI: {len(app.karten_treffer)} Karte(n), {len(app.tv.get_children())} Listenzeile(n)")
+        ok &= len(app.karten_treffer) + len(app.tv.get_children()) == 1
+        for seite in ("verlauf", "vergleich", "einstellungen", "suche"):
+            app.seite_zeigen(seite)
+            app.update()
+        app.dunkel_setzen(True)
+        app.update()
+        app.dunkel_setzen(False)
+        zeilen.append("Seiten und Dunkelmodus OK")
         app.destroy()
     except Exception:  # noqa: BLE001
         zeilen.append(traceback.format_exc())
