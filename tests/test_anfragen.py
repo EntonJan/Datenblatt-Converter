@@ -167,6 +167,9 @@ class _Item:
         neu = _Item(ziel, self.Subject, self.Body)
         return neu
 
+    def Delete(self):
+        self.ordner._items.remove(self)
+
 
 class _Namespace:
     """Wie bei Enton: lokale „Outlook-Datendatei“ ist Standard und steht vorn, das Konto (IMAP) dahinter."""
@@ -217,6 +220,21 @@ def test_outlook_ordner_lesen_und_verschieben(tmp_path):
         raise AssertionError("Fehler erwartet")
     except outlook.OutlookFehler as e:
         assert "gibtsnicht" in str(e)
+
+
+def test_outlook_loeschen(tmp_path):
+    ns = _Namespace()
+    auto = ns.eingang.Add("Anfragen").Add("Automatisch")
+    _Item(auto, "Spam", "x")
+    ol = outlook.Outlook(namespace=ns)
+    m = ol.mails("Posteingang/Anfragen/Automatisch", tmp_path)[0]
+    ol.loeschen(m.quelle)
+    assert auto._items == []
+    try:
+        ol.loeschen(m.quelle)
+        raise AssertionError("Fehler erwartet")
+    except outlook.OutlookFehler:
+        pass
 
 
 def test_einstellungen(tmp_path):

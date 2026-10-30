@@ -39,48 +39,75 @@ def _zentrieren(fenster: tk.Toplevel, master: tk.Misc) -> None:
     fenster.geometry(f"+{max(x, 0)}+{max(y, 0)}")
 
 
-class VariantenDialog(tk.Toplevel):
-    """Auswahl einer Variante aus einer Zahlenreihe ohne Modellnamen (z. B. „0-30 V / 0-40 A / 1,2 kW“)."""
+class AuswahlDialog(ctk.CTkToplevel):
+    """Liste zum Auswählen (Variante oder Modell aus einem Kunden-Dokument) im Stil der Produktsuche.
 
-    def __init__(self, master, varianten, datei: str = ""):
-        super().__init__(master)
-        self.title("Variante auswählen" + (f" – {datei}" if datei else ""))
+    ergebnis: Index der Auswahl, False = „ohne“, None = abgebrochen."""
+
+    def __init__(self, master, titel: str, frage: str, eintraege: list[str], ohne_text: str):
+        super().__init__(master, fg_color=TH.BG)
+        self.title(titel)
         self.transient(master)
-        self.grab_set()
         self.ergebnis = None
-        self.varianten = varianten
-        ttk.Label(self, text="Das Dokument enthält mehrere Varianten bzw. Ausbaustufen ohne Modellnamen.\n"
-                             "Welche braucht der Kunde?", padding=10).pack(anchor="w")
-        fr = ttk.Frame(self, padding=(10, 0))
-        fr.pack(fill="both", expand=True)
-        self.lb = tk.Listbox(fr, height=min(16, len(varianten) + 1), width=52, activestyle="dotbox", font=(TH.SCHRIFT, 10))
-        sb = ttk.Scrollbar(fr, command=self.lb.yview)
-        self.lb.configure(yscrollcommand=sb.set)
-        for v in varianten:
-            self.lb.insert("end", v.label)
-        self.lb.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        self.lb.bind("<Double-1>", lambda e: self.ok())
-        self.lb.bind("<Return>", lambda e: self.ok())
-        self.lb.selection_set(0)
-        self.lb.focus_set()
-        bf = ttk.Frame(self, padding=10)
-        bf.pack(fill="x")
-        ttk.Button(bf, text="Ohne Variante (Höchstwerte)", command=self.ohne).pack(side="left")
-        ttk.Button(bf, text="Übernehmen", command=self.ok).pack(side="right")
+        hoehe = min(560, 230 + 32 * len(eintraege))
+        self.geometry(f"560x{hoehe}")
+        self.minsize(420, 300)
+        TH.text(self, frage, 13, anchor="w", justify="left", wraplength=520).pack(fill="x", padx=18, pady=(16, 10))
+        rahmen, self.tv = TH.tabelle(self, [("wert", "Auswahl", 480)], dehnen=("wert",))
+        self.tv.configure(show="tree")
+        self.tv.column("#0", width=0, stretch=False)
+        rahmen.pack(fill="both", expand=True, padx=18)
+        for i, e in enumerate(eintraege):
+            self.tv.insert("", "end", iid=str(i), values=[e])
+        unten = ctk.CTkFrame(self, fg_color="transparent")
+        unten.pack(fill="x", padx=18, pady=14)
+        TH.knopf(unten, ohne_text, self.ohne).pack(side="left")
+        TH.knopf(unten, "Übernehmen", self.ok, haupt=True, width=120).pack(side="right")
+        TH.knopf(unten, "Abbrechen", self.destroy, width=100).pack(side="right", padx=8)
+        self.tv.bind("<Double-1>", lambda e: self.ok())
+        self.bind("<Return>", lambda e: self.ok())
         self.bind("<Escape>", lambda e: self.destroy())
+        if eintraege:
+            self.tv.selection_set("0")
+            self.tv.focus("0")
         _zentrieren(self, master)
+        self.after(80, self._modal)
         self.wait_window()
 
+    def _modal(self):
+        try:
+            self.lift()
+            self.grab_set()
+            self.tv.focus_set()
+        except tk.TclError:                       # Fenster noch nicht sichtbar
+            self.after(80, self._modal)
+
     def ok(self):
-        sel = self.lb.curselection()
+        sel = self.tv.selection()
         if sel:
-            self.ergebnis = self.varianten[sel[0]]
+            self.ergebnis = int(sel[0])
             self.destroy()
 
     def ohne(self):
         self.ergebnis = False
         self.destroy()
+
+
+def variante_waehlen(master, varianten, datei: str = ""):
+    """Variante aus einer Zahlenreihe ohne Modellnamen (z. B. „0-30 V / 0-40 A / 1,2 kW“)."""
+    d = AuswahlDialog(master, "Variante auswählen" + (f" – {datei}" if datei else ""),
+                      "Das Dokument enthält mehrere Varianten bzw. Ausbaustufen ohne Modellnamen. Welche braucht der Kunde?",
+                      [v.label for v in varianten], "Ohne Variante (Höchstwerte)")
+    return d.ergebnis if d.ergebnis in (None, False) else varianten[d.ergebnis]
+
+
+def modell_waehlen(master, modelle, datei: str = ""):
+    """Modell aus einem Datenblatt mit mehreren Modellspalten."""
+    d = AuswahlDialog(master, "Modell auswählen" + (f" – {datei}" if datei else ""),
+                      "Dieses Datenblatt enthält mehrere Modelle. Welches braucht der Kunde?",
+                      [f"{m.label}   (Tabelle {m.tabelle + 1}, Seite {m.seite})" for m in modelle],
+                      "Ohne Modell (nur allgemeine Werte)")
+    return d.ergebnis if d.ergebnis in (None, False) else modelle[d.ergebnis]
 
 
 class OffenePunkteDialog(ctk.CTkToplevel):
@@ -981,18 +1008,17 @@ class App(ctk.CTk):
                 return fehler_melden(fehler)
             modell = variante = None
             if analyse.modelle and analyse.hat_text:
-                from eps_converter.importieren import ModellDialog
-                d = ModellDialog(self, analyse.modelle, pfad.name)
-                if d.ergebnis is None:
+                wahl = modell_waehlen(self, analyse.modelle, pfad.name)
+                if wahl is None:
                     self.info.configure(text="Abgebrochen – kein Modell gewählt.")
                     return
-                modell = d.ergebnis or None
+                modell = wahl or None
             elif len(analyse.varianten) > 1:
-                d = VariantenDialog(self, analyse.varianten, pfad.name)
-                if d.ergebnis is None:
+                wahl = variante_waehlen(self, analyse.varianten, pfad.name)
+                if wahl is None:
                     self.info.configure(text="Abgebrochen – keine Variante gewählt.")
                     return
-                variante = d.ergebnis or None
+                variante = wahl or None
             self._hintergrund(lambda: datenblatt.lesen(pfad, modell, variante), nach_lesen, f"Werte aus {pfad.name} …")
 
         def nach_lesen(fg, fehler):

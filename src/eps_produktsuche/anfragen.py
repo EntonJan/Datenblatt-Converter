@@ -90,6 +90,9 @@ class AnfragenSeite(ctk.CTkFrame):
         t_rahmen.pack(fill="both", expand=True, padx=4)
         self.app.tabellen.append(self.tv)
         self.tv.bind("<<TreeviewSelect>>", lambda e: self.auswaehlen())
+        self.tv.bind("<Button-3>", self._menue)
+        self.tv.bind("<Delete>", lambda e: self.loeschen())
+        self.menue = tk.Menu(self, tearoff=False)
         ablage = ctk.CTkButton(links, text="Mail-Datei öffnen … oder .msg / .eml hierher ziehen", height=44,
                                fg_color="transparent", hover_color=TH.KNOPF_HOVER, text_color=TH.GRAU,
                                border_color=TH.RAND, border_width=1, corner_radius=10, font=TH.schrift(12),
@@ -349,6 +352,71 @@ class AnfragenSeite(ctk.CTkFrame):
             self.status.configure(text=f"Nach „{ziel}“ verschoben – andere sehen, dass du sie bearbeitest.")
 
         self._im_hintergrund(arbeit, fertig, "Verschiebe nach „In Bearbeitung“ …")
+
+    # ---------------------------------------------------------------- Rechtsklick
+    def _menue(self, e):
+        zeile = self.tv.identify_row(e.y)
+        if not zeile:
+            return
+        if zeile not in self.tv.selection():
+            self.tv.selection_set(zeile)
+            self.tv.focus(zeile)
+            self.update_idletasks()
+        i = int(zeile)
+        o = self.ordner_von.get(i)
+        m = self.menue
+        m.delete(0, "end")
+        m.configure(bg=TH.f(TH.FLAECHE), fg=TH.f(TH.TEXT), activebackground=TH.f(TH.CHIP),
+                    activeforeground=TH.f(TH.TEXT), font=(TH.SCHRIFT, 10), relief="flat", borderwidth=1)
+        m.add_command(label="In Suche übernehmen", command=self.uebernehmen)
+        m.add_command(label="Nach „In Bearbeitung“", command=self.in_bearbeitung,
+                      state="normal" if o and not getattr(self.mails[i], "_in_bearbeitung", False) else "disabled")
+        m.add_command(label="Erledigt", command=self.erledigt, state="normal" if o else "disabled")
+        m.add_separator()
+        m.add_command(label="Löschen …" if o else "Aus der Liste entfernen", command=self.loeschen)
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
+
+    def loeschen(self):
+        """Outlook-Mail löschen (→ „Gelöschte Elemente“) bzw. geöffnete Mail-Datei nur aus der Liste nehmen."""
+        if self.aktuell is None:
+            return
+        i = self.aktuell
+        m, o = self.mails[i], self.ordner_von.get(i)
+
+        def entfernen(text: str):
+            self.tv.delete(str(i))
+            self.aktuell = None
+            self._leeren()
+            self.status.configure(text=text)
+            if o:
+                self.app.anfragen_anzahl(len(self.tv.get_children()))
+            rest = self.tv.get_children()
+            if rest:
+                self.tv.selection_set(rest[0])
+
+        if not o:                                  # geöffnete .msg/.eml: Datei bleibt, wo sie ist
+            entfernen(f"„{m.betreff or m.absender_email}“ aus der Liste entfernt (die Datei bleibt erhalten).")
+            return
+        if not messagebox.askyesno("Anfrage löschen",
+                                   f"Diese Mail in Outlook löschen?\n\n{m.betreff}\nvon {m.absender_name or m.absender_email}"
+                                   "\n\nSie landet in „Gelöschte Elemente“ und lässt sich dort wiederherstellen.",
+                                   icon="warning", default="no", parent=self):
+            return
+
+        def arbeit():
+            with outlook.Outlook() as ol:
+                ol.loeschen(m.quelle)
+
+        def fertig(_, fehler):
+            if fehler:
+                messagebox.showerror("Anfragen", f"Löschen fehlgeschlagen:\n{fehler}", parent=self)
+                return
+            entfernen("Gelöscht – in Outlook unter „Gelöschte Elemente“ wiederherstellbar.")
+
+        self._im_hintergrund(arbeit, fertig, "Lösche …")
 
     # ---------------------------------------------------------------- Aktionen
     def in_bearbeitung(self):

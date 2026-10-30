@@ -203,6 +203,14 @@ class Outlook:
         neu = item.Move(self.ordner(ziel_pfad, anlegen=True))
         return neu.EntryID
 
+    def loeschen(self, entry_id: str) -> None:
+        """Mail löschen – Outlook legt sie in „Gelöschte Elemente“ (dort wiederherstellbar)."""
+        try:
+            item = self.ns.GetItemFromID(entry_id)
+        except Exception as e:  # noqa: BLE001
+            raise OutlookFehler("Die Mail wurde nicht mehr gefunden – evtl. schon verschoben oder gelöscht.") from e
+        item.Delete()
+
 
 def unterordner(pfad: str, name: str) -> str:
     """Zielordner: ein Name („Erledigt“) wird Unterordner des Anfrage-Ordners, ein Pfad mit „/“
