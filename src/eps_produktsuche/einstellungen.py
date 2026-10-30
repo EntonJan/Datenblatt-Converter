@@ -31,6 +31,7 @@ class Einstellungen:
     ordner_erledigt: str = "Erledigt"              # Unterordner des jeweiligen Anfrageordners
     ordner_in_bearbeitung: str = "In Bearbeitung"
     preisfrist_monate: int = 6                      # ab wann ein Einkaufspreis als zu alt gilt (Weclapp)
+    interne_domains: list[str] = field(default_factory=lambda: ["eps-germany.de"])   # Weiterleitungen erkennen
 
     @staticmethod
     def laden(pfad: Path) -> "Einstellungen":
@@ -39,7 +40,7 @@ class Einstellungen:
         except (OSError, ValueError):
             return Einstellungen()
         e = Einstellungen()
-        for k in ("experimentell", "ordner_erledigt", "ordner_in_bearbeitung", "preisfrist_monate"):
+        for k in ("experimentell", "ordner_erledigt", "ordner_in_bearbeitung", "preisfrist_monate", "interne_domains"):
             if k in d:
                 setattr(e, k, d[k])
         if isinstance(d.get("anfrageordner"), list):

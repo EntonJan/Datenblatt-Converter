@@ -209,7 +209,7 @@ class AnfragenFenster(tk.Toplevel):
         self.mails, self.erkennungen, self.ordner_von, self.aktuell = mails, {}, {}, None
         self.tv.delete(*self.tv.get_children())
         for i, m in enumerate(mails):
-            e = K.erkennen(m)
+            e = K.erkennen(m, tuple(self.app.einstellungen.interne_domains))
             self.erkennungen[i], self.ordner_von[i] = e, ordner
             try:
                 zeit = datetime.fromisoformat(m.empfangen).strftime("%d.%m. %H:%M")
@@ -267,10 +267,18 @@ class AnfragenFenster(tk.Toplevel):
         self.termin.set(e.termin)
         self.suchtext.set(e.suchtext)
         self.text.delete("1.0", "end")
-        self.text.insert("1.0", f"{m.betreff}\n\n{e.anfrage}")
+        kopf = f"{m.betreff}\n\n"
+        if e.weitergeleitet_von:
+            kopf += f"▶ Weitergeleitet von {e.weitergeleitet_von}" + (f":\n{e.notiz}\n" if e.notiz else "\n") + \
+                "\n▶ Original-Anfrage des Kunden:\n"
+        self.text.insert("1.0", kopf + e.anfrage)
         self.anh_lbl.configure(text=("Anhänge: " + ", ".join(p.name for p in m.anhaenge)) if m.anhaenge else
                                "Keine PDF/Word-Anhänge")
-        hinweis = ("Bitte prüfen: " + " · ".join(e.unsicher)) if e.unsicher else \
+        if e.weitergeleitet_von:
+            e.unsicher = [u for u in e.unsicher if not u.startswith("Weitergeleitet")]
+        hinweis = (f"Weitergeleitet von {e.weitergeleitet_von} – Kunde aus der Original-Mail. " if e.weitergeleitet_von
+                   else "") + (("Bitte prüfen: " + " · ".join(e.unsicher)) if e.unsicher else "")
+        hinweis = hinweis or \
             ("Homepage-Formular – vollständig erkannt" if e.formular else "")
         self.unsicher.configure(text=hinweis, bg=GELB if e.unsicher else ("#E8F5E9" if hinweis else self.cget("bg")))
         o = self.ordner_von.get(i)

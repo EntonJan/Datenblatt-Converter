@@ -160,6 +160,10 @@ class EinstellungenDialog(tk.Toplevel):
         ttk.Label(fr, text="Einkaufspreis gilt als zu alt nach (Monaten, für Weclapp):").grid(row=r + 2, column=0, sticky="w")
         self.frist = tk.IntVar(value=e.preisfrist_monate)
         ttk.Spinbox(fr, from_=1, to=36, width=5, textvariable=self.frist).grid(row=r + 2, column=1, sticky="w")
+        ttk.Label(fr, text="Eigene Domains (Mails von dort = Weiterleitung, Kunde steht darunter):").grid(
+            row=r + 3, column=0, sticky="w")
+        self.domains = tk.StringVar(value=", ".join(e.interne_domains))
+        ttk.Entry(fr, textvariable=self.domains, width=30).grid(row=r + 3, column=1, columnspan=3, sticky="w")
         bf = ttk.Frame(self, padding=(14, 0, 14, 14))
         bf.pack(fill="x")
         ttk.Button(bf, text="Speichern", command=self.speichern).pack(side="right")
@@ -201,6 +205,8 @@ class EinstellungenDialog(tk.Toplevel):
         e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "Automatisch" else "pruefen",
                                          g.get()) for p, a, g in self.zeilen if p.get().strip()]
         e.ordner_erledigt = self.erledigt.get().strip() or "Erledigt"
+        e.interne_domains = [d.strip().lower().lstrip("@") for d in self.domains.get().replace(";", ",").split(",")
+                             if d.strip()] or ["eps-germany.de"]
         e.ordner_in_bearbeitung = self.bearbeitung.get().strip() or "In Bearbeitung"
         try:
             e.preisfrist_monate = max(1, int(self.frist.get()))

@@ -253,3 +253,66 @@ def test_testkanal(tmp_path, monkeypatch):
     assert exe.read_bytes() == b"neu" and exe.with_name("EPS-Produktsuche-TEST.alt.exe").exists()
     A.test_aufraeumen(exe, versuche=1)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["EPS-Produktsuche-TEST.exe"]
+
+
+# ---------------------------------------------------------------- Weiterleitungen (z. B. vom Chef)
+WEITERLEITUNG = """Hallo Jan-Dean,
+
+bitte kümmere dich darum, gerne 3 Stück anbieten.
+
+Gruß
+TEST Chef
+EPS Stromversorgung GmbH
+
+Von: Max Mustermann <max.mustermann@muster-testtechnik.de>
+Gesendet: Mittwoch, 28. Oktober 2026 14:02
+An: TEST Chef <chef@eps-germany.de>
+Betreff: Anfrage Netzgerät
+
+""" + SIGNATUR_DE.split("\nVon: Vertrieb EPS")[0]
+
+
+def test_weiterleitung_vom_chef():
+    m = Mail(absender_name="TEST Chef", absender_email="chef@eps-germany.de", betreff="WG: Anfrage Netzgerät",
+             text=WEITERLEITUNG)
+    e = K.erkennen(m)
+    assert e.weitergeleitet_von == "TEST Chef" and "3 Stück" in e.notiz
+    assert (e.kunde.firma, e.kunde.rechtsform, e.kunde.email) == ("TEST Muster Testtechnik", "GmbH & Co. KG",
+                                                                  "max.mustermann@muster-testtechnik.de")
+    assert e.suchtext == "Quelle 0-60V 100A 3kW" and e.menge == 2            # Menge aus der Kundenmail hat Vorrang
+
+
+def test_weiterleitung_englisch_und_mailto():
+    text = ("FYI\n\n---------- Forwarded message ---------\nFrom: Jane Doe [mailto:jane.doe@example-rail.co.uk]\n"
+            "Sent: Tuesday, October 27, 2026 9:00 AM\nTo: info@eps-germany.de\nSubject: RFQ inverter\n\n" + SIGNATUR_EN)
+    e = K.erkennen(Mail(absender_name="TEST Chef", absender_email="chef@eps-germany.de", text=text))
+    assert e.kunde.email == "jane.doe@example-rail.co.uk" and e.kunde.firma == "TEST Example Rail Systems"
+    assert e.notiz == "FYI"
+
+
+def test_weiterleitung_als_anhang(tmp_path):
+    innen = EmailMessage()
+    innen["From"] = "Max Mustermann <max.mustermann@muster-testtechnik.de>"
+    innen["Subject"] = "Anfrage"
+    innen.set_content(SIGNATUR_DE)
+    innen.add_attachment(b"%PDF-1.4", maintype="application", subtype="pdf", filename="spec.pdf")
+    aussen = EmailMessage()
+    aussen["From"] = "TEST Chef <chef@eps-germany.de>"
+    aussen["Subject"] = "WG: Anfrage"
+    aussen.set_content("Bitte bearbeiten.\n\nGruß\nTEST Chef")
+    aussen.add_attachment(innen)
+    p = tmp_path / "wg.eml"
+    p.write_bytes(bytes(aussen))
+    m = datei_lesen(p, tmp_path / "anh")
+    assert len(m.eingebettet) == 1 and [a.name for a in m.anhaenge] == ["spec.pdf"]
+    e = K.erkennen(m)
+    assert e.weitergeleitet_von == "TEST Chef" and e.kunde.firma == "TEST Muster Testtechnik"
+    assert e.notiz == "Bitte bearbeiten."
+
+
+def test_interne_mail_ohne_original():
+    e = K.erkennen(Mail(absender_name="TEST Chef", absender_email="chef@eps-germany.de",
+                        text="Kannst du mal 60V 100A raussuchen?\n\nGruß\nTEST Chef"))
+    assert not e.weitergeleitet_von and e.unsicher[0].startswith("Absender ist EPS-intern")
+    assert e.suchtext == "60V 100A"
+    assert K.ist_intern("x@eps-germany.de") and K.ist_intern("x@mail.eps-germany.de") and not K.ist_intern("x@eps.de")

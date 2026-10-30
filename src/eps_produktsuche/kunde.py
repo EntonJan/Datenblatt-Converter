@@ -67,6 +67,11 @@ class Erkennung:
     termin: str = "ASAP"
     formular: bool = False       # Homepage-Formular erkannt (sicher)
     unsicher: list[str] = field(default_factory=list)   # Felder, die geprüft werden sollten
+    weitergeleitet_von: str = "" # interne Weiterleitung (z. B. vom Chef) – Kunde stammt aus der Original-Mail
+    notiz: str = ""              # Text des Weiterleitenden über der Original-Mail
+
+
+INTERN = ("eps-germany.de",)     # eigene Domains: Mails von hier sind Weiterleitungen, nie der Kunde
 
 
 # ------------------------------------------------------------------------ Bausteine
@@ -348,7 +353,66 @@ def suchtext(nachricht: str) -> str:
     return " ".join(dict.fromkeys(teile))
 
 
-def erkennen(mail: Mail) -> Erkennung:
+# ------------------------------------------------------------------------ Weiterleitungen
+
+_KOPF = re.compile(r"^[ \t>]*(?:von|from|de|da|absender)\s*:[ \t]*(?P<von>[^\n]*?)[ \t]*\n"
+                   r"(?P<rest>(?:[ \t>]*(?:gesendet|sent|datum|date|an|to|cc|bcc|betreff|subject|envoyé|à|objet|"
+                   r"wichtigkeit|importance|antwort an|reply-to)\s*:[^\n]*\n?){1,8})", re.I | re.M)
+_MAILTO = re.compile(r"(?:<|\[mailto:|\()?\s*([\w.+-]+@[\w-]+(?:\.[\w-]+)+)\s*(?:>|\]|\))?")
+
+
+@dataclass
+class Block:
+    name: str
+    email: str
+    betreff: str
+    text: str
+
+
+def ist_intern(adresse: str, intern=INTERN) -> bool:
+    dom = (adresse or "").lower().rsplit("@", 1)[-1]
+    return bool(dom) and any(dom == d or dom.endswith("." + d) for d in intern)
+
+
+def zerlegen(text: str) -> tuple[str, list[Block]]:
+    """Weitergeleitete/zitierte Mails im Text → (eigener Text oben, Blöcke darunter mit Absender und Inhalt)."""
+    treffer = list(_KOPF.finditer(text or ""))
+    if not treffer:
+        return text or "", []
+    oben = text[:treffer[0].start()]
+    oben = re.sub(r"(?im)^[ \t>]*-{2,}.*(original|forwarded|weitergeleitet|ursprüngliche).*-*\s*$", "", oben).strip()
+    bloecke = []
+    for i, m in enumerate(treffer):
+        ende = treffer[i + 1].start() if i + 1 < len(treffer) else len(text)
+        von = m.group("von")
+        em = _MAILTO.search(von)
+        name = (von[:em.start()] if em else von).strip(' "\'<[(')
+        bm = re.search(r"(?im)^[ \t>]*(?:betreff|subject|objet)\s*:\s*(.*)$", m.group("rest"))
+        inhalt = re.sub(r"(?m)^[ \t]*>[ \t]?", "", text[m.end():ende]).strip()
+        bloecke.append(Block(name, em.group(1).lower() if em else "", bm.group(1).strip() if bm else "", inhalt))
+    return oben, bloecke
+
+
+def original_mail(mail: Mail, intern=INTERN) -> tuple[Mail | None, str]:
+    """Bei interner Weiterleitung: die Original-Mail des Kunden (erster Absender von außerhalb) und die Notiz darüber."""
+    for inner in mail.eingebettet:                          # als Anhang weitergeleitet
+        if inner.absender_email and not ist_intern(inner.absender_email, intern):
+            return inner, signatur(mail.text)[0]
+        tiefer, _ = original_mail(inner, intern)
+        if tiefer:
+            return tiefer, signatur(mail.text)[0]
+    oben, bloecke = zerlegen(mail.text)
+    for b in bloecke:
+        if b.email and ist_intern(b.email, intern):
+            continue
+        if not b.email and re.search(r"(?i)\beps\b", b.name):
+            continue
+        return Mail(betreff=b.betreff or mail.betreff, absender_name=b.name, absender_email=b.email, text=b.text,
+                    anhaenge=mail.anhaenge, quelle=mail.quelle, ordner=mail.ordner), signatur(oben)[0]
+    return None, ""
+
+
+def erkennen(mail: Mail, intern=INTERN) -> Erkennung:
     werte = _formular(mail.text)
     if werte is not None:
         k = Kunde(firma=werte.get("firma", ""), rechtsform=werte.get("rechtsform", ""), anrede=werte.get("anrede", ""),
@@ -378,8 +442,22 @@ def erkennen(mail: Mail) -> Erkennung:
         e.suchtext = (bm.group(1) or bm.group(2)) if bm else suchtext(e.anfrage)
         e.unsicher = [f for f, v in (("Firma", k.firma), ("E-Mail", k.email), ("Land", k.land)) if not v]
         return e
+    if ist_intern(mail.absender_email, intern) or (not mail.absender_email and mail.eingebettet):
+        original, notiz = original_mail(mail, intern)
+        if original is not None:
+            e = erkennen(original, intern)
+            e.weitergeleitet_von = mail.absender_name or mail.absender_email
+            e.notiz = notiz
+            if not e.kunde.email:
+                e.unsicher.append("E-Mail des Kunden fehlt in der Weiterleitung")
+            m = _MENGE.search(notiz)                        # Hinweise des Chefs („bitte 3 Stück anbieten“) zählen auch
+            if m and not e.menge:
+                e.menge = int(m.group(1) or m.group(2))
+            return e
     nachricht, block = signatur(mail.text)
     k, unsicher = kunde_aus_signatur(block, mail)
+    if ist_intern(mail.absender_email, intern):
+        unsicher.insert(0, "Absender ist EPS-intern – Original-Kunde nicht gefunden, bitte Kundendaten eintragen")
     e = Erkennung(kunde=k, anfrage=nachricht, unsicher=unsicher)
     e.suchtext = suchtext(nachricht) or suchtext(mail.betreff)   # Betreff nur, wenn der Text nichts hergibt
     mm = _MENGE.search(nachricht)

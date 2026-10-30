@@ -175,6 +175,18 @@ class Outlook:
         for j in range(1, item.Attachments.Count + 1):
             a = item.Attachments.Item(j)
             name = a.FileName or ""
+            if getattr(a, "Type", 1) == 5 or name.lower().endswith(".msg"):     # als Anhang weitergeleitete Mail
+                anhang_ordner.mkdir(parents=True, exist_ok=True)
+                ziel = anhang_ordner / f"eingebettet{j}.msg"
+                try:
+                    a.SaveAsFile(str(ziel))
+                    from .mail import msg_lesen
+                    inner = msg_lesen(ziel, anhang_ordner / f"eingebettet{j}")
+                    m.eingebettet.append(inner)
+                    m.anhaenge.extend(inner.anhaenge)
+                except Exception:  # noqa: BLE001 – Weiterleitung als Text funktioniert trotzdem
+                    pass
+                continue
             if name.lower().endswith(ANHANG_ENDUNGEN):
                 anhang_ordner.mkdir(parents=True, exist_ok=True)
                 ziel = anhang_ordner / _sicherer_name(name)
