@@ -147,6 +147,8 @@ class EinstellungenDialog(tk.Toplevel):
             ttk.Combobox(fr, textvariable=art, values=["Automatisch", "Selbst prüfen"], state="readonly",
                          width=14).grid(row=3 + i, column=1, padx=6)
             ttk.Checkbutton(fr, variable=gem).grid(row=3 + i, column=2)
+            ttk.Button(fr, text="Aus Outlook wählen …", command=lambda v=pfad: self.waehlen(v)).grid(row=3 + i, column=3,
+                                                                                                padx=(6, 0))
             self.zeilen.append((pfad, art, gem))
         r = 3 + len(self.zeilen)
         ttk.Label(fr, text="Erledigte Mails nach (Name = Unterordner, mit „/“ = fester Ordner):").grid(row=r, column=0, sticky="w", pady=(12, 2))
@@ -164,6 +166,34 @@ class EinstellungenDialog(tk.Toplevel):
         ttk.Button(bf, text="Abbrechen", command=self.destroy).pack(side="right", padx=6)
         self.bind("<Escape>", lambda ev: self.destroy())
         _zentrieren(self, app)
+
+    def waehlen(self, var: tk.StringVar):
+        """Outlook-Ordnerdialog (im Hintergrund, Outlook braucht einen eigenen COM-Thread)."""
+        from . import outlook
+        if not outlook.verfuegbar():
+            messagebox.showinfo("Einstellungen", "Klassisches Outlook ist auf diesem Rechner nicht verfügbar.", parent=self)
+            return
+        ergebnis: dict = {}
+
+        def lauf():
+            try:
+                with outlook.Outlook() as ol:
+                    ergebnis["pfad"] = ol.ordner_waehlen()
+            except Exception as ex:  # noqa: BLE001
+                ergebnis["fehler"] = ex
+            ergebnis["fertig"] = True
+
+        def abfragen():
+            if not ergebnis.get("fertig"):
+                self.after(150, abfragen)
+                return
+            if "fehler" in ergebnis:
+                messagebox.showerror("Einstellungen", f"Outlook: {ergebnis['fehler']}", parent=self)
+            elif ergebnis.get("pfad"):
+                var.set(ergebnis["pfad"])
+
+        threading.Thread(target=lauf, daemon=True).start()
+        self.after(150, abfragen)
 
     def speichern(self):
         e = self.app.einstellungen

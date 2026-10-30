@@ -65,37 +65,74 @@ class Outlook:
         self.schliessen()
 
     # ---------------------------------------------------------------- Ordner
+    _EINGANG_NAMEN = ("posteingang", "inbox")
+
     def _kind(self, ordner, name: str):
+        n = name.lower()
         for i in range(1, ordner.Folders.Count + 1):
             f = ordner.Folders.Item(i)
-            if f.Name.lower() == name.lower():
+            if f.Name.lower() == n:
                 return f
+        if n in self._EINGANG_NAMEN:                      # „Posteingang“ = „Inbox“ (IMAP-Konten, englisches Outlook)
+            for i in range(1, ordner.Folders.Count + 1):
+                f = ordner.Folders.Item(i)
+                if f.Name.lower() in self._EINGANG_NAMEN:
+                    return f
         return None
 
-    def ordner(self, pfad: str, anlegen: bool = False):
-        teile = [t for t in pfad.replace("\\", "/").split("/") if t.strip()]
-        if not teile:
-            raise OutlookFehler("Kein Ordner angegeben.")
-        start = None
-        for i in range(1, self.ns.Folders.Count + 1):        # Postfächer (eigenes + gemeinsame)
-            f = self.ns.Folders.Item(i)
-            if f.Name.lower() == teile[0].lower():
-                start, teile = f, teile[1:]
-                break
-        if start is None:
-            eingang = self.ns.GetDefaultFolder(POSTEINGANG)
-            start = eingang.Parent                               # Wurzel des eigenen Postfachs
-            if teile[0].lower() in ("posteingang", "inbox", eingang.Name.lower()):
-                start, teile = eingang, teile[1:]
-        aktuell = start
+    def _postfaecher(self) -> list:
+        """Alle Postfächer/Datendateien; das Standard-Postfach zuerst."""
+        alle = [self.ns.Folders.Item(i) for i in range(1, self.ns.Folders.Count + 1)]
+        try:
+            standard = self.ns.GetDefaultFolder(POSTEINGANG).Parent
+            alle.sort(key=lambda f: f.Name != standard.Name)
+        except Exception:  # noqa: BLE001
+            pass
+        return alle
+
+    def _gehen(self, start, teile: list[str]):
+        """So weit wie möglich absteigen → (Ordner, Anzahl gefundener Teile)."""
+        aktuell, n = start, 0
         for t in teile:
             kind = self._kind(aktuell, t)
             if kind is None:
-                if not anlegen:
-                    raise OutlookFehler(f"Ordner „{t}“ in „{pfad}“ nicht gefunden.")
-                kind = aktuell.Folders.Add(t)
-            aktuell = kind
-        return aktuell
+                break
+            aktuell, n = kind, n + 1
+        return aktuell, n
+
+    def ordner(self, pfad: str, anlegen: bool = False):
+        """Ordner zu einem Pfad. Beginnt der Pfad nicht mit einem Postfachnamen, werden alle Postfächer durchsucht
+        (in Outlook steht oft eine lokale „Outlook-Datendatei“ als Standard vor dem eigentlichen Konto)."""
+        teile = [t for t in pfad.replace("\\", "/").split("/") if t.strip()]
+        if not teile:
+            raise OutlookFehler("Kein Ordner angegeben.")
+        postfaecher = self._postfaecher()
+        treffer = [f for f in postfaecher if f.Name.lower() == teile[0].lower()]
+        if treffer:
+            kandidaten, teile = treffer[:1], teile[1:]
+        else:
+            kandidaten = postfaecher
+        bester, tiefe = None, -1
+        for p in kandidaten:
+            ordner, n = self._gehen(p, teile)
+            if n > tiefe:
+                bester, tiefe = ordner, n
+            if n == len(teile):
+                break
+        if tiefe == len(teile):
+            return bester
+        if not anlegen or bester is None or tiefe < len(teile) - 1:
+            gesucht = "/".join(teile[:tiefe + 1]) if tiefe >= 0 else pfad
+            raise OutlookFehler(f"Ordner „{gesucht}“ in keinem Postfach gefunden. Pfad in den Einstellungen prüfen "
+                                "oder mit „Aus Outlook wählen …“ auswählen.")
+        return bester.Folders.Add(teile[-1])              # nur der letzte Teil (z. B. „Erledigt“) wird angelegt
+
+    def ordner_waehlen(self) -> str:
+        """Outlook-eigenen Ordnerdialog öffnen → Pfad im Format der Einstellungen („Postfach/Posteingang/…“) oder ""."""
+        f = self.ns.PickFolder()
+        if f is None:
+            return ""
+        return f.FolderPath.replace("\\", "/").strip("/")
 
     # ---------------------------------------------------------------- Mails
     @staticmethod

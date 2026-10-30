@@ -169,17 +169,20 @@ class _Item:
 
 
 class _Namespace:
+    """Wie bei Enton: lokale „Outlook-Datendatei“ ist Standard und steht vorn, das Konto (IMAP) dahinter."""
     def __init__(self):
+        self.pst = _Ordner("Outlook-Datendatei")
+        self.pst_eingang = self.pst.Add("Posteingang")
         self.wurzel = _Ordner("jandean.enkelmann@eps-germany.de")
         self.eingang = self.wurzel.Add("Posteingang")
         self.gemeinsam = _Ordner("vertrieb@eps-germany.de")
-        self.Folders = _Liste([self.wurzel, self.gemeinsam])
+        self.Folders = _Liste([self.pst, self.wurzel, self.gemeinsam])
 
     def GetDefaultFolder(self, n):
-        return self.eingang
+        return self.pst_eingang
 
     def GetItemFromID(self, i):
-        for o in self._alle(self.wurzel) + self._alle(self.gemeinsam):
+        for o in self._alle(self.pst) + self._alle(self.wurzel) + self._alle(self.gemeinsam):
             for it in o._items:
                 if it.EntryID == i:
                     return it
@@ -205,6 +208,10 @@ def test_outlook_ordner_lesen_und_verschieben(tmp_path):
     neu = ol.verschieben(mails[0].quelle, outlook.unterordner("Posteingang/Anfragen/Automatisch", "Erledigt"))
     assert [m.betreff for m in ol.mails("Posteingang/Anfragen/Automatisch/Erledigt", tmp_path)] == ["Anfrage 2"]
     assert len(auto._items) == 1 and neu.startswith("ID")
+    assert ol.ordner("jandean.enkelmann@eps-germany.de/Posteingang/Anfragen/Automatisch") is auto
+    assert ol.ordner("Inbox/Anfragen/Automatisch") is auto                     # englischer Name
+    erledigt = ol.ordner("Posteingang/Anfragen/Erledigt", anlegen=True)          # wird im Konto angelegt, nicht in der PST
+    assert erledigt.Parent is auto.Parent and ns.pst_eingang._kinder == []
     try:
         ol.mails("Posteingang/gibtsnicht", tmp_path)
         raise AssertionError("Fehler erwartet")
