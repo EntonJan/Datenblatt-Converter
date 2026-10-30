@@ -45,6 +45,19 @@ def selbsttest(ziel: Path) -> int:
         ok &= len(verlauf.laden(ziel / "verlauf.json")) == 1
         ok &= aktualisierung.neueste(releases=[{"tag_name": "produktsuche-v99.0.0", "assets": [
             {"name": aktualisierung.ASSET, "browser_download_url": "x"}]}]) == ("99.0.0", "x")
+        from . import kunde as KD
+        from .mail import Mail
+        ek = KD.erkennen(Mail(absender_email="t@test-firma.de", text="Bitte 60V 100A\n\nMit freundlichen Grüßen\n"
+                                                                        "Max Test\nTEST Firma GmbH\nTeststr. 1\n86150 Augsburg"))
+        zeilen.append(f"Mail-Erkennung: {ek.kunde.firmenname} · {ek.suchtext}")
+        ok &= ek.kunde.firmenname == "TEST Firma GmbH" and ek.suchtext == "60V 100A"
+        try:
+            import extract_msg  # noqa: F401
+            from . import outlook as OL
+            zeilen.append(f"Outlook-Anbindung: {'verfügbar' if OL.verfuegbar() else 'nicht verfügbar'}")
+        except ImportError as ie:
+            zeilen.append(f"Mail-Bibliotheken fehlen: {ie}")
+            ok = False
         from .gui import App
         app = App(pfad=ziel / "shopdaten.json", automatisch_laden=False, update_pruefen=False)
         app.eingabe.set("Stromquelle 0-30V 1kA 30kW")

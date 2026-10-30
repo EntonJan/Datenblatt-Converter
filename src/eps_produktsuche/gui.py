@@ -14,6 +14,9 @@ from pathlib import Path
 from tkinter import ttk, messagebox, simpledialog
 
 from . import __version__, shop, suche as Q, verlauf, aktualisierung
+from .einstellungen import Einstellungen, Anfrageordner
+
+TESTVERSION = "dev" in __version__        # Test-Builds vom Branch: kein Selbst-Update, keine Aufräumaktion
 
 NAVY, CYAN, GRAU = "#35528C", "#52B4D7", "#6A7380"
 FARBEN = {Q.PASST: "#2E7D32", Q.GROESSER: "#1B4F72", Q.PARALLEL: "#8E5A00", Q.REIHE: "#8E5A00", Q.KNAPP_DARUNTER: "#8A8F98"}
@@ -114,6 +117,72 @@ class OffenePunkteDialog(tk.Toplevel):
         text = "\n".join(("[x] " if v.get() else "[ ] ") + p for p, v in zip(self.punkte, self.vars))
         self.clipboard_clear()
         self.clipboard_append(text)
+
+
+class EinstellungenDialog(tk.Toplevel):
+    def __init__(self, app: "App"):
+        super().__init__(app)
+        self.app = app
+        self.title("Einstellungen")
+        self.transient(app)
+        self.grab_set()
+        e = app.einstellungen
+        fr = ttk.Frame(self, padding=14)
+        fr.pack(fill="both", expand=True)
+        self.experimentell = tk.BooleanVar(value=e.experimentell)
+        ttk.Checkbutton(fr, text="Experimentelle Funktionen: Kundenanfragen aus Outlook (Testphase)",
+                        variable=self.experimentell).grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(fr, text="Anfrage-Ordner im klassischen Outlook (Pfad wie in der Ordnerliste, mit „/“ getrennt; "
+                           "gemeinsames Postfach: dessen Name vorn, z. B. „vertrieb@eps-germany.de/Posteingang/Anfragen“):",
+                  wraplength=640, foreground=GRAU).grid(row=1, column=0, columnspan=3, sticky="w", pady=(12, 4))
+        ttk.Label(fr, text="Ordner").grid(row=2, column=0, sticky="w")
+        ttk.Label(fr, text="Art").grid(row=2, column=1, sticky="w")
+        ttk.Label(fr, text="gemeinsam").grid(row=2, column=2, sticky="w")
+        self.zeilen = []
+        ordner = list(e.anfrageordner) + [Anfrageordner("", "pruefen")] * max(0, 4 - len(e.anfrageordner))
+        for i, o in enumerate(ordner[:6]):
+            pfad, art, gem = tk.StringVar(value=o.pfad), tk.StringVar(value="Automatisch" if o.art == "automatisch"
+                                                                      else "Selbst prüfen"), tk.BooleanVar(value=o.gemeinsam)
+            ttk.Entry(fr, textvariable=pfad, width=58).grid(row=3 + i, column=0, sticky="we", pady=2)
+            ttk.Combobox(fr, textvariable=art, values=["Automatisch", "Selbst prüfen"], state="readonly",
+                         width=14).grid(row=3 + i, column=1, padx=6)
+            ttk.Checkbutton(fr, variable=gem).grid(row=3 + i, column=2)
+            self.zeilen.append((pfad, art, gem))
+        r = 3 + len(self.zeilen)
+        ttk.Label(fr, text="Unterordner für erledigte Mails:").grid(row=r, column=0, sticky="w", pady=(12, 2))
+        self.erledigt = tk.StringVar(value=e.ordner_erledigt)
+        ttk.Entry(fr, textvariable=self.erledigt, width=20).grid(row=r, column=1, columnspan=2, sticky="w", pady=(12, 2))
+        ttk.Label(fr, text="Unterordner „in Bearbeitung“ (gemeinsame Postfächer):").grid(row=r + 1, column=0, sticky="w")
+        self.bearbeitung = tk.StringVar(value=e.ordner_in_bearbeitung)
+        ttk.Entry(fr, textvariable=self.bearbeitung, width=20).grid(row=r + 1, column=1, columnspan=2, sticky="w")
+        ttk.Label(fr, text="Einkaufspreis gilt als zu alt nach (Monaten, für Weclapp):").grid(row=r + 2, column=0, sticky="w")
+        self.frist = tk.IntVar(value=e.preisfrist_monate)
+        ttk.Spinbox(fr, from_=1, to=36, width=5, textvariable=self.frist).grid(row=r + 2, column=1, sticky="w")
+        bf = ttk.Frame(self, padding=(14, 0, 14, 14))
+        bf.pack(fill="x")
+        ttk.Button(bf, text="Speichern", command=self.speichern).pack(side="right")
+        ttk.Button(bf, text="Abbrechen", command=self.destroy).pack(side="right", padx=6)
+        self.bind("<Escape>", lambda ev: self.destroy())
+        _zentrieren(self, app)
+
+    def speichern(self):
+        e = self.app.einstellungen
+        e.experimentell = self.experimentell.get()
+        e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "Automatisch" else "pruefen",
+                                         g.get()) for p, a, g in self.zeilen if p.get().strip()]
+        e.ordner_erledigt = self.erledigt.get().strip() or "Erledigt"
+        e.ordner_in_bearbeitung = self.bearbeitung.get().strip() or "In Bearbeitung"
+        try:
+            e.preisfrist_monate = max(1, int(self.frist.get()))
+        except (tk.TclError, ValueError):
+            pass
+        try:
+            e.speichern(self.app.einstellungen_pfad)
+        except OSError as ex:
+            messagebox.showerror("Einstellungen", f"Konnte nicht gespeichert werden:\n{ex}", parent=self)
+            return
+        self.app._experimentell_zeigen()
+        self.destroy()
 
 
 class VerlaufDialog(tk.Toplevel):
@@ -244,6 +313,9 @@ class App(tk.Tk):
             pass
         self.pfad = pfad or datenpfad()
         self.verlauf_pfad = self.pfad.parent / "verlauf.json"
+        self.einstellungen_pfad = self.pfad.parent / "einstellungen.json"
+        self.einstellungen = Einstellungen.laden(self.einstellungen_pfad)
+        self.vorgang = None                     # aktuelle Kundenanfrage aus Outlook/Mail (kunde.Erkennung + Mail)
         self.geraete, self.stand = shop.laden(self.pfad)
         self.treffer: list[Q.Treffer] = []
         self.zeilen_geraete: list[shop.Geraet] = []
@@ -260,8 +332,8 @@ class App(tk.Tk):
         if automatisch_laden and (not self.geraete or shop.veraltet(self.stand) or veraltetes_format):
             self.after(300, lambda: self.einlesen(still=bool(self.geraete)))
         if update_pruefen is None:
-            update_pruefen = aktualisierung.ist_exe()
-        if aktualisierung.ist_exe():
+            update_pruefen = aktualisierung.ist_exe() and not TESTVERSION
+        if aktualisierung.ist_exe() and not TESTVERSION:
             threading.Thread(target=aktualisierung.alte_entfernen, daemon=True).start()
         if update_pruefen:
             self.after(2500, lambda: self.updates_suchen(still=True))
@@ -285,6 +357,10 @@ class App(tk.Tk):
         self.knopf_laden.pack(side="right", padx=(4, 10))
         ttk.Button(kopf, text="Updates", command=lambda: self.updates_suchen(still=False)).pack(side="right", padx=4)
         ttk.Button(kopf, text="Verlauf …", command=lambda: VerlaufDialog(self)).pack(side="right", padx=4)
+        ttk.Button(kopf, text="Einstellungen …", command=lambda: EinstellungenDialog(self)).pack(side="right", padx=4)
+        self.knopf_anfragen = ttk.Button(kopf, text="Anfragen (Outlook) …", command=self.anfragen_oeffnen)
+        self.kopf = kopf
+        self._experimentell_zeigen()
         self.stand_lbl = tk.Label(kopf, text="", fg="white", bg=NAVY)
         self.stand_lbl.pack(side="right", padx=10)
 
@@ -595,6 +671,36 @@ class App(tk.Tk):
             verlauf.hinzufuegen(self.verlauf_pfad, text, aktion, geraete, self.typ.get(), fremd)
         except OSError:
             pass
+
+    # ------------------------------------------------------------------ Anfragen (experimentell)
+    def _experimentell_zeigen(self):
+        if self.einstellungen.experimentell:
+            self.knopf_anfragen.pack(side="right", padx=4)
+        else:
+            self.knopf_anfragen.pack_forget()
+
+    def anfragen_oeffnen(self):
+        fenster = getattr(self, "_anfragen_fenster", None)
+        if fenster is not None and fenster.winfo_exists():
+            fenster.lift()
+            return
+        from .anfragen import AnfragenFenster
+        self._anfragen_fenster = AnfragenFenster(self)
+
+    def vorgang_uebernehmen(self, mail, erkennung):
+        """Anfrage aus dem Anfragen-Fenster in die Suche holen. Anhang (PDF/Word) hat Vorrang vor dem Mailtext."""
+        self.vorgang = (mail, erkennung)
+        self.fremd, self.fremd_anfrage = None, ""
+        self.fremd_lbl.pack_forget()
+        self.typ.set("automatisch")
+        if mail.anhaenge:
+            self.datenblatt_laden(mail.anhaenge[0])
+        else:
+            self.eingabe.set(erkennung.suchtext)
+        k = erkennung.kunde
+        self.info.configure(text=f"Anfrage von {k.firmenname or k.email} übernommen"
+                                 + (f" – {len(mail.anhaenge)} Anhang/Anhänge" if mail.anhaenge else ""))
+        self.feld.focus_set()
 
     def verlauf_uebernehmen(self, e: dict):
         from . import datenblatt

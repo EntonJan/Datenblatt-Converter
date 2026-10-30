@@ -12,7 +12,10 @@ a = Analysis(
            (str(ROOT / "assets" / "fonts" / "Carlito-Bold.ttf"), "assets/fonts"),
            (str(ROOT / "katalog" / "feldkatalog.xlsx"), "katalog")],
     hiddenimports=["eps_produktsuche.selbsttest", "eps_produktsuche.datenblatt", "eps_produktsuche.vergleich",
-                   "eps_produktsuche.verlauf", "eps_produktsuche.anforderung", "eps_produktsuche.aktualisierung", "eps_converter.auslesen",
+                   "eps_produktsuche.verlauf", "eps_produktsuche.anforderung",
+                   "eps_produktsuche.anfragen", "eps_produktsuche.kunde", "eps_produktsuche.mail",
+                   "eps_produktsuche.outlook", "eps_produktsuche.einstellungen", "extract_msg",
+                   "win32com.client", "pythoncom", "eps_produktsuche.aktualisierung", "eps_converter.auslesen",
                    "eps_converter.importieren", "PIL._tkinter_finder", "tkinterdnd2"],
     excludes=["pytest"],
 )
