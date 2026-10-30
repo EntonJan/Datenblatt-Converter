@@ -61,6 +61,19 @@ def selbsttest(ziel: Path) -> int:
         except ImportError as ie:
             zeilen.append(f"Mail-Bibliotheken fehlen: {ie}")
             ok = False
+        from . import weclapp as WC
+        from .weclapp_attrappe import Attrappe
+        wc = WC.Weclapp(Attrappe(g))
+        plan = wc.planen(ek.kunde, [(g[0].bestellnummer, 1)], 6)
+        erg = wc.ausfuehren(plan, ek.kunde)
+        zeilen.append(f"Weclapp-Attrappe: Angebot {erg.angebot_nummer}")
+        ok &= bool(erg.angebot_nummer)
+        try:
+            import keyring  # noqa: F401
+            zeilen.append("keyring OK")
+        except ImportError:
+            zeilen.append("keyring fehlt")
+            ok = False
         from .gui import App
         app = App(pfad=ziel / "shopdaten.json", automatisch_laden=False, update_pruefen=False)
         app.eingabe.set("Stromquelle 0-30V 1kA 30kW")

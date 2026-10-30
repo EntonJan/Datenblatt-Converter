@@ -164,12 +164,51 @@ class EinstellungenDialog(tk.Toplevel):
             row=r + 3, column=0, sticky="w")
         self.domains = tk.StringVar(value=", ".join(e.interne_domains))
         ttk.Entry(fr, textvariable=self.domains, width=30).grid(row=r + 3, column=1, columnspan=3, sticky="w")
+        ttk.Separator(fr).grid(row=r + 4, column=0, columnspan=4, sticky="we", pady=10)
+        ttk.Label(fr, text="Weclapp-Adresse (z. B. „firma.weclapp.com“, „demo“ = nachgebautes Weclapp zum Ausprobieren):"
+                  ).grid(row=r + 5, column=0, sticky="w")
+        self.weclapp = tk.StringVar(value=e.weclapp_adresse)
+        ttk.Entry(fr, textvariable=self.weclapp, width=30).grid(row=r + 5, column=1, columnspan=2, sticky="w")
+        wk = ttk.Frame(fr)
+        wk.grid(row=r + 6, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        ttk.Button(wk, text="Token eintragen …", command=self.token_eintragen).pack(side="left")
+        ttk.Button(wk, text="Verbindung testen", command=self.verbindung_testen).pack(side="left", padx=6)
+        self.weclapp_status = ttk.Label(wk, text="", foreground=GRAU)
+        self.weclapp_status.pack(side="left", padx=6)
         bf = ttk.Frame(self, padding=(14, 0, 14, 14))
         bf.pack(fill="x")
         ttk.Button(bf, text="Speichern", command=self.speichern).pack(side="right")
         ttk.Button(bf, text="Abbrechen", command=self.destroy).pack(side="right", padx=6)
         self.bind("<Escape>", lambda ev: self.destroy())
         _zentrieren(self, app)
+
+    def token_eintragen(self):
+        from . import zugang
+        adresse = self.weclapp.get().strip()
+        if not adresse or adresse.lower() == "demo":
+            messagebox.showinfo("Weclapp", "Erst die Weclapp-Adresse eintragen (für „demo“ ist kein Token nötig).",
+                                parent=self)
+            return
+        token = simpledialog.askstring("Weclapp-Token", "API-Token aus Weclapp (Meine Einstellungen → API).\n"
+                                       "Wird nur in der Windows-Anmeldeinformationsverwaltung gespeichert:",
+                                       show="*", parent=self)
+        if token:
+            dauerhaft = zugang.speichern(adresse, token.strip())
+            self.weclapp_status.configure(text="Token gespeichert." if dauerhaft else
+                                          "Token nur für diese Sitzung (keine Windows-Anmeldeinformationsverwaltung).")
+
+    def verbindung_testen(self):
+        from . import weclapp_dialog
+        from .einstellungen import Einstellungen
+        e = Einstellungen(weclapp_adresse=self.weclapp.get().strip())
+        self.weclapp_status.configure(text="Teste …")
+
+        def arbeit():
+            return weclapp_dialog.verbindung(e, self.app.geraete).verbindung_testen()
+
+        def fertig(text, fehler):
+            self.weclapp_status.configure(text=str(fehler) if fehler else text)
+        weclapp_dialog._hintergrund(self, arbeit, fertig)
 
     def waehlen(self, var: tk.StringVar):
         """Outlook-Ordnerdialog (im Hintergrund, Outlook braucht einen eigenen COM-Thread)."""
@@ -205,6 +244,7 @@ class EinstellungenDialog(tk.Toplevel):
         e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "Automatisch" else "pruefen",
                                          g.get()) for p, a, g in self.zeilen if p.get().strip()]
         e.ordner_erledigt = self.erledigt.get().strip() or "Erledigt"
+        e.weclapp_adresse = self.weclapp.get().strip()
         e.interne_domains = [d.strip().lower().lstrip("@") for d in self.domains.get().replace(";", ",").split(",")
                              if d.strip()] or ["eps-germany.de"]
         e.ordner_in_bearbeitung = self.bearbeitung.get().strip() or "In Bearbeitung"
@@ -469,6 +509,8 @@ class App(tk.Tk):
         ttk.Button(unten, text="(EN)", width=5, command=lambda: self.kopieren("en")).pack(side="left", padx=4)
         ttk.Button(unten, text="Gegenüberstellung PDF (DE)", command=lambda: self.gegenueberstellung("de")).pack(side="left", padx=(18, 0))
         ttk.Button(unten, text="(EN)", width=5, command=lambda: self.gegenueberstellung("en")).pack(side="left", padx=4)
+        self.knopf_weclapp = ttk.Button(unten, text="In Weclapp vorbereiten …", command=self.weclapp_vorbereiten)
+        self._experimentell_zeigen()
         ttk.Label(unten, text="Enter: im Verlauf merken · Doppelklick: Datenblatt · Strg+C: Empfehlung · Strg+O: Kunden-Dokument",
                   foreground=GRAU).pack(side="right")
 
@@ -718,6 +760,34 @@ class App(tk.Tk):
             self.knopf_anfragen.pack(side="right", padx=4)
         else:
             self.knopf_anfragen.pack_forget()
+        knopf = getattr(self, "knopf_weclapp", None)          # entsteht erst mit der unteren Leiste
+        if knopf is None:
+            return
+        if self.einstellungen.experimentell and self.einstellungen.weclapp_adresse:
+            knopf.pack(side="left", padx=(18, 0))
+        else:
+            knopf.pack_forget()
+
+    def weclapp_vorbereiten(self):
+        """Ausgewählte Geräte + Kunde der übernommenen Anfrage → Plan in Weclapp (Angebot, ggf. Herstelleranfrage)."""
+        from .weclapp_dialog import WeclappDialog
+        sel = self._auswahl()
+        if not sel:
+            messagebox.showinfo("Weclapp", "Bitte zuerst das Gerät bzw. die Geräte für das Angebot auswählen "
+                                           "(Strg + Klick für mehrere).", parent=self)
+            return
+        if not self.vorgang:
+            messagebox.showinfo("Weclapp", "Bitte zuerst eine Kundenanfrage übernehmen (Anfragen (Outlook) … → "
+                                           "„In Suche übernehmen“) – daraus kommt der Kunde.", parent=self)
+            return
+        mail, erk = self.vorgang
+        menge = erk.menge or 1
+        geraete = []
+        for i in sel:
+            g = self.zeilen_geraete[i]
+            if g.bestellnummer not in [x[0] for x in geraete]:
+                geraete.append((g.bestellnummer, g.name, menge))
+        WeclappDialog(self, erk.kunde, geraete, erk.termin, notiz=(f"Anfrage: {mail.betreff}" if mail.betreff else ""))
 
     def anfragen_oeffnen(self):
         fenster = getattr(self, "_anfragen_fenster", None)
