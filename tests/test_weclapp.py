@@ -82,3 +82,20 @@ def test_zugang_ohne_dauerhaften_speicher(monkeypatch):
     assert zugang.laden("test.weclapp.com") == "geheim"
     zugang.loeschen("test.weclapp.com")
     assert zugang.laden("test.weclapp.com") == ""
+
+
+def test_feldliste_und_import():
+    from eps_converter import katalog as K, pfade
+    from eps_produktsuche import shop, weclapp_felder as WF
+    attribute, standard = WF.feldliste(K.laden(pfade.KATALOG_MITGELIEFERT))
+    schluessel = [a.schluessel for a in attribute]
+    assert len(schluessel) == len(set(schluessel)) and all(s.startswith("eps_") for s in schluessel)
+    assert {"eps_ausgangsspannung", "eps_ausgangsspannung_min", "eps_ausgangsspannung_max"} <= set(schluessel)
+    assert next(a for a in attribute if a.schluessel == "eps_bauform").auswahl_de.endswith("DIN Rail")
+    assert "eps_bestellnummer" not in schluessel and any(s[0] == "bestellnummer" for s in standard)
+    g = shop.Geraet("T-125", "TEST CTP 6000-125-400 Wechselrichter", serie="TEST", geraetetyp="DC/AC",
+                    spannung="3x 400V AC (L-L)", strom="8,6A", leistung="6000 VA")
+    shop.auswerten(g)
+    z = dict(zip([s for s, _ in WF.IMPORT_SPALTEN], WF.artikel_zeilen([g])[0]))
+    assert (z["eps_eingangsspannung_min"], z["eps_ausgangsspannung_fest"], z["eps_ausgangsfrequenz"]) == ("125", "400", "")
+    assert z["Warengruppe"] == "DC/AC" and "Bauform fehlt" in z["Prüfen"]
