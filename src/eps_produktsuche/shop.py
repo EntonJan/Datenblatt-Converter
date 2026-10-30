@@ -252,7 +252,7 @@ def serie_lesen(seite: str, url: str) -> Serie:
     beschreibung = m.group(1) if m else beschreibung          # Navigation vor der Überschrift weglassen
     s.f_fest, s.f_bereiche, s.f_option = frequenzen(beschreibung)
     s.wasser = wasserkuehlung("", s.titel, beschreibung)
-    s.rueckspeisung = bool(re.search(r"rückspeis|regenerativ|regenerative|energy recovery", s.titel + " " + beschreibung, re.I))
+    s.rueckspeisung = ist_rueckspeisend("", s.titel)
     return s
 
 
@@ -294,10 +294,20 @@ def geraete_lesen(seite: str, serie: Serie, seite_url: str = "") -> list[Geraet]
         ff, fb, fo = frequenzen(beschr_text)
         g.f_fest, g.f_bereiche, g.f_option = (ff, fb, fo) if (ff or fb) else (serie.f_fest, serie.f_bereiche, serie.f_option or fo)
         g.wasser = wasserkuehlung(name, "", beschr_text) or serie.wasser
-        g.rueckspeisung = bool(re.search(r"rückspeis|regenerativ", name + " " + beschr_text, re.I)) or serie.rueckspeisung
+        g.rueckspeisung = ist_rueckspeisend(name, serie.titel)
         auswerten(g)
         out.append(g)
     return out
+
+
+_RUECKSPEISUNG = re.compile(r"netz-?\s?rückspeis|rückspeisend|regenerativ|energy recovery|regenerative", re.I)
+
+
+def ist_rueckspeisend(name: str, serie: str) -> bool:
+    """Netzrückspeisung nur aus Gerätename/Serientitel – dort kennzeichnet EPS sie („+Netzrückspeisung“, „rückspeisend“,
+    „Regeneratives …“). Beschreibungstexte enthalten oft „rückspeisefest“/„Rückspeiseschutz“ (Schutz GEGEN
+    Rückspeisung) und führten zu falschen Treffern (Korrektur 30.10.2026)."""
+    return bool(_RUECKSPEISUNG.search(f"{name} {serie}"))
 
 
 _EINGAENGE = "12|24|36|48|60|72|96|110|125|220|250|300|360|600"
@@ -523,6 +533,7 @@ def laden(pfad: Path) -> tuple[list[Geraet], str]:
     for g in geraete:
         if d.get("format", 1) < 2:                # ältere Daten: Wasserkühlung wenigstens aus dem Namen ableiten
             g.wasser = g.wasser or wasserkuehlung(g.name, g.serie, "")
+        g.rueckspeisung = ist_rueckspeisend(g.name, g.serie)   # gespeicherte Werte vor dem 30.10.2026 waren teils falsch
         if g.u_eingang is None:                   # Eingangsspannung kommt aus dem Namen – geht ohne neues Einlesen
             g.u_eingang = eingang_aus_name(g.name, g.geraetetyp)
     return geraete, d.get("stand", "")
