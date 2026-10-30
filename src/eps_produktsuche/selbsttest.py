@@ -45,12 +45,48 @@ def selbsttest(ziel: Path) -> int:
         ok &= len(verlauf.laden(ziel / "verlauf.json")) == 1
         ok &= aktualisierung.neueste(releases=[{"tag_name": "produktsuche-v99.0.0", "assets": [
             {"name": aktualisierung.ASSET, "browser_download_url": "x"}]}]) == ("99.0.0", "x")
+        from . import kunde as KD
+        from .mail import Mail
+        ek = KD.erkennen(Mail(absender_email="t@test-firma.de", text="Bitte 60V 100A\n\nMit freundlichen Grüßen\n"
+                                                                        "Max Test\nTEST Firma GmbH\nTeststr. 1\n86150 Augsburg"))
+        zeilen.append(f"Mail-Erkennung: {ek.kunde.firmenname} · {ek.suchtext}")
+        ok &= ek.kunde.firmenname == "TEST Firma GmbH" and ek.suchtext == "60V 100A"
+        try:
+            import extract_msg  # noqa: F401
+            from . import outlook as OL
+            zeilen.append(f"Outlook-Anbindung: {'verfügbar' if OL.verfuegbar() else 'nicht verfügbar'}")
+            if OL.verfuegbar():
+                import win32timezone  # noqa: F401 – braucht pywin32 für Datumswerte aus Outlook (ReceivedTime)
+                zeilen.append("win32timezone OK")
+        except ImportError as ie:
+            zeilen.append(f"Mail-Bibliotheken fehlen: {ie}")
+            ok = False
+        from . import weclapp as WC
+        from .weclapp_attrappe import Attrappe
+        wc = WC.Weclapp(Attrappe(g))
+        plan = wc.planen(ek.kunde, [(g[0].bestellnummer, 1)], 6)
+        erg = wc.ausfuehren(plan, ek.kunde)
+        zeilen.append(f"Weclapp-Attrappe: Angebot {erg.angebot_nummer}")
+        ok &= bool(erg.angebot_nummer)
+        try:
+            import keyring  # noqa: F401
+            zeilen.append("keyring OK")
+        except ImportError:
+            zeilen.append("keyring fehlt")
+            ok = False
         from .gui import App
         app = App(pfad=ziel / "shopdaten.json", automatisch_laden=False, update_pruefen=False)
         app.eingabe.set("Stromquelle 0-30V 1kA 30kW")
         app.update()
-        zeilen.append(f"GUI-Zeilen: {len(app.tv.get_children())}")
-        ok &= len(app.tv.get_children()) == 1
+        zeilen.append(f"GUI: {len(app.karten_treffer)} Karte(n), {len(app.tv.get_children())} Listenzeile(n)")
+        ok &= len(app.karten_treffer) + len(app.tv.get_children()) == 1
+        for seite in ("verlauf", "vergleich", "einstellungen", "suche"):
+            app.seite_zeigen(seite)
+            app.update()
+        app.dunkel_setzen(True)
+        app.update()
+        app.dunkel_setzen(False)
+        zeilen.append("Seiten und Dunkelmodus OK")
         app.destroy()
     except Exception:  # noqa: BLE001
         zeilen.append(traceback.format_exc())

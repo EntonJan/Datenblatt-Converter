@@ -30,7 +30,7 @@ def speichern(pfad: Path, eintraege: list[dict]) -> None:
 
 
 def hinzufuegen(pfad: Path, anfrage: str, aktion: str, geraete: list[dict] | None = None, typ: str = "automatisch",
-                fremd: dict | None = None, jetzt: datetime | None = None) -> dict:
+                fremd: dict | None = None, jetzt: datetime | None = None, kunde: str = "") -> dict:
     """Neuen Eintrag anlegen oder den letzten zur selben Anfrage ergänzen. Gibt den Eintrag zurück.
 
     geraete: [{"bestellnummer", "name"}]; fremd: Kunden-Datenblatt (datei, modell, hersteller_typ, Werte …)."""
@@ -50,6 +50,8 @@ def hinzufuegen(pfad: Path, anfrage: str, aktion: str, geraete: list[dict] | Non
         e["aktionen"].append(aktion)
     if fremd:
         e["fremd"] = fremd
+    if kunde:
+        e["kunde"] = kunde
     bekannt = {g.get("bestellnummer") for g in e["geraete"]}
     for g in geraete or []:
         if g.get("bestellnummer") not in bekannt:
@@ -79,6 +81,30 @@ def passt(e: dict, suchtext: str) -> bool:
     if not worte:
         return True
     f = e.get("fremd") or {}
-    alles = " ".join([e.get("anfrage", ""), e.get("notiz", ""), f.get("datei", ""), f.get("hersteller_typ", ""),
+    alles = " ".join([e.get("anfrage", ""), e.get("notiz", ""), e.get("kunde", ""), f.get("datei", ""), f.get("hersteller_typ", ""),
                       " ".join(g.get("bestellnummer", "") + " " + g.get("name", "") for g in e.get("geraete", []))]).lower()
     return all(w in alles for w in worte)
+
+
+def kunde_von(e: dict) -> str:
+    """Kunde eines Eintrags: aus der übernommenen Anfrage, sonst das Kunden-Dokument."""
+    f = e.get("fremd") or {}
+    return e.get("kunde") or (f"Dokument: {f.get('datei')}" if f.get("datei") else "")
+
+
+def kennzahlen(eintraege: list[dict], jetzt: datetime | None = None) -> dict:
+    """Zahlen für die Verlauf-Seite, jeweils für die laufende Woche (ab Montag)."""
+    jetzt = jetzt or datetime.now()
+    montag = (jetzt - timedelta(days=jetzt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    woche = []
+    for e in eintraege:
+        try:
+            if datetime.fromisoformat(e.get("zeit", "")) >= montag:
+                woche.append(e)
+        except ValueError:
+            continue
+    aktionen = lambda e: " ".join(e.get("aktionen", []))  # noqa: E731
+    return {"woche": len(woche),
+            "mit_kunde": sum(1 for e in woche if kunde_von(e)),
+            "empfohlen": sum(1 for e in woche if "Empfehlung" in aktionen(e) or "Gegenüberstellung" in aktionen(e)),
+            "weclapp": sum(1 for e in woche if "Weclapp" in aktionen(e))}

@@ -644,3 +644,37 @@ def test_netzrueckspeisung_nur_aus_name_und_serie():
     assert S.ist_rueckspeisend("EPS/TSDCR 65012001200", "EPS/TSDCR Regeneratives DC Lastsystem 60kW-2,6MW")
     assert not S.ist_rueckspeisend("EPS/CSI 1000-48-230 Sinus-Wechselrichter", "EPS/CSI DC/AC Wechselrichter 50-11000 VA")
     assert not S.ist_rueckspeisend("E/PS 10060-1000 4U Labornetzgerät", "E/PS 10000 4U Labornetzgerät 30-1920 kW")
+
+
+# ---------------------------------------------------------------- 1.4: Shop-Änderungen und Verlauf-Zahlen
+
+def test_shop_aenderungen():
+    from eps_produktsuche.shop import Geraet, aenderungen
+    alt = [Geraet("1", "A"), Geraet("2", "B", leistung="1000 W"), Geraet("3", "C"), Geraet("4", "D alt")]
+    neu = [Geraet("1", "A"), Geraet("2", "B", leistung="1500 W"), Geraet("5", "E"), Geraet("4", "D neu")]
+    a = aenderungen(alt, neu)
+    assert [g.bestellnummer for g in a["neu"]] == ["5"]
+    assert [g.bestellnummer for g in a["weg"]] == ["3"]
+    geaendert = {g.bestellnummer: felder for _, g, felder in a["geaendert"]}
+    assert geaendert == {"2": ["Leistung"], "4": ["Name"]}
+
+
+def test_verlauf_kunde_und_kennzahlen(tmp_path):
+    from datetime import datetime
+    from eps_produktsuche import verlauf
+    pfad = tmp_path / "verlauf.json"
+    mo = datetime(2026, 10, 26, 9, 0)           # Montag
+    verlauf.hinzufuegen(pfad, "alt", "Suche", jetzt=datetime(2026, 10, 20, 9, 0))
+    verlauf.hinzufuegen(pfad, "30V 10A", "Empfehlung DE", kunde="Muster GmbH", jetzt=mo)
+    verlauf.hinzufuegen(pfad, "60V 5A", "In Weclapp vorbereitet", jetzt=datetime(2026, 10, 28, 9, 0))
+    e = verlauf.laden(pfad)
+    assert e[1]["kunde"] == "Muster GmbH" and verlauf.passt(e[1], "muster")
+    z = verlauf.kennzahlen(e, datetime(2026, 10, 30, 12, 0))
+    assert z == {"woche": 2, "mit_kunde": 1, "empfohlen": 1, "weclapp": 1}
+
+
+def test_einstellungen_dunkelmodus(tmp_path):
+    from eps_produktsuche.einstellungen import Einstellungen
+    e = Einstellungen(dunkelmodus=True)
+    e.speichern(tmp_path / "e.json")
+    assert Einstellungen.laden(tmp_path / "e.json").dunkelmodus is True

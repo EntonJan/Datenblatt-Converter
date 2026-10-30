@@ -7,3 +7,5 @@ einstellungen.json
 daten/
 ausgabe/
 .venv/
+
+src/eps_produktsuche/_build.py
