@@ -36,6 +36,9 @@ jobs:
         run: python -m pytest -q tests/test_produktsuche.py tests/test_anfragen.py
         env:
           PYTHONPATH: src
+      - name: Buildnummer eintragen (Testkanal)
+        shell: pwsh
+        run: Set-Content -Path src/eps_produktsuche/_build.py -Value "BUILD = ${{ github.run_number }}"
       - name: EXE bauen
         run: pyinstaller --noconfirm --clean packaging/eps-produktsuche.spec
       - name: Selbsttest der fertigen EXE

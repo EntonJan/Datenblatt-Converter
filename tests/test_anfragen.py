@@ -234,3 +234,22 @@ def test_zielordner_name_oder_pfad():
     assert outlook.unterordner("Posteingang/Anfragen/Automatisch", "Erledigt") == "Posteingang/Anfragen/Automatisch/Erledigt"
     assert outlook.unterordner("Posteingang/Anfragen/Automatisch", "Posteingang/Anfragen/Erledigt") == \
         "Posteingang/Anfragen/Erledigt"
+
+
+def test_testkanal(tmp_path, monkeypatch):
+    from eps_produktsuche import aktualisierung as A
+    rel = [{"tag_name": "produktsuche-v1.3.5", "assets": [{"name": A.ASSET, "browser_download_url": "stabil"}]},
+           {"tag_name": "produktsuche-test-16", "prerelease": True,
+            "assets": [{"name": A.TEST_ASSET, "browser_download_url": "t16"}]},
+           {"tag_name": "produktsuche-test-18", "prerelease": True,
+            "assets": [{"name": A.TEST_ASSET, "browser_download_url": "t18"}]}]
+    assert A.neueste_test(releases=rel, eigener_build=17) == (18, "t18")
+    assert A.neueste_test(releases=rel, eigener_build=18) is None
+    assert A.neueste(releases=rel) is None or A.neueste(releases=rel)[1] == "stabil"   # stabil sieht nie Testversionen
+    exe = tmp_path / "EPS-Produktsuche-TEST.exe"
+    exe.write_bytes(b"alt")
+    monkeypatch.setattr(A, "herunterladen", lambda url, ziel, fortschritt=None: ziel.write_bytes(b"neu") or ziel)
+    A.test_ersetzen("t18", exe=exe)
+    assert exe.read_bytes() == b"neu" and exe.with_name("EPS-Produktsuche-TEST.alt.exe").exists()
+    A.test_aufraeumen(exe, versuche=1)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["EPS-Produktsuche-TEST.exe"]

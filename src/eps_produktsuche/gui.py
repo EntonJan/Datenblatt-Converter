@@ -362,9 +362,11 @@ class App(tk.Tk):
         if automatisch_laden and (not self.geraete or shop.veraltet(self.stand) or veraltetes_format):
             self.after(300, lambda: self.einlesen(still=bool(self.geraete)))
         if update_pruefen is None:
-            update_pruefen = aktualisierung.ist_exe() and not TESTVERSION
+            update_pruefen = aktualisierung.ist_exe()
         if aktualisierung.ist_exe() and not TESTVERSION:
             threading.Thread(target=aktualisierung.alte_entfernen, daemon=True).start()
+        if aktualisierung.ist_exe() and TESTVERSION:
+            threading.Thread(target=aktualisierung.test_aufraeumen, daemon=True).start()
         if update_pruefen:
             self.after(2500, lambda: self.updates_suchen(still=True))
 
@@ -382,7 +384,9 @@ class App(tk.Tk):
         kopf = tk.Frame(self, bg=NAVY)
         kopf.pack(fill="x")
         tk.Label(kopf, text="EPS-Produktsuche", fg="white", bg=NAVY, font=("Segoe UI", 15, "bold")).pack(side="left", padx=14, pady=10)
-        tk.Label(kopf, text=f"Version {__version__} · intern", fg=CYAN, bg=NAVY).pack(side="left")
+        tk.Label(kopf, text=f"Version {__version__} · intern" + (f" · TESTVERSION Build {aktualisierung.build()}"
+                                                                  if TESTVERSION else ""),
+                 fg="#FFD54F" if TESTVERSION else CYAN, bg=NAVY).pack(side="left")
         self.knopf_laden = ttk.Button(kopf, text="Shop neu einlesen", command=lambda: self.einlesen(still=False))
         self.knopf_laden.pack(side="right", padx=(4, 10))
         ttk.Button(kopf, text="Updates", command=lambda: self.updates_suchen(still=False)).pack(side="right", padx=4)
@@ -990,6 +994,8 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------ Updates
     def updates_suchen(self, still: bool = True):
+        if TESTVERSION:
+            return self._test_updates(still)
         ergebnis: dict = {}
 
         def lauf():
@@ -1018,6 +1024,72 @@ class App(tk.Tk):
                                    "und gestartet, die alte danach entfernt. Shopdaten und Verlauf bleiben erhalten.",
                                    parent=self):
                 self._update_laden(version, url)
+
+        threading.Thread(target=lauf, daemon=True).start()
+        self.after(200, abfragen)
+
+    def _test_updates(self, still: bool):
+        """Testkanal: nur neuere Testversionen, ersetzt nur EPS-Produktsuche-TEST.exe."""
+        ergebnis: dict = {}
+
+        def lauf():
+            ergebnis["neu"] = aktualisierung.neueste_test(timeout=8.0)
+            ergebnis["fertig"] = True
+
+        def abfragen():
+            if not ergebnis.get("fertig"):
+                self.after(200, abfragen)
+                return
+            neu = ergebnis.get("neu")
+            if not neu:
+                if not still:
+                    messagebox.showinfo("Updates", f"Testversion {__version__} (Build {aktualisierung.build()}) ist "
+                                                   "aktuell (oder GitHub ist gerade nicht erreichbar).", parent=self)
+                return
+            nr, url = neu
+            if not aktualisierung.ist_exe():
+                return
+            if messagebox.askyesno("Neue Testversion", f"Neue Testversion verfügbar (Build {nr}, installiert: "
+                                                       f"{aktualisierung.build()}).\n\nJetzt aktualisieren? Die Testversion "
+                                                       "startet danach neu. Die normale Version bleibt unverändert.",
+                                   parent=self):
+                self._test_laden(url)
+
+        threading.Thread(target=lauf, daemon=True).start()
+        self.after(200, abfragen)
+
+    def _test_laden(self, url: str):
+        stand: dict = {"geladen": 0, "gesamt": 0}
+        ergebnis: dict = {}
+        self.fortschritt.configure(mode="determinate", value=0, maximum=100)
+        self.fortschritt.pack(fill="x", padx=12, before=self.info)
+
+        def lauf():
+            try:
+                ergebnis["exe"] = aktualisierung.test_ersetzen(url, lambda g, t: stand.update(geladen=g, gesamt=t))
+            except Exception as e:  # noqa: BLE001
+                ergebnis["fehler"] = e
+            ergebnis["fertig"] = True
+
+        def abfragen():
+            if stand["gesamt"]:
+                self.fortschritt.configure(value=stand["geladen"] * 100 / stand["gesamt"])
+            self.info.configure(text=f"Lade Testversion … {stand['geladen'] // 1_000_000} MB")
+            if not ergebnis.get("fertig"):
+                self.after(200, abfragen)
+                return
+            self.fortschritt.pack_forget()
+            if "fehler" in ergebnis:
+                messagebox.showerror("Update", f"Die Testversion konnte nicht aktualisiert werden:\n{ergebnis['fehler']}",
+                                     parent=self)
+                return
+            try:
+                aktualisierung.starten(ergebnis["exe"])
+            except OSError as e:
+                messagebox.showerror("Update", f"Neue Testversion geladen, Start fehlgeschlagen:\n{e}", parent=self)
+                return
+            self.destroy()
+            os._exit(0)
 
         threading.Thread(target=lauf, daemon=True).start()
         self.after(200, abfragen)

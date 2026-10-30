@@ -129,3 +129,72 @@ def starten(ziel: Path) -> None:
     env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"      # neue EXE nutzt nicht die Temp-Dateien der alten
     subprocess.Popen([str(ziel)], cwd=str(ziel.parent), close_fds=True, env=env,
                      creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+
+
+# ------------------------------------------------------------------------ Testkanal (Branch weclapp)
+# Testversionen sind Vorabversionen „produktsuche-test-<Buildnummer>“ mit EPS-Produktsuche-TEST.exe. Sie ersetzen nur
+# sich selbst; die normale Version und ihr Update-Kanal bleiben unberührt.
+TEST_PREFIX = "produktsuche-test-"
+TEST_ASSET = "EPS-Produktsuche-TEST.exe"
+
+
+def build() -> int:
+    """Buildnummer der laufenden Testversion (von GitHub Actions eingetragen, sonst 0)."""
+    try:
+        from ._build import BUILD
+        return int(BUILD)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def neueste_test(timeout: float = 6.0, releases: list | None = None, eigener_build: int | None = None):
+    """(Buildnummer, Download-URL) der neuesten Testversion, falls neuer als die laufende – sonst None."""
+    if releases is None:
+        try:
+            with _anfrage(API, timeout) as r:
+                releases = json.loads(r.read().decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            return None
+    eigener = build() if eigener_build is None else eigener_build
+    beste = None
+    for rel in releases or []:
+        tag = rel.get("tag_name", "")
+        if not tag.startswith(TEST_PREFIX) or rel.get("draft") or not tag[len(TEST_PREFIX):].isdigit():
+            continue
+        url = next((a.get("browser_download_url", "") for a in rel.get("assets", []) if a.get("name") == TEST_ASSET), "")
+        nr = int(tag[len(TEST_PREFIX):])
+        if url and nr > eigener and (beste is None or nr > beste[0]):
+            beste = (nr, url)
+    return beste
+
+
+def test_ersetzen(url: str, fortschritt=None, exe: Path | None = None) -> Path:
+    """Laufende TEST.exe beiseite benennen (geht unter Windows auch im Betrieb), neue an ihren Platz laden."""
+    exe = Path(exe or exe_pfad())
+    alt = exe.with_name(exe.stem + ".alt.exe")
+    teil = exe.with_suffix(".part")
+    herunterladen(url, teil.with_suffix(".exe.neu"), fortschritt)
+    neu = teil.with_suffix(".exe.neu")
+    if alt.exists():
+        alt.unlink()
+    exe.rename(alt)
+    try:
+        neu.rename(exe)
+    except OSError:
+        alt.rename(exe)                                   # zurück, damit das Programm startbar bleibt
+        raise
+    return exe
+
+
+def test_aufraeumen(exe: Path | None = None, versuche: int = 15) -> None:
+    exe = Path(exe or exe_pfad())
+    for _ in range(versuche):
+        reste = [p for p in (exe.with_name(exe.stem + ".alt.exe"), exe.with_suffix(".exe.neu")) if p.exists()]
+        if not reste:
+            return
+        for p in reste:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        time.sleep(1)
