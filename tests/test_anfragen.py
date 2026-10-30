@@ -221,3 +221,9 @@ def test_einstellungen(tmp_path):
     e.speichern(p)
     e2 = Einstellungen.laden(p)
     assert e2.experimentell and e2.anfrageordner[-1].gemeinsam and e2.anfrageordner[-1].art == "automatisch"
+
+
+def test_zielordner_name_oder_pfad():
+    assert outlook.unterordner("Posteingang/Anfragen/Automatisch", "Erledigt") == "Posteingang/Anfragen/Automatisch/Erledigt"
+    assert outlook.unterordner("Posteingang/Anfragen/Automatisch", "Posteingang/Anfragen/Erledigt") == \
+        "Posteingang/Anfragen/Erledigt"

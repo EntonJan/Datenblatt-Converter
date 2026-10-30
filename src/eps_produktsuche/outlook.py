@@ -156,4 +156,9 @@ class Outlook:
 
 
 def unterordner(pfad: str, name: str) -> str:
+    """Zielordner: ein Name („Erledigt“) wird Unterordner des Anfrage-Ordners, ein Pfad mit „/“
+    („Posteingang/Anfragen/Erledigt“) gilt so, wie er ist – ein gemeinsamer Ordner für alle Anfrage-Ordner."""
+    name = name.strip().strip("/\\")
+    if "/" in name.replace("\\", "/"):
+        return name
     return pfad.rstrip("/\\") + "/" + name
