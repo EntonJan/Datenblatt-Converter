@@ -99,3 +99,23 @@ def test_feldliste_und_import():
     z = dict(zip([s for s, _ in WF.IMPORT_SPALTEN], WF.artikel_zeilen([g])[0]))
     assert (z["eps_eingangsspannung_min"], z["eps_ausgangsspannung_fest"], z["eps_ausgangsfrequenz"]) == ("125", "400", "")
     assert z["Warengruppe"] == "DC/AC" and "Bauform fehlt" in z["Prüfen"]
+
+
+def test_datenquelle_weclapp_gleich_wie_shop():
+    """Shopgeräte → Importdatei → (nachgebautes) Weclapp → zurückgelesen: die Suche liefert dieselben Treffer."""
+    from eps_produktsuche import datenquelle as D, shop, suche as Q
+    from eps_produktsuche.weclapp_attrappe import Attrappe
+    import json
+    from pathlib import Path
+    faelle = json.loads((Path(__file__).with_name("gemeinsame-suchfaelle.json")).read_text(encoding="utf-8"))
+    geraete = [shop.Geraet(**g) for g in faelle["geraete"]]
+    for g in geraete:
+        g.rueckspeisung = shop.ist_rueckspeisend(g.name, g.serie)
+        g.u_eingang = shop.eingang_aus_name(g.name, g.geraetetyp)
+    zurueck = D.geraete_lesen(Attrappe.mit_importdaten(geraete))
+    assert {g.bestellnummer for g in zurueck} == {g.bestellnummer for g in geraete}
+    for fall in faelle["faelle"]:
+        a = Q.anfrage_lesen(fall["anfrage"])
+        vorher = {(t.g.bestellnummer, t.bewertung) for t in Q.suchen(geraete, a)}
+        nachher = {(t.g.bestellnummer, t.bewertung) for t in Q.suchen(zurueck, a)}
+        assert vorher == nachher, fall["anfrage"]

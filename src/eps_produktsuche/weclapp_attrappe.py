@@ -24,7 +24,8 @@ class Attrappe:
         self.heute = heute or datetime.now()
         self.naechste = 1000
         self.daten: dict[str, list[dict]] = {"party": [], "article": [], "articleSupplySource": [], "quotation": [],
-                                             "purchaseOrderRequest": []}
+                                             "purchaseOrderRequest": [], "customAttributeDefinition": [],
+                                             "articleCategory": []}
         self.aufrufe: list[tuple[str, str]] = []
         for g in geraete:
             self.artikel(g.bestellnummer, g.name)
@@ -44,6 +45,57 @@ class Attrappe:
             self.daten["articleSupplySource"].append({
                 "id": self._id(), "articleId": a["id"], "supplierName": lieferant,
                 "purchasePrices": [{"price": "100.00", "startDate": _ms(self.heute - timedelta(days=30 * monate_alt))}]})
+        return a
+
+    @classmethod
+    def mit_importdaten(cls, geraete, heute: datetime | None = None) -> "Attrappe":
+        """Weclapp, wie es nach Feldliste + Import aussähe: eigene Attribute angelegt, Artikel aus der Importdatei."""
+        from eps_converter import katalog as K, pfade
+        from .weclapp_felder import feldliste, artikel_zeilen, IMPORT_SPALTEN
+        a = cls(heute=heute)
+        attribute, _ = feldliste(K.laden(pfade.KATALOG_MITGELIEFERT))
+        defs = {}
+        for at in attribute:
+            d = {"id": a._id(), "attributeKey": at.schluessel, "attributeType": at.typ, "label": at.de,
+                 "selectableValues": [{"id": a._id(), "value": w} for w in at.auswahl_de.split("; ") if w]}
+            a.daten["customAttributeDefinition"].append(d)
+            defs[at.schluessel] = d
+        kategorien = {}
+        spalten = [s for s, _ in IMPORT_SPALTEN]
+        for zeile in artikel_zeilen(geraete):
+            z = dict(zip(spalten, zeile))
+            kat = z["Warengruppe"]
+            if kat not in kategorien:
+                kategorien[kat] = {"id": a._id(), "name": kat}
+                a.daten["articleCategory"].append(kategorien[kat])
+            werte = []
+            for schluessel, wert in z.items():
+                d = defs.get(schluessel)
+                if not d or wert in (None, ""):
+                    continue
+                ca = {"attributeDefinitionId": d["id"]}
+                typ = d["attributeType"]
+                if typ in ("LIST", "MULTISELECT_LIST"):
+                    ids = []
+                    for w in (str(wert).split("; ") if typ == "MULTISELECT_LIST" else [str(wert)]):
+                        sv = next((v for v in d["selectableValues"] if v["value"] == w), None)
+                        if sv is None:                       # Wert fehlt in der Auswahlliste → wie in Weclapp ergänzen
+                            sv = {"id": a._id(), "value": w}
+                            d["selectableValues"].append(sv)
+                        ids.append(sv["id"])
+                    if typ == "LIST":
+                        ca["selectedValueId"] = ids[0]
+                    else:
+                        ca["selectedValues"] = [{"id": i} for i in ids]
+                elif typ in ("DECIMAL", "INTEGER"):
+                    ca["numberValue"] = str(wert).replace(",", ".")
+                elif typ == "BOOLEAN":
+                    ca["booleanValue"] = str(wert).lower() in ("ja", "true", "1")
+                else:
+                    ca["stringValue"] = str(wert)
+                werte.append(ca)
+            art = a.artikel(z["Artikelnummer"], z["Artikelname"])
+            art.update(articleCategoryId=kategorien[kat]["id"], customAttributes=werte)
         return a
 
     def kunde(self, firma: str, email: str, plz: str = "") -> dict:
@@ -66,7 +118,8 @@ class Attrappe:
                 elif schluessel.endswith("-ilike"):
                     feld, w = schluessel[:-6], str(wert).strip("%").lower()
                     liste = [x for x in liste if w in str(x.get(feld, "")).lower()]
-            return {"result": liste[: int((params or {}).get("pageSize", 100))]}
+            groesse, seite = int((params or {}).get("pageSize", 100)), int((params or {}).get("page", 1))
+            return {"result": liste[(seite - 1) * groesse: seite * groesse]}
         if methode == "POST" and len(teile) == 1:
             neu = dict(daten or {}, id=self._id())
             if art == "party":

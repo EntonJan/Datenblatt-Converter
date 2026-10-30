@@ -169,6 +169,10 @@ class EinstellungenDialog(tk.Toplevel):
                   ).grid(row=r + 5, column=0, sticky="w")
         self.weclapp = tk.StringVar(value=e.weclapp_adresse)
         ttk.Entry(fr, textvariable=self.weclapp, width=30).grid(row=r + 5, column=1, columnspan=2, sticky="w")
+        ttk.Label(fr, text="Gerätedaten für die Suche aus:").grid(row=r + 7, column=0, sticky="w", pady=(6, 0))
+        self.quelle = tk.StringVar(value="Weclapp" if e.datenquelle == "weclapp" else "Shop")
+        ttk.Combobox(fr, textvariable=self.quelle, values=["Shop", "Weclapp"], state="readonly", width=12).grid(
+            row=r + 7, column=1, sticky="w", pady=(6, 0))
         wk = ttk.Frame(fr)
         wk.grid(row=r + 6, column=0, columnspan=4, sticky="w", pady=(4, 0))
         ttk.Button(wk, text="Token eintragen …", command=self.token_eintragen).pack(side="left")
@@ -245,6 +249,8 @@ class EinstellungenDialog(tk.Toplevel):
                                          g.get()) for p, a, g in self.zeilen if p.get().strip()]
         e.ordner_erledigt = self.erledigt.get().strip() or "Erledigt"
         e.weclapp_adresse = self.weclapp.get().strip()
+        alte_quelle = e.datenquelle
+        e.datenquelle = "weclapp" if self.quelle.get() == "Weclapp" and e.weclapp_adresse else "shop"
         e.interne_domains = [d.strip().lower().lstrip("@") for d in self.domains.get().replace(";", ",").split(",")
                              if d.strip()] or ["eps-germany.de"]
         e.ordner_in_bearbeitung = self.bearbeitung.get().strip() or "In Bearbeitung"
@@ -258,6 +264,8 @@ class EinstellungenDialog(tk.Toplevel):
             messagebox.showerror("Einstellungen", f"Konnte nicht gespeichert werden:\n{ex}", parent=self)
             return
         self.app._experimentell_zeigen()
+        if e.datenquelle != alte_quelle:
+            self.app.datenquelle_wechseln()
         self.destroy()
 
 
@@ -392,6 +400,9 @@ class App(tk.Tk):
         self.einstellungen_pfad = self.pfad.parent / "einstellungen.json"
         self.einstellungen = Einstellungen.laden(self.einstellungen_pfad)
         self.vorgang = None                     # aktuelle Kundenanfrage aus Outlook/Mail (kunde.Erkennung + Mail)
+        self.shop_pfad = self.pfad                # Shopdaten (auch Grundlage für den Weclapp-Demo-Modus)
+        if self.einstellungen.datenquelle == "weclapp":
+            self.pfad = self.pfad.with_name("weclappdaten.json")
         self.geraete, self.stand = shop.laden(self.pfad)
         self.treffer: list[Q.Treffer] = []
         self.zeilen_geraete: list[shop.Geraet] = []
@@ -433,7 +444,8 @@ class App(tk.Tk):
         tk.Label(kopf, text=f"Version {__version__} · intern" + (f" · TESTVERSION Build {aktualisierung.build()}"
                                                                   if TESTVERSION else ""),
                  fg="#FFD54F" if TESTVERSION else CYAN, bg=NAVY).pack(side="left")
-        self.knopf_laden = ttk.Button(kopf, text="Shop neu einlesen", command=lambda: self.einlesen(still=False))
+        self.knopf_laden = ttk.Button(kopf, text=self._quelle("Shop neu einlesen", "Weclapp neu laden"),
+                                      command=lambda: self.einlesen(still=False))
         self.knopf_laden.pack(side="right", padx=(4, 10))
         ttk.Button(kopf, text="Updates", command=lambda: self.updates_suchen(still=False)).pack(side="right", padx=4)
         ttk.Button(kopf, text="Verlauf …", command=lambda: VerlaufDialog(self)).pack(side="right", padx=4)
@@ -937,19 +949,33 @@ class App(tk.Tk):
         self.fremd_lbl.pack(fill="x", padx=12, pady=(6, 0), before=self.tabelle_rahmen)
 
     # ------------------------------------------------------------------ Shopdaten
+    def datenquelle_wechseln(self):
+        """Nach Änderung in den Einstellungen: andere Datei laden (shopdaten.json / weclappdaten.json), ggf. neu lesen."""
+        self.pfad = self.shop_pfad.with_name("weclappdaten.json") if self.einstellungen.datenquelle == "weclapp" \
+            else self.shop_pfad
+        self.geraete, self.stand = shop.laden(self.pfad)
+        self.knopf_laden.configure(text=self._quelle("Shop neu einlesen", "Weclapp neu laden"))
+        self._status()
+        self.suchen()
+        if not self.geraete:
+            self.einlesen(still=False)
+
+    def _quelle(self, shop_text: str, weclapp_text: str) -> str:
+        return weclapp_text if self.einstellungen.datenquelle == "weclapp" else shop_text
+
     def _status(self):
         if self.stand:
             try:
                 st = datetime.fromisoformat(self.stand).strftime("%d.%m.%Y %H:%M")
             except ValueError:
                 st = self.stand
-            self.stand_lbl.configure(text=f"Shopdaten: {len(self.geraete)} Geräte · Stand {st}")
+            self.stand_lbl.configure(text=f"{self._quelle('Shopdaten', 'Weclapp')}: {len(self.geraete)} Geräte · Stand {st}")
         else:
-            self.stand_lbl.configure(text="Shopdaten: noch nicht eingelesen")
+            self.stand_lbl.configure(text=self._quelle("Shopdaten: noch nicht eingelesen", "Weclapp: noch nicht geladen"))
 
     def _alter_stand(self) -> list[shop.Geraet]:
         """Aktuelle Daten plus Geräte aus shopdaten_vorher.json, die darin fehlen (falls schon einmal etwas verloren ging)."""
-        vorher, _ = shop.laden(self.pfad.with_name("shopdaten_vorher.json"))
+        vorher, _ = shop.laden(self.pfad.with_name(self.pfad.stem + "_vorher.json"))
         bekannt = {g.bestellnummer + "|" + g.name for g in self.geraete}
         return self.geraete + [g for g in vorher if g.bestellnummer + "|" + g.name not in bekannt]
 
@@ -958,12 +984,12 @@ class App(tk.Tk):
             return
         self.laedt = True
         self.knopf_laden.state(["disabled"])
-        self.knopf_laden.configure(text="Shop wird gelesen …")
+        self.knopf_laden.configure(text=self._quelle("Shop wird gelesen …", "Weclapp wird gelesen …"))
         self.fortschritt.pack(fill="x", padx=12, before=self.info)
         self.fortschritt.configure(value=0, maximum=100, mode="indeterminate")   # bis die Serienliste steht
         self.fortschritt.start(12)
         grund_text = "automatisch" if still else "neu"
-        self.stand_lbl.configure(text=f"Shop wird {grund_text} eingelesen – verbinde …")
+        self.stand_lbl.configure(text=f"{self._quelle('Shop', 'Weclapp')} wird {grund_text} eingelesen – verbinde …")
         ergebnis: dict = {}
         meldungen: queue.Queue = queue.Queue()      # Tk darf nur aus dem Hauptthread angefasst werden
 
@@ -972,8 +998,19 @@ class App(tk.Tk):
 
         bekannte = self._alter_stand()
 
+        weclapp_quelle = self.einstellungen.datenquelle == "weclapp"
+        einst = self.einstellungen
+
         def lauf():
             try:
+                if weclapp_quelle:                    # Gerätedaten aus Weclapp (eigene Attribute eps_…)
+                    from . import datenquelle, weclapp_dialog
+                    demo_basis = shop.laden(self.shop_pfad)[0]
+                    wc = weclapp_dialog.verbindung(einst, demo_basis)
+                    ergebnis["geraete"] = datenquelle.geraete_lesen(wc.t, melden)
+                    ergebnis["fehlend"] = []
+                    ergebnis["fertig"] = True
+                    return
                 fehlend: list[str] = []
                 bekannt = sorted({g.shop_url for g in bekannte if g.shop_url})
                 neu = shop.einlesen(fortschritt=melden, unvollstaendig=fehlend, bekannte_serien=bekannt)
@@ -994,7 +1031,8 @@ class App(tk.Tk):
                         self.fortschritt.configure(mode="determinate")
                     self.fortschritt.configure(maximum=max(gesamt, 1), value=erledigt)
                     # in der Kopfzeile: die Infozeile unten wird beim Tippen von der Suche überschrieben
-                    self.stand_lbl.configure(text=f"Shop wird eingelesen … Serie {erledigt}/{gesamt}")
+                    self.stand_lbl.configure(text=f"{self._quelle('Shop wird eingelesen … Serie', 'Weclapp wird gelesen … Artikel')} "
+                                                  f"{erledigt}/{gesamt}")
             except queue.Empty:
                 pass
             if ergebnis.get("fertig"):
@@ -1005,7 +1043,7 @@ class App(tk.Tk):
         def fertig():
             self.laedt = False
             self.knopf_laden.state(["!disabled"])
-            self.knopf_laden.configure(text="Shop neu einlesen")
+            self.knopf_laden.configure(text=self._quelle("Shop neu einlesen", "Weclapp neu laden"))
             self.fortschritt.stop()
             self.fortschritt.configure(mode="determinate")
             self.fortschritt.pack_forget()
@@ -1033,7 +1071,7 @@ class App(tk.Tk):
             grund = shop.pruefen(neu, alt)
             if grund:
                 try:                                      # zur Fehlersuche aufheben
-                    shop.speichern(neu, self.pfad.with_name("shopdaten_abgelehnt.json"))
+                    shop.speichern(neu, self.pfad.with_name(self.pfad.stem + "_abgelehnt.json"))
                 except OSError:
                     pass
                 bleibt = f"Die bisherigen Daten ({len(self.geraete)} Geräte) bleiben erhalten." if self.geraete else ""

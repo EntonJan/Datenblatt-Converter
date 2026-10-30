@@ -20,7 +20,7 @@ def verbindung(einstellungen, geraete=()) -> W.Weclapp:
         from .weclapp_attrappe import Attrappe
         global _DEMO
         if _DEMO is None:                               # Demo-Daten bleiben bis zum Programmende erhalten
-            _DEMO = Attrappe(geraete)
+            _DEMO = Attrappe.mit_importdaten(geraete)   # wie nach Feldliste + Artikelimport
             _DEMO.kunde("DEMO Bestandskunde GmbH", "einkauf@demo-bestandskunde.de", "86150")
         return W.Weclapp(_DEMO)
     token = zugang.laden(adresse)
