@@ -41,9 +41,14 @@ class Fremdgeraet:
     pflicht: list[str] = field(default_factory=list)    # markierte Stellen (Textmarker) = muss genau erfüllt sein
     eingang: float | None = None                        # DC-Eingangsspannung (Wechselrichter, DC/DC)
     typ_geschaetzt: bool = False                        # Gerätetyp nur aus dem Text geraten → Suche nur „Quelle“/„Last“
+    rolle: str = "vergleich"                            # "vergleich" (Ersatz/Anforderung) oder "verbraucher"
+    verbraucher: dict = field(default_factory=dict)     # verbraucher.Verbraucher als dict (nur bei rolle "verbraucher")
 
     def anfrage(self) -> str:
         """Anfragetext für die Suche, z. B. „AC/DC 60V 1000A 30kW“."""
+        if self.rolle == "verbraucher" and self.verbraucher:
+            from . import verbraucher as V
+            return V.aus_dict(self.verbraucher).anfrage()
         teile = []
         typen = set(self.geraetetyp)
         if typen == {LAST}:
@@ -136,6 +141,28 @@ class Analyse:
 def _text(pfad: Path, max_seiten: int = 4) -> str:
     with pdfplumber.open(str(pfad)) as pdf:
         return "\n".join((p.extract_text() or "") for p in pdf.pages[:max_seiten])
+
+
+def volltext(pfad: Path) -> str:
+    """Text des Dokuments (PDF: erste Seiten, Word: alles) – für die Erkennung „zu versorgendes Gerät“."""
+    pfad = Path(pfad)
+    try:
+        return anforderung.docx_lesen(pfad).text if ist_word(pfad) else _text(pfad)
+    except Exception:  # noqa: BLE001 – Scan o. Ä.: dann eben kein Text
+        return ""
+
+
+def als_verbraucher(pfad: Path, v) -> Fremdgeraet:
+    """Kunden-Dokument als zu versorgendes Gerät (verbraucher.Verbraucher mit Entscheidungen aus dem Dialog)."""
+    v.name = v.name or _produktname(volltext(pfad)) or Path(pfad).stem.replace("_", " ")
+    fg = Fremdgeraet(datei=Path(pfad).name, rolle="verbraucher", verbraucher=v.als_dict(), hersteller_typ=v.name,
+                     spannung=v.spannung_text, ac=True, umax=v.spannung, pmax=v.bedarf,
+                     leistung=f"{_z(v.leistung)} W" if v.leistung else "", strom=f"{_z(v.strom)} A" if v.strom else "",
+                     geraetetyp=[v.geraetetyp()] if v.geraetetyp() else [])
+    fg.hinweise = v.hinweise()
+    if not ist_word(pfad):
+        fg.pflicht = anforderung.pdf_markierungen(Path(pfad))
+    return fg
 
 
 def ist_word(pfad: Path) -> bool:
