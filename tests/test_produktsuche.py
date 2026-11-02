@@ -706,3 +706,17 @@ def test_dreiphasig_in_der_suche():
     assert Q.merkmale_pruefen(g(3), a) == (True, [])
     assert Q.merkmale_pruefen(g(1), a)[0] is False
     assert Q.merkmale_pruefen(g(None), a) == (True, ["Phasenzahl nicht im Shop angegeben – prüfen"])
+
+
+def test_drehstrom_beim_netzgeraet_meint_den_anschluss():
+    """„Netzgerät … Drehstrom“: kein AC-Ausgang erzwingen, DC-Geräte nicht prüfen; „400V 3-phasig“ bei AC = L-L."""
+    from eps_produktsuche.shop import Geraet
+    a = Q.anfrage_lesen("Netzgerät 60V 100A Drehstrom")
+    assert a.phasen == 3 and a.ausgang == "" and "3-phasig (gilt für AC-Ausgänge)" in a.erkannt
+    dc = Geraet("1", "PS 10060-100", geraetetyp="AC/DC", spannung="0-60 V")
+    assert Q.merkmale_pruefen(dc, a) == (True, [])
+    assert "3-phasiger Netzanschluss (nicht geprüft)" in Q.anfrage_lesen("AC/DC 60V 100A 3-phasig").erkannt
+    assert Q.anfrage_lesen("AC/AC 230VAC 10kVA 3 Phasen").phasen == 3
+    a = Q.anfrage_lesen("AC/AC 400VAC 10kVA 3-phasig")
+    assert a.spannung == 230 and a.erkannt[0] == "U = 400 V (L-L) → 230 V je Phase"
+    assert Q.anfrage_lesen("AC/AC 400VAC 10kVA").spannung == 400          # ohne Drehstrom-Angabe bleibt es
