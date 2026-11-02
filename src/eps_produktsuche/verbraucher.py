@@ -29,7 +29,14 @@ _QUELLE = re.compile(r"ausgangsspannung|output voltage|ausgangsstrom|output curr
 
 _MOTOR = re.compile(r"motor|kompressor|compressor|pumpe|pump|antrieb|drive|lüfter|fan|waschmaschine|washing|washer|"
                     r"trockner|dryer|schleuder|spin|kühl|refrigerat|klima|air condition", re.I)
-_HEIZUNG = re.compile(r"heiz|heater|heating|boiler|warmwasser", re.I)
+_HEIZUNG = re.compile(r"heiz|heater|heating|boiler|warmwasser|waschmaschine|waschtrockner|washing machine|washer|"
+                      r"trockner|dryer|trocknen|geschirrspül|dishwasher|dampf|steam", re.I)
+# Tabellen-Datenblätter: Einheit im Namen, Wert dahinter („Spannung in V 220-240“, „Gesamtanschlusswert in kW 2,1-2,4“)
+_TABELLE = re.compile(r"^(?P<name>.*?\S)\s+(?:in|\[|\()\s*(?P<einheit>kVA|VA|kW|W|V|A|Hz)\s*[\])]?\s+"
+                      r"(?P<wert>\d+(?:[.,]\d+)?(?:\s*[-–/]\s*\d+(?:[.,]\d+)?)?)\s*$", re.I)
+# Leistungsangaben, die nichts über den Anschluss sagen (Standby, Verbrauch pro Zyklus …)
+_NEBENSACHE = re.compile(r"aus-zustand|bereitschaft|standby|stand-by|off[- ]mode|kwh|verbrauch pro|pro 100|"
+                         r"energieverbrauch|energy consumption", re.I)
 
 RESERVE = {"motor": 2.0, "gemischt": 1.5, "heizung": 1.2, "unbekannt": 1.5}
 LASTART_TEXT = {"motor": "Motor/Kompressor", "gemischt": "Motor + Heizung", "heizung": "Heizung (ohmsch)",
@@ -213,7 +220,23 @@ def _strom(text: str, muster: str) -> float | None:
     return None
 
 
+def _normalisieren(text: str) -> str:
+    """Tabellenzeilen „Name in Einheit Wert“ → „Name Wert Einheit“; Standby-/Verbrauchszeilen fallen weg."""
+    zeilen = []
+    for z in (text or "").splitlines():
+        if _NEBENSACHE.search(z):
+            continue
+        m = _TABELLE.match(z.strip())
+        if m:
+            einheit = m.group("einheit")
+            einheit = {"hz": "Hz", "kva": "kVA", "va": "VA", "kw": "kW", "w": "W", "v": "V", "a": "A"}[einheit.lower()]
+            z = f"{m.group('name')} {m.group('wert')} {einheit}"
+        zeilen.append(z)
+    return "\n".join(zeilen)
+
+
 def lesen(text: str, name: str = "") -> Verbraucher:
+    text = _normalisieren(text)
     v = Verbraucher(name=name)
     v.spannung, v.spannung_text, v.phasen = _spannung(text)
     v.frequenzen = _frequenzen(text)

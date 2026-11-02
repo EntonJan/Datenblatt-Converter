@@ -91,3 +91,28 @@ def _docx(pfad, text):
                    '<Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
         z.writestr("word/document.xml", '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
                    f'<w:body>{absaetze}</w:body></w:document>')
+
+
+TABELLE = """WT 360 Waschtrockner 8/5kg
+Durchgängig Waschen und Trocknen •
+Max. Schleuderdrehzahl 1600
+Gewichteter Energieverbrauch pro 100 Betriebszyklen für 262
+den vollständigen Betriebszyklus in kWh
+Leistungsaufnahme im Aus-Zustand in W 0,30
+DuraLife Motor •
+Technische Daten
+Spannung in V 220-240
+Absicherung in A 10
+Frequenz in HZ 50
+Gesamtanschlusswert in kW 2,10-2,40
+Länge der elektrischen Zuleitung in m 2
+"""
+
+
+def test_tabellen_datenblatt_einheit_im_namen():
+    """Herstellertabellen „Spannung in V 220-240“ (Einheit vor dem Wert), Standby-Leistung zählt nicht."""
+    assert V.wahrscheinlich(TABELLE)
+    v = V.lesen(TABELLE)
+    assert (v.spannung, v.frequenzen, v.leistung, v.absicherung, v.lastart) == (230, [50], 2400, 10, "gemischt")
+    v.versorgung = "netz"
+    assert v.anfrage() == "AC/AC 230VAC 3,6kVA"
