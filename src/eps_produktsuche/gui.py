@@ -117,7 +117,7 @@ class RolleDialog(ctk.CTkToplevel):
 
     ergebnis: verbraucher.Verbraucher, False = Vergleichsgerät, None = abgebrochen."""
 
-    def __init__(self, master, v, datei: str, vorschlag: str = "verbraucher"):
+    def __init__(self, master, v, datei: str, vorschlag: str = "verbraucher", aus_mail: list[str] | None = None):
         from . import verbraucher as V
         super().__init__(master, fg_color=TH.BG)
         self.V, self.v, self.ergebnis = V, v, None
@@ -145,6 +145,11 @@ class RolleDialog(ctk.CTkToplevel):
         self.teil.pack(fill="both", expand=True, pady=(12, 0))
         innen = ctk.CTkFrame(self.teil, fg_color="transparent")
         innen.pack(fill="both", expand=True, padx=16, pady=12)
+        if aus_mail:
+            box = ctk.CTkFrame(innen, fg_color=TH.GRUEN_BG, corner_radius=8)
+            box.pack(fill="x", pady=(0, 10))
+            TH.text(box, "Aus der Kundenmail übernommen (bitte kurz prüfen):\n" + "\n".join(f"„{x}“" for x in aus_mail),
+                    11, farbe=TH.GRUEN, anchor="w", justify="left", wraplength=600).pack(fill="x", padx=10, pady=6)
         TH.text(innen, "Erkannt aus dem Datenblatt (änderbar)", 12, True, farbe=TH.GRAU, anchor="w").pack(anchor="w")
         werte = ctk.CTkFrame(innen, fg_color="transparent")
         werte.pack(fill="x", pady=(4, 8))
@@ -162,8 +167,8 @@ class RolleDialog(ctk.CTkToplevel):
                 ).pack(anchor="w")
 
         TH.text(innen, "Was hat der Kunde zur Verfügung?", 12, True, farbe=TH.GRAU, anchor="w").pack(anchor="w", pady=(12, 2))
-        self.versorgung = tk.StringVar(value="unbekannt")
-        self.dc = tk.StringVar()
+        self.versorgung = tk.StringVar(value=v.versorgung)
+        self.dc = tk.StringVar(value=_zahl(v.dc_spannung))
         for wert, titel in (("netz", "Stromnetz (andere Spannung/Frequenz, Prüfplatz) → Frequenzumrichter/AC-Quelle (AC/AC)"),
                             ("dc", "Batterie / DC-Netz → Wechselrichter (DC/AC)"),
                             ("unbekannt", "Weiß ich nicht – offen lassen, kommt in die Liste zum Klären")):
@@ -1105,7 +1110,7 @@ class App(ctk.CTk):
         self.typ.set("automatisch")
         self.seite_zeigen("suche")
         if mail.anhaenge:
-            self.datenblatt_laden(mail.anhaenge[0])
+            self.datenblatt_laden(mail.anhaenge[0], mailtext=f"{mail.betreff}\n{erkennung.anfrage or mail.text}")
         else:
             self.eingabe.set(erkennung.suchtext)
         k = erkennung.kunde
@@ -1173,7 +1178,7 @@ class App(ctk.CTk):
         if pfad:
             self.datenblatt_laden(Path(pfad))
 
-    def datenblatt_laden(self, pfad: Path, fertig_cb=None, rolle: str | None = None):
+    def datenblatt_laden(self, pfad: Path, fertig_cb=None, rolle: str | None = None, mailtext: str = ""):
         """Kunden-/Fremddatenblatt auslesen (im Hintergrund), Modell/Variante wählen lassen, Anfrage ins Suchfeld setzen.
 
         rolle: None = automatisch erkennen (Verbraucher → Abfrage), "verbraucher" = Abfrage erzwingen,
@@ -1182,6 +1187,7 @@ class App(ctk.CTk):
         if self.beschaeftigt:
             return
         self._fremd_pfad = Path(pfad)
+        self._fremd_mailtext = mailtext
 
         def fehler_melden(fehler):
             messagebox.showerror("Kunden-Datenblatt", f"Das PDF konnte nicht gelesen werden:\n{fehler}", parent=self)
@@ -1191,8 +1197,11 @@ class App(ctk.CTk):
             if fehler:
                 return fehler_melden(fehler)
             analyse, text = erg
-            if rolle == "verbraucher" or (rolle is None and V.wahrscheinlich(text)):
-                wahl = RolleDialog(self, V.lesen(text), pfad.name).ergebnis
+            if rolle == "verbraucher" or (rolle is None and (V.wahrscheinlich(text) or
+                                                             (mailtext and V.wahrscheinlich(mailtext + "\n" + text)))):
+                v = V.lesen(text)
+                fund = V.aus_mail(v, mailtext) if mailtext else []
+                wahl = RolleDialog(self, v, pfad.name, aus_mail=fund).ergebnis
                 if wahl is None:
                     self.info.configure(text="Abgebrochen.")
                     return
@@ -1295,7 +1304,8 @@ class App(ctk.CTk):
         """Banner-Knopf: dasselbe Dokument mit der anderen Rolle neu einlesen."""
         pfad = getattr(self, "_fremd_pfad", None)
         if pfad and self.fremd:
-            self.datenblatt_laden(pfad, rolle="vergleich" if self.fremd.rolle == "verbraucher" else "verbraucher")
+            self.datenblatt_laden(pfad, rolle="vergleich" if self.fremd.rolle == "verbraucher" else "verbraucher",
+                                  mailtext=getattr(self, "_fremd_mailtext", ""))
 
     # ------------------------------------------------------------------ Shopdaten
     def datenquelle_wechseln(self):

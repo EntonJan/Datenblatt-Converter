@@ -125,3 +125,21 @@ def test_zweck_und_kundenfragen():
     assert v.kundenfragen() == []
     assert v.anfrage() == "AC/AC 230VAC 3,6kVA 50Hz 60Hz"     # Prüfung: 50 und 60 Hz einstellbar
     assert not any(h.startswith("Klären: Wofür") for h in v.hinweise())
+
+
+def test_angaben_aus_der_kundenmail():
+    v = V.lesen(TABELLE)
+    fund = V.aus_mail(v, "Guten Tag, wir möchten die angehängte Waschmaschine in unserem Wohnmobil betreiben. "
+                         "Wir haben eine 24V Batterie an Bord. Gibt es dafür etwas von Ihnen?")
+    assert (v.versorgung, v.dc_spannung, v.zweck) == ("dc", 24, "dauer")
+    assert v.anfrage() == "DC/AC 230VAC 3,6kVA Eingang 24VDC" and len(fund) == 2
+
+    v = V.lesen(TABELLE)
+    V.aus_mail(v, "Wir müssen die Maschine für den Export prüfen und brauchen dazu 120 V / 60 Hz aus unserem "
+                  "400 V Drehstromnetz. Der Anlaufstrom liegt laut Hersteller bei 25 A.")
+    assert (v.versorgung, v.zweck, v.anlaufstrom, v.reserve) == ("netz", "pruefung", 25, 1.2)
+    assert v.kundenfragen() == []
+
+    v = V.lesen(TABELLE)
+    assert V.aus_mail(v, "Anbei das Datenblatt, bitte um ein Angebot.") == []
+    assert (v.versorgung, v.zweck) == ("unbekannt", "unbekannt")

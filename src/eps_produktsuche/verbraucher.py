@@ -284,3 +284,66 @@ def aus_dict(d: dict | None) -> Verbraucher | None:
         return None
     felder = Verbraucher.__dataclass_fields__
     return Verbraucher(**{k: w for k, w in d.items() if k in felder})
+
+
+# ------------------------------------------------------------------------ Angaben aus der Kundenmail
+
+_DC = re.compile(r"batterie|akku|battery|bordnetz|dc[- ]?netz|gleichspannung|gleichstrom|\bdc\b|solar|photovoltaik|"
+                 r"pv[- ]anlage|lkw|fahrzeug|wohnmobil|boot|schiff|vehicle|truck", re.I)
+_NETZ = re.compile(r"steckdose|stromnetz|\bnetz(?:spannung|anschluss)?\b|drehstrom|generator|aggregat|mains|grid|"
+                   r"wall socket|\b(?:110|115|120|208|220|230|240|380|400|415|480)\s*v(?:olt)?\b(?!\s*dc)", re.I)
+_ZWECK = [("notstrom", re.compile(r"notstrom|\busv\b|\bups\b|stromausfall|netzausfall|backup|emergency power", re.I)),
+          ("pruefung", re.compile(r"prüf|\btest|export|zertifizier|abnahme|labor|messung|simulier|nachbild|"
+                                  r"verschiedene(?:n)? (?:spannung|frequenz|länder)|andere(?:n)? (?:spannung|frequenz)",
+                                  re.I)),
+          ("dauer", re.compile(r"dauerbetrieb|dauerhaft|rund um die uhr|24/7|täglich|im (?:alltag|einsatz)|"
+                               r"fahrzeug|wohnmobil|boot|schiff|container|baustelle|camping", re.I))]
+
+
+def _saetze(text: str) -> list[str]:
+    return [x.strip() for x in re.split(r"(?<=[.!?])\s+|\n+", text or "") if x.strip()]
+
+
+def aus_mail(v: Verbraucher, text: str) -> list[str]:
+    """Was die Kundenmail zu Versorgung, Zweck und Anlaufstrom sagt, in v eintragen. Gibt die Fundstellen
+    (Sätze) zurück, damit man im Dialog sieht, woher die Vorauswahl kommt. Datenblattwerte bleiben unverändert."""
+    fund: list[str] = []
+    saetze = _saetze(text)
+
+    def merken(satz: str):
+        kurz = satz if len(satz) <= 160 else satz[:157] + "…"
+        if kurz not in fund:
+            fund.append(kurz)
+
+    dc_saetze = [x for x in saetze if _DC.search(x)]
+    netz_satz = next((x for x in saetze if _NETZ.search(x) and not _DC.search(x)), "")
+    if dc_saetze:
+        v.versorgung = "dc"
+        for satz in dc_saetze:
+            m = re.search(_ZAHL + r"\s*v(?:olt)?\s*(?:dc|=|gleich)", satz, re.I) or \
+                re.search(r"(?:batterie|akku|battery|bordnetz)\D{0,25}?" + _ZAHL + r"\s*v", satz, re.I) or \
+                re.search(_ZAHL + r"\s*v(?:olt)?[- ]?(?:batterie|akku|battery|bordnetz)", satz, re.I)
+            if m and 6 <= _f(m.group(1)) <= 1500:
+                v.dc_spannung = _f(m.group(1))
+                merken(satz)
+                break
+        else:
+            merken(dc_saetze[0])
+    elif netz_satz:
+        v.versorgung = "netz"
+        merken(netz_satz)
+    for zweck, muster in _ZWECK:
+        satz = next((x for x in saetze if muster.search(x)), "")
+        if satz:
+            v.zweck = zweck
+            merken(satz)
+            break
+    for x in saetze:
+        m = re.search(r"(?:anlauf|einschalt|inrush|start)\w*[^\d\n]{0,45}?" + _ZAHL + r"\s*a\b", x, re.I)
+        if m:
+            v.anlaufstrom = _f(m.group(1))
+            if v.spannung:
+                v.reserve = 1.2
+            merken(x)
+            break
+    return fund
