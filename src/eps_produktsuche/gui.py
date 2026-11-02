@@ -670,7 +670,7 @@ class App(ctk.CTk):
         self.gruppieren = tk.BooleanVar(value=True)
         TH.schalter(self.liste_kopf, "nach Serie gruppieren", self.gruppieren, self.suchen).pack(side="right")
 
-        sp = [("bew", "Bewertung", 110), ("nr", "Nr.", 70), ("name", "Gerät", 300), ("typ", "Gerätetyp", 105),
+        sp = [("vorgang", "Vorgang", 82), ("bew", "Bewertung", 110), ("nr", "Nr.", 70), ("name", "Gerät", 300), ("typ", "Gerätetyp", 105),
               ("u", "Spannung", 115), ("i", "Strom", 90), ("p", "Leistung", 115), ("res", "Reserve", 170),
               ("hin", "Hinweis", 240)]
         self.tabelle_rahmen, self.tv = TH.tabelle(seite, sp, baum=True, mehrfach=True, dehnen=("name", "hin"))
@@ -938,6 +938,9 @@ class App(ctk.CTk):
 
     def suchen(self):
         self.tv.delete(*self.tv.get_children())
+        self._vorgang_spalte = (self.nummern.vorhanden(self.vorgang[0]) if self.vorgang else "") or ""
+        spalten = list(self.tv["columns"])
+        self.tv["displaycolumns"] = spalten if self._vorgang_spalte else spalten[1:]   # Spalte nur mit Vorgang
         self.treffer, self.zeilen_geraete, self.iid_index, self.serie_iid = [], [], {}, {}
         self.karten_treffer, self.karten_gewaehlt = [], set()
         text = self.eingabe.get().strip()
@@ -1071,7 +1074,7 @@ class App(ctk.CTk):
         typ = g.geraetetyp + (" (bidir.)" if g.bidirektional and g.geraetetyp != shop.LAST else "") + \
             {3: " 3~", 1: " 1~"}.get(g.phasen, "")
         self.tv.insert(eltern, "end", iid=iid, tags=tags, open=False,
-                       values=[bew, g.bestellnummer, g.name, typ, g.spannung or "–", g.strom or "–", g.leistung or "–",
+                       values=[self._vorgang_spalte, bew, g.bestellnummer, g.name, typ, g.spannung or "–", g.strom or "–", g.leistung or "–",
                                reserve, hinweis])
         return iid
 
@@ -1208,6 +1211,7 @@ class App(ctk.CTk):
     def vorgang_loesen(self):
         """✕ am Vorgang: Suche wieder frei (Mail bleibt, wo sie ist)."""
         self.vorgang = None
+        self._vorgang_spalte = ""
         self.vorgang_chip.pack_forget()
         self.fremd, self.fremd_anfrage = None, ""
         self.fremd_rahmen.pack_forget()
