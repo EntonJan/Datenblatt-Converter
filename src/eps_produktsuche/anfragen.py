@@ -40,6 +40,7 @@ class Vorsortierung:
     bestellungen: int = 0
     unsicher: int = 0
     falsch: list = field(default_factory=list)       # (Ordner, Mail, Erkennung)
+    alle: list = field(default_factory=list)         # (Ordner, Mail, Erkennung) – für die Vorgangsnummern
 
     def text(self) -> str:
         teile = [f"{self.anfragen} Anfrage{'n' if self.anfragen != 1 else ''}",
@@ -57,6 +58,7 @@ def vorsortierung(ergebnis, interne_domains=()) -> Vorsortierung:
     for o, mails in ergebnis:
         for m in mails:
             e = K.erkennen(m, tuple(interne_domains))
+            v.alle.append((o, m, e))
             if e.art == "bestellung":
                 v.bestellungen += 1
             else:
@@ -143,7 +145,7 @@ class AnfragenSeite(ctk.CTkFrame):
         self.ordner_cb.set(werte[0])
         self.ordner_cb.pack(side="left", fill="x", expand=True)
         TH.knopf(oben, "Aktualisieren", self.laden, height=34, width=110).pack(side="left", padx=(6, 0))
-        sp = [("zeit", "Eingang", 90), ("art", "Art", 95), ("von", "Absender", 130), ("betreff", "Betreff", 200)]
+        sp = [("nr", "Nr.", 82), ("zeit", "Eingang", 90), ("art", "Art", 95), ("von", "Absender", 130), ("betreff", "Betreff", 200)]
         t_rahmen, self.tv = TH.tabelle(links, sp, dehnen=("betreff",))
         t_rahmen.configure(border_width=0)
         t_rahmen.pack(fill="both", expand=True, padx=4)
@@ -326,8 +328,9 @@ class AnfragenSeite(ctk.CTkFrame):
                 zeit = m.empfangen
             vorschlag = self._falscher_ordner(i)
             art = ("Bestellung" if e.art == "bestellung" else "Anfrage") + ("" if e.art_sicher else "?")
+            nr = self.app.vorgang_nr(m, e, ordner)
             self.tv.insert("", "end", iid=str(i), tags=("vorschlag",) if vorschlag else (("formular",) if e.formular else ()),
-                           values=[zeit, ("→ " + art) if vorschlag else art, m.absender_name or m.absender_email,
+                           values=[nr, zeit, ("→ " + art) if vorschlag else art, m.absender_name or m.absender_email,
                                    m.betreff])
         self._leeren()
         kinder = self.tv.get_children()
@@ -421,6 +424,7 @@ class AnfragenSeite(ctk.CTkFrame):
             if fehler:
                 messagebox.showerror("Anfragen", f"Verschieben fehlgeschlagen:\n{fehler}", parent=self)
                 return
+            self.app.nummern.nummer(m, neu)              # andere Art → neue Nummer (Bes… statt Anf…)
             self.tv.delete(str(i))
             self.aktuell = None
             self._leeren()

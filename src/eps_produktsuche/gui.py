@@ -451,6 +451,8 @@ class App(ctk.CTk):
     def __init__(self, pfad: Path | None = None, automatisch_laden: bool = True, update_pruefen: bool | None = None):
         self.pfad = pfad or datenpfad()
         self.verlauf_pfad = self.pfad.parent / "verlauf.json"
+        from .vorgangsnummer import Nummern
+        self.nummern = Nummern(self.pfad.parent / "vorgangsnummern.json")
         self.einstellungen_pfad = self.pfad.parent / "einstellungen.json"
         self.einstellungen = Einstellungen.laden(self.einstellungen_pfad)
         TH.modus_setzen(self.einstellungen.dunkelmodus)
@@ -612,6 +614,9 @@ class App(ctk.CTk):
         self.such_karte = such
         z1 = ctk.CTkFrame(such, fg_color="transparent")
         z1.pack(fill="x", padx=16, pady=(14, 6))
+        self.vorgang_chip = ctk.CTkButton(z1, text="", height=46, corner_radius=8, fg_color=TH.GELB,
+                                          hover_color=TH.KNOPF_HOVER, text_color=TH.GELB_TEXT, font=TH.schrift(14, True),
+                                          command=self.vorgang_loesen)
         self.eingabe = tk.StringVar()
         self.feld = ctk.CTkEntry(z1, textvariable=self.eingabe, height=46, font=TH.schrift(18), fg_color=TH.EINGABE,
                                  border_color=TH.AKZENT, border_width=2, text_color=TH.TEXT, corner_radius=8,
@@ -784,15 +789,17 @@ class App(ctk.CTk):
 
     def _eingang_zeigen(self, lauf):
         """Ergebnis in die Seitenleiste; die neueste Mail mit Treffern gleich in die Suche (wenn die Suche frei ist)."""
+        for s in lauf.sortiert:
+            s.nr = self.nummern.nummer(s.mail, "bestellung" if s.erkennung.art == "bestellung" else "anfrage")
         treffer = [s for s in lauf.sortiert if s.gefunden and not s.fehler]
         frei = self.aktive_seite == "suche" and not self.eingabe.get().strip() and not self.fremd
         text = lauf.text()
         if treffer and frei:
             s = treffer[-1]
             self.vorgang_uebernehmen(s.mail, s.erkennung)
-            text += f"\n→ in der Suche: {s.erkennung.kunde.firma or s.mail.absender_name or s.mail.betreff}"
+            text += f"\n→ in der Suche: {s.nr} · {s.erkennung.kunde.firma or s.mail.absender_name or s.mail.betreff}"
         elif treffer:
-            text += f"\n{len(treffer)} warten auf „Ansehen“"
+            text += f"\nWarten auf „Ansehen“: " + ", ".join(t.nr for t in treffer)
         self._eingang_text = text
         self.sortier_lbl.configure(text=text)
         self.sortier_knopf.pack_forget()
@@ -804,6 +811,7 @@ class App(ctk.CTk):
 
     def vorsortierung_zeigen(self, v):
         """Ergebnis von AnfragenSeite.vorsortieren in der Seitenleiste – verschoben wird nur per Klick."""
+        self.nummern.viele([(m, e.art if (e.art_sicher or o is None) else o.typ) for o, m, e in v.alle])
         zusatz = getattr(self, "_eingang_text", "")
         if not (v.anfragen or v.bestellungen or zusatz):
             self.sortier_box.pack_forget()
@@ -1177,6 +1185,36 @@ class App(ctk.CTk):
         return self.pfad.parent / "Gegenueberstellungen"
 
     # ------------------------------------------------------------------ Verlauf
+    # ------------------------------------------------------------------ Vorgangsnummer (Anf00001 / Bes00001)
+    def vorgang_nr(self, mail, erkennung, ordner=None) -> str:
+        """Interne Nummer: bestehende behalten, sonst nach Art (unsicher → Art des Ordners) neu vergeben."""
+        typ = erkennung.art if (erkennung.art_sicher or ordner is None) else ordner.typ
+        return self.nummern.nummer(mail, "bestellung" if typ == "bestellung" else "anfrage")
+
+    def _vorgang_titel(self) -> str:
+        if not self.vorgang:
+            return ""
+        nr = self.nummern.vorhanden(self.vorgang[0])
+        return " · ".join(x for x in (nr, self._kunde_name()) if x)
+
+    def _vorgang_chip_zeigen(self):
+        titel = self._vorgang_titel()
+        if titel:
+            self.vorgang_chip.configure(text=f"{titel}   ✕")
+            self.vorgang_chip.pack(side="left", padx=(0, 10), before=self.feld)
+        else:
+            self.vorgang_chip.pack_forget()
+
+    def vorgang_loesen(self):
+        """✕ am Vorgang: Suche wieder frei (Mail bleibt, wo sie ist)."""
+        self.vorgang = None
+        self.vorgang_chip.pack_forget()
+        self.fremd, self.fremd_anfrage = None, ""
+        self.fremd_rahmen.pack_forget()
+        self.eingabe.set("")
+        self.info.configure(text="")
+        self.feld.focus_set()
+
     def _kunde_name(self) -> str:
         if not self.vorgang:
             return ""
@@ -1190,7 +1228,7 @@ class App(ctk.CTk):
         fremd = asdict(self.fremd) if self.fremd and text == self.fremd_anfrage else None
         geraete = [{"bestellnummer": t.g.bestellnummer, "name": t.g.name} for t in (treffer or [])]
         try:
-            verlauf.hinzufuegen(self.verlauf_pfad, text, aktion, geraete, self.typ.get(), fremd, kunde=self._kunde_name())
+            verlauf.hinzufuegen(self.verlauf_pfad, text, aktion, geraete, self.typ.get(), fremd, kunde=self._vorgang_titel())
         except OSError:
             pass
 
@@ -1239,6 +1277,8 @@ class App(ctk.CTk):
     def vorgang_uebernehmen(self, mail, erkennung):
         """Anfrage von der Anfragen-Seite in die Suche holen. Anhang (PDF/Word) hat Vorrang vor dem Mailtext."""
         self.vorgang = (mail, erkennung)
+        nr = self.nummern.vorhanden(mail) or self.vorgang_nr(mail, erkennung)
+        self._vorgang_chip_zeigen()
         self.fremd, self.fremd_anfrage = None, ""
         self.fremd_rahmen.pack_forget()
         self.typ.set("automatisch")
@@ -1247,7 +1287,7 @@ class App(ctk.CTk):
         if erkennung.positionen:                      # Anfragekorb: Kunde hat die Geräte schon gewählt
             self.eingabe.set(erkennung.suchtext)
             n = self._positionen_markieren(erkennung.positionen)
-            self.info.configure(text=f"Anfrage {erkennung.anfrage_nr} von {k.firmenname or k.email} übernommen – "
+            self.info.configure(text=f"{nr}: Anfrage {erkennung.anfrage_nr} von {k.firmenname or k.email} übernommen – "
                                      f"{len(erkennung.positionen)} Artikel vom Kunden gewählt, {n} davon markiert")
             self.feld.focus_set()
             return
@@ -1259,7 +1299,8 @@ class App(ctk.CTk):
                 self.datenblatt_laden(anhang, mailtext=f"{mail.betreff}\n{erkennung.anfrage or mail.text}")
         else:
             self.eingabe.set(erkennung.suchtext)
-        self.info.configure(text=f"Anfrage von {k.firmenname or k.email} übernommen"
+        self.info.configure(text=f"{nr}: {'Bestellung' if nr.startswith('Bes') else 'Anfrage'} von "
+                                 f"{k.firmenname or k.email} übernommen"
                                  + (f" – {len(mail.anhaenge)} Anhang/Anhänge" if mail.anhaenge else ""))
         self.feld.focus_set()
 
