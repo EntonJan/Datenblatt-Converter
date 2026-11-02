@@ -240,7 +240,8 @@ def test_outlook_loeschen(tmp_path):
 def test_einstellungen(tmp_path):
     p = tmp_path / "einstellungen.json"
     e = Einstellungen.laden(p)
-    assert not e.experimentell and len(e.anfrageordner) == 2
+    assert not e.experimentell and len(e.anfrageordner) == 4
+    assert [o.typ for o in e.anfrageordner] == ["anfrage", "anfrage", "bestellung", "bestellung"]
     e.experimentell = True
     e.anfrageordner.append(Anfrageordner("vertrieb@eps-germany.de/Posteingang/Anfragen", "automatisch", True))
     e.speichern(p)
@@ -344,3 +345,20 @@ def test_outlook_json_anhang_eps_anfrage(tmp_path):
     _Item(auto, "Anfrage über die Homepage", "Neue Anfrage", [("EPS-Anfrage.json", daten)])
     m = outlook.Outlook(namespace=ns).mails("Posteingang/Anfragen/Automatisch", tmp_path)[0]
     assert m.daten["positionen"][1]["bestellnummer"] == "200961" and m.anhaenge == []
+
+
+def test_outlook_bestellungen_ordner_anlegen(tmp_path):
+    """Neue Ordnerstruktur Bestellungen/…: zwei Ebenen werden im Konto angelegt, nicht in der lokalen Datendatei."""
+    ns = _Namespace()
+    auto = ns.eingang.Add("Anfragen").Add("Automatisch")
+    _Item(auto, "Bestellung 4500123", "hiermit bestellen wir")
+    ol = outlook.Outlook(namespace=ns)
+    m = ol.mails("Posteingang/Anfragen/Automatisch", tmp_path)[0]
+    ol.verschieben(m.quelle, "Posteingang/Bestellungen/Selbst prüfen")
+    neu = ol.ordner("Posteingang/Bestellungen/Selbst prüfen")
+    assert neu.Parent.Parent is ns.eingang and len(neu._items) == 1 and ns.pst_eingang._kinder == []
+    try:
+        ol.ordner("Postausgang/X/Y/Z", anlegen=True)                 # Tippfehler: nichts anlegen
+        raise AssertionError("Fehler erwartet")
+    except outlook.OutlookFehler:
+        pass

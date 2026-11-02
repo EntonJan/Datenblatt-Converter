@@ -564,7 +564,7 @@ class App(ctk.CTk):
         self.nav: dict[str, ctk.CTkButton] = {}
         self.nav_rahmen = ctk.CTkFrame(leiste, fg_color="transparent")
         self.nav_rahmen.pack(fill="x", padx=12)
-        for key, titel in (("suche", "Suche"), ("anfragen", "Anfragen"), ("verlauf", "Verlauf"),
+        for key, titel in (("suche", "Suche"), ("anfragen", "Anfragen & Bestellungen"), ("verlauf", "Verlauf"),
                            ("vergleich", "Gegenüberstellungen"), ("einstellungen", "Einstellungen")):
             b = ctk.CTkButton(self.nav_rahmen, text=titel, anchor="w", height=40, corner_radius=8, font=TH.schrift(14),
                               fg_color="transparent", hover_color=TH.KNOPF_HOVER, text_color=TH.TEXT,

@@ -8,6 +8,7 @@ Alle Aufrufe laufen in einem eigenen Thread; die Oberfläche bekommt nur einfach
 """
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 from datetime import datetime
@@ -112,20 +113,27 @@ class Outlook:
             kandidaten, teile = treffer[:1], teile[1:]
         else:
             kandidaten = postfaecher
-        bester, tiefe = None, -1
+        bester, tiefe, bester_lokal = None, -1, True
         for p in kandidaten:
             ordner, n = self._gehen(p, teile)
-            if n > tiefe:
-                bester, tiefe = ordner, n
+            lokal = bool(re.search(r"outlook[- ]?(?:datendatei|data file)|persönliche ordner|personal folders",
+                                   getattr(p, "Name", ""), re.I))
+            # gleich tief: lieber im echten Konto als in einer lokalen Outlook-Datendatei (dort anlegen wäre falsch)
+            if n > tiefe or (n == tiefe and bester_lokal and not lokal):
+                bester, tiefe, bester_lokal = ordner, n, lokal
             if n == len(teile):
                 break
         if tiefe == len(teile):
             return bester
-        if not anlegen or bester is None or tiefe < len(teile) - 1:
+        # Anlegen höchstens zwei Ebenen unter einem vorhandenen Ordner (z. B. „Bestellungen/Erledigt“ im Posteingang) –
+        # ein Tippfehler im Postfach- oder Posteingangsnamen legt nichts an
+        if not anlegen or bester is None or tiefe < 1 or len(teile) - tiefe > 2:
             gesucht = "/".join(teile[:tiefe + 1]) if tiefe >= 0 else pfad
             raise OutlookFehler(f"Ordner „{gesucht}“ in keinem Postfach gefunden. Pfad in den Einstellungen prüfen "
                                 "oder mit „Aus Outlook wählen …“ auswählen.")
-        return bester.Folders.Add(teile[-1])              # nur der letzte Teil (z. B. „Erledigt“) wird angelegt
+        for name in teile[tiefe:]:
+            bester = bester.Folders.Add(name)
+        return bester
 
     def ordner_waehlen(self) -> str:
         """Outlook-eigenen Ordnerdialog öffnen → Pfad im Format der Einstellungen („Postfach/Posteingang/…“) oder ""."""

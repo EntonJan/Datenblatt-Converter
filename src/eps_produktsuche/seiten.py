@@ -479,17 +479,20 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
 
         # Outlook
         g = self._gruppe(rechts, "Outlook-Anfragen")
-        TH.text(g, "Anfrage-Ordner im klassischen Outlook (Pfad mit „/“; gemeinsames Postfach: dessen Name vorn, "
+        TH.text(g, "Anfrage- und Bestellungs-Ordner im klassischen Outlook (Pfad mit „/“; gemeinsames Postfach: dessen Name vorn, "
                    "z. B. „vertrieb@eps-germany.de/Posteingang/Anfragen“)", 12, farbe=TH.GRAU, anchor="w",
                 justify="left", wraplength=560).pack(fill="x", padx=18)
         self.ordner_rahmen = ctk.CTkFrame(g, fg_color="transparent")
         self.ordner_rahmen.pack(fill="x", padx=18, pady=(6, 0))
-        self.zeilen: list[tuple[tk.StringVar, tk.StringVar, tk.BooleanVar]] = []
+        self.zeilen: list[tuple[tk.StringVar, tk.StringVar, tk.BooleanVar, tk.StringVar]] = []
         self.erledigt = tk.StringVar()
+        self.erledigt_b = tk.StringVar()
         self.bearbeitung = tk.StringVar()
         self.domains = tk.StringVar()
-        self._zeile(g, "Erledigte Mails nach", "Name = Unterordner, mit „/“ = fester Ordner",
+        self._zeile(g, "Erledigte Anfragen nach", "Name = Unterordner, mit „/“ = fester Ordner",
                     TH.eingabe(g, textvariable=self.erledigt, width=300))
+        self._zeile(g, "Erledigte Bestellungen nach", "z. B. Posteingang/Bestellungen/Erledigt",
+                    TH.eingabe(g, textvariable=self.erledigt_b, width=300))
         self._zeile(g, "„In Bearbeitung“", "für gemeinsame Postfächer (Name oder Pfad)",
                     TH.eingabe(g, textvariable=self.bearbeitung, width=300))
         self._zeile(g, "Eigene Domains", "Mails von dort = Weiterleitung, der Kunde steht darunter",
@@ -538,21 +541,23 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         for w in self.ordner_rahmen.winfo_children():
             w.destroy()
         self.zeilen = []
-        liste = list(ordner) + [Anfrageordner("", "pruefen")] * max(0, 3 - len(ordner))
-        for o in liste[:6]:
+        liste = list(ordner) + [Anfrageordner("", "pruefen")] * max(0, 5 - len(ordner))
+        for o in liste[:8]:
             pfad = tk.StringVar(value=o.pfad)
+            typ = tk.StringVar(value="Bestellungen" if o.typ == "bestellung" else "Anfragen")
             art = tk.StringVar(value="automatisch" if o.art == "automatisch" else "selbst prüfen")
             gem = tk.BooleanVar(value=o.gemeinsam)
             z = ctk.CTkFrame(self.ordner_rahmen, fg_color="transparent")
             z.pack(fill="x", pady=3)
             TH.eingabe(z, textvariable=pfad, placeholder_text="Posteingang/Anfragen/…").pack(side="left", fill="x",
                                                                                           expand=True)
-            TH.auswahl(z, ["automatisch", "selbst prüfen"], art, breite=130).pack(side="left", padx=(6, 0))
+            TH.auswahl(z, ["Anfragen", "Bestellungen"], typ, breite=125).pack(side="left", padx=(6, 0))
+            TH.auswahl(z, ["automatisch", "selbst prüfen"], art, breite=125).pack(side="left", padx=(6, 0))
             ctk.CTkCheckBox(z, text="gemeinsam", variable=gem, font=TH.schrift(12), text_color=TH.TEXT, width=20,
                             fg_color=TH.AKZENT).pack(side="left", padx=(8, 0))
             TH.knopf(z, "Aus Outlook …", lambda v=pfad: self.waehlen(v), height=32, width=110).pack(side="left",
                                                                                                    padx=(6, 0))
-            self.zeilen.append((pfad, art, gem))
+            self.zeilen.append((pfad, art, gem, typ))
 
     def zeigen(self):
         if not getattr(self, "_gefuellt", False):
@@ -567,6 +572,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         self.frist.set(str(e.preisfrist_monate))
         self._ordner_zeilen(e.anfrageordner)
         self.erledigt.set(e.ordner_erledigt)
+        self.erledigt_b.set(e.erledigt_fuer("bestellung"))
         self.bearbeitung.set(e.ordner_in_bearbeitung)
         self.domains.set(", ".join(e.interne_domains))
         self.weclapp.set(e.weclapp_adresse)
@@ -640,8 +646,10 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         e = self.app.einstellungen
         e.experimentell = self.experimentell.get()
         e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "automatisch" else "pruefen",
-                                         g.get()) for p, a, g in self.zeilen if p.get().strip()]
+                                         g.get(), "bestellung" if t.get() == "Bestellungen" else "anfrage")
+                           for p, a, g, t in self.zeilen if p.get().strip()]
         e.ordner_erledigt = self.erledigt.get().strip() or "Erledigt"
+        e.ordner_erledigt_bestellung = self.erledigt_b.get().strip()
         e.weclapp_adresse = self.weclapp.get().strip()
         alte_quelle = e.datenquelle
         e.datenquelle = "weclapp" if self.quelle.get() == "Weclapp" and e.weclapp_adresse else "shop"

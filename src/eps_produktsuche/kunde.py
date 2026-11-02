@@ -74,6 +74,12 @@ class Erkennung:
     anfrage_nr: str = ""
     quelle: str = ""             # "produktkonfigurator" / "anfrageformular" / "shop" / "" (normale Mail)
     sprache: str = ""
+    # Anfrage oder Bestellung (Vorschlag, entscheidet über den Ordner; verschoben wird nur nach Klick)
+    art: str = "anfrage"         # "anfrage" / "bestellung"
+    art_gruende: list[str] = field(default_factory=list)
+    art_sicher: bool = True
+    bestell_nr: str = ""         # Bestellnummer des Kunden (Purchase Order)
+    angebots_nr: str = ""        # unser Angebot, auf das sich die Mail bezieht
 
 
 INTERN = ("eps-germany.de",)     # eigene Domains: Mails von hier sind Weiterleitungen, nie der Kunde
@@ -417,6 +423,70 @@ def original_mail(mail: Mail, intern=INTERN) -> tuple[Mail | None, str]:
     return None, ""
 
 
+# ------------------------------------------------------------------------ Anfrage oder Bestellung?
+
+_BESTELLWORTE = re.compile(
+    r"\bbestellung\b|hiermit bestellen|wir bestellen|bestellen wir|bestellen hiermit|auftragserteilung|"
+    r"erteilen (?:ihnen )?(?:hiermit )?(?:den |unseren )?auftrag|purchase order|we (?:hereby )?(?:would like to )?order|"
+    r"please (?:find|see) (?:attached )?(?:our )?(?:purchase )?order|bestellen (?:wir )?(?:gemäß|laut) (?:ihrem )?angebot",
+    re.I)
+_ANFRAGEWORTE = re.compile(
+    r"\banfrage\b|\banfragen\b|bitte um (?:ein |ihr |einen )?(?:angebot|preis)|angebot (?:für|über|zu) |"
+    r"(?:können|könnten) sie (?:uns |mir )?(?:bitte )?(?:ein |einen )?(?:angebot|preis)|request for (?:a )?quot|\brfq\b|"
+    r"\binquiry\b|\benquiry\b|quote request|(?:send|provide) (?:us |me )?(?:a |your )?(?:quot|price)|"
+    r"preisanfrage|was kostet|lieferzeit(?:en)? und preis", re.I)
+_KUNDEN_BESTELLNR = re.compile(
+    r"(?:bestell(?:ung)?s?[- ]?(?:nr|nummer|no)\.?|purchase order(?: no\.?| number)?|\bpo(?:[- ]?(?:no|nr|number))?\.?|"
+    r"order (?:no|number)\.?)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-/]{3,})", re.I)
+_ANGEBOTSNR = re.compile(
+    r"(?:angebot(?:s)?[- ]?(?:nr|nummer|no)\.?|ihr(?:em|es)? angebot(?:s)?(?: nr\.?| vom [\d.]+)?|your quotation|"
+    r"quotation(?: no\.?| number)?|\bquote(?: no\.?)?)\s*[:#]?\s*(?:nr\.?\s*)?([A-Z]{0,4}-?\d{3,}[\w\-/]*)", re.I)
+_BESTELLDATEI = re.compile(r"bestellung|purchase.?order|\bpo[_\- ]?\d|auftrag|\border\b", re.I)
+
+
+def art_erkennen(e: Erkennung, mail: Mail, text: str = "") -> None:
+    """Bestellung oder Anfrage? Nur ein Vorschlag mit Gründen – das Verschieben in den Ordner macht der Mensch."""
+    t = f"{mail.betreff}\n{text or e.anfrage}\n{e.notiz}"
+    b, a, gruende = 0, 0, []
+    w = {m.group(0).lower() for m in _BESTELLWORTE.finditer(t)}
+    if w:
+        b += 2 + (1 if len(w) > 1 else 0)
+        gruende.append("Text: „" + "“, „".join(sorted(w))[:80] + "“")
+    for m in _KUNDEN_BESTELLNR.finditer(t):
+        nr = m.group(1).strip(".-/")
+        if re.fullmatch(r"\d{6}", nr) or not re.search(r"\d", nr):    # 6 Ziffern = EPS-Artikelnummer, kein Auftrag
+            continue
+        e.bestell_nr = e.bestell_nr or nr
+        b += 2
+        gruende.append(f"Bestell-Nr. {nr}")
+        break
+    m = _ANGEBOTSNR.search(t)
+    if m:
+        e.angebots_nr = m.group(1)
+        b += 1
+        gruende.append(f"bezieht sich auf Angebot {e.angebots_nr}")
+    dateien = [p.name for p in mail.anhaenge if _BESTELLDATEI.search(p.name)]
+    if dateien:
+        b += 2
+        gruende.append("Anhang " + ", ".join(dateien[:2]))
+    aw = {m.group(0).lower().strip() for m in _ANFRAGEWORTE.finditer(t)}
+    if aw:
+        a += 2 + (1 if len(aw) > 1 else 0)
+    if b >= 3 and b > a:
+        e.art, e.art_gruende = "bestellung", gruende
+        e.art_sicher = b - a >= 3
+        # Suche: die bestellten EPS-Artikel (6-stellige Bestellnummern), nicht die Bestellnummer des Kunden
+        artikel = list(dict.fromkeys(n for n in re.findall(r"(?<![\d\-/])(\d{6})(?![\d\-/])", t) if n != e.bestell_nr))
+        if artikel:
+            e.suchtext = " ".join(artikel)
+            e.unsicher = [u for u in e.unsicher if not u.startswith("Keine technischen Werte")]
+    else:
+        e.art, e.art_gruende = "anfrage", (["Text: „" + "“, „".join(sorted(aw))[:80] + "“"] if aw else [])
+        e.art_sicher = not (b >= 2 and b >= a)
+        if not e.art_sicher:
+            e.art_gruende.append("Hinweise auf eine Bestellung: " + "; ".join(gruende))
+
+
 def _aus_anfrage(d: dict, mail: Mail) -> Erkennung:
     """EPS-Anfrage (JSON-Anhang oder Textblock, siehe anfrage_format) → Erkennung."""
     kd = d["kunde"]
@@ -500,6 +570,8 @@ def erkennen(mail: Mail, intern=INTERN) -> Erkennung:
             m = _MENGE.search(notiz)                        # Hinweise des Chefs („bitte 3 Stück anbieten“) zählen auch
             if m and not e.menge:
                 e.menge = int(m.group(1) or m.group(2))
+            if not e.quelle:
+                art_erkennen(e, original)
             return e
     nachricht, block = signatur(mail.text)
     k, unsicher = kunde_aus_signatur(block, mail)
@@ -515,4 +587,5 @@ def erkennen(mail: Mail, intern=INTERN) -> Erkennung:
         e.termin = tm.group(1).strip()
     if not e.suchtext:
         e.unsicher.append("Keine technischen Werte in der Mail – Anhang oder Text prüfen")
+    art_erkennen(e, mail, nachricht)
     return e
