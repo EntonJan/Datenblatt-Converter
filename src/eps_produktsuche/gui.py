@@ -527,6 +527,7 @@ class App(ctk.CTk):
         # und der erste Wechsel ist trotzdem sofort da
         self.after(400, self._seiten_vorbereiten)
         self.after(2500, self._vorsortieren_starten)
+        self.after(4000, self._eingang_pruefen)
         self.after(50, startbild_schliessen)                 # Fenster steht – Startbild weg
 
         self.eingabe.trace_add("write", lambda *a: self.suchen())
@@ -752,12 +753,63 @@ class App(ctk.CTk):
         if e.experimentell and e.vorsortieren and e.anfrageordner:
             self.seite("anfragen").vorsortieren()
 
+    EINGANG_TAKT_MS = 60_000
+
+    def _eingang_pruefen(self):
+        """Alle 60 s den Eingangsordner leeren (eingang.einsortieren) – nur mit Anfragen-Funktion und Outlook."""
+        e = self.einstellungen
+        if getattr(self, "_eingang_laeuft", False) or not (e.experimentell and e.ordner_eingang):
+            self.after(self.EINGANG_TAKT_MS, self._eingang_pruefen)
+            return
+        from . import anfragen as A, eingang, outlook
+        if not outlook.verfuegbar():
+            return
+        self._eingang_laeuft = True
+        seite = self.seite("anfragen")
+        ordner = seite.anhang_ordner / ("eingang-" + datetime.now().strftime("%H%M%S"))
+        geraete = list(self.geraete)
+
+        def arbeit():
+            with outlook.Outlook() as ol:
+                return eingang.einsortieren(ol, e, geraete, ordner)
+
+        def fertig(lauf, fehler):
+            self._eingang_laeuft = False
+            self.after(self.EINGANG_TAKT_MS, self._eingang_pruefen)
+            if fehler or not lauf or not lauf.sortiert:
+                return
+            self._eingang_zeigen(lauf)
+
+        A._sicher(arbeit, fertig, self)
+
+    def _eingang_zeigen(self, lauf):
+        """Ergebnis in die Seitenleiste; die neueste Mail mit Treffern gleich in die Suche (wenn die Suche frei ist)."""
+        treffer = [s for s in lauf.sortiert if s.gefunden and not s.fehler]
+        frei = self.aktive_seite == "suche" and not self.eingabe.get().strip() and not self.fremd
+        text = lauf.text()
+        if treffer and frei:
+            s = treffer[-1]
+            self.vorgang_uebernehmen(s.mail, s.erkennung)
+            text += f"\n→ in der Suche: {s.erkennung.kunde.firma or s.mail.absender_name or s.mail.betreff}"
+        elif treffer:
+            text += f"\n{len(treffer)} warten auf „Ansehen“"
+        self._eingang_text = text
+        self.sortier_lbl.configure(text=text)
+        self.sortier_knopf.pack_forget()
+        self.sortier_box.pack(fill="x", padx=12, pady=(14, 0), after=self.nav_rahmen)
+        seite = self.seite("anfragen")
+        if seite.geladen:
+            seite.laden()
+        self.after(1500, self._vorsortieren_starten)
+
     def vorsortierung_zeigen(self, v):
         """Ergebnis von AnfragenSeite.vorsortieren in der Seitenleiste – verschoben wird nur per Klick."""
-        if not (v.anfragen or v.bestellungen):
+        zusatz = getattr(self, "_eingang_text", "")
+        if not (v.anfragen or v.bestellungen or zusatz):
             self.sortier_box.pack_forget()
             return
-        self.sortier_lbl.configure(text="Im Postfach:\n" + v.text())
+        inhalt = ("Im Postfach:\n" + v.text()) if (v.anfragen or v.bestellungen) else ""
+        self.sortier_lbl.configure(text="\n\n".join(t for t in (inhalt, zusatz) if t))
         if v.falsch:
             self.sortier_knopf.configure(text=f"{len(v.falsch)} richtig einsortieren", state="normal")
             self.sortier_knopf.pack(fill="x", padx=10, pady=(0, 6))
@@ -771,7 +823,7 @@ class App(ctk.CTk):
         def fertig(ok, gesamt, fehler):
             self.sortier_knopf.pack_forget()
             text = self.sortier_lbl.cget("text").split(" · ")
-            text = [t for t in text if "falsch" not in t]
+            text = [t for t in text if "falsch einsortiert" not in t]
             meldung = f"{ok} von {gesamt} verschoben" if ok != gesamt else f"{ok} verschoben"
             self.sortier_lbl.configure(text=" · ".join(text) + f"\n✓ {meldung}")
 

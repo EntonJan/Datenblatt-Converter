@@ -494,6 +494,11 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         TH.knopf(ok, "+ Fehlende Ordner in Outlook anlegen", self.ordner_anlegen, height=32).pack(side="left")
         self.ordner_status = TH.text(ok, "", 12, farbe=TH.GRAU, anchor="w", justify="left", wraplength=360)
         self.ordner_status.pack(side="left", padx=10, fill="x", expand=True)
+        self.eingang = tk.StringVar(value=e.ordner_eingang)
+        self._zeile(g, "Eingangsordner (sortiert selbst)", "Was du hier hineinziehst: Anfrage/Bestellung erkennen, Gerät "
+                                                          "gefunden → „Automatisch“ + in die Suche, sonst → „Selbst prüfen“. "
+                                                          "Leer = aus",
+                    TH.eingabe(g, textvariable=self.eingang, width=300))
         self.vorsortieren = tk.BooleanVar(value=e.vorsortieren)
         self._zeile(g, "Beim Start vorsortieren", "Ordner lesen und zählen (Anfragen, Bestellungen, falsch einsortiert) – "
                                                   "verschoben wird nur per Klick",
@@ -579,6 +584,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         self.dunkel_var.set(e.dunkelmodus)
         self.experimentell.set(e.experimentell)
         self.vorsortieren.set(e.vorsortieren)
+        self.eingang.set(e.ordner_eingang)
         self.quelle.set("Weclapp" if e.datenquelle == "weclapp" else "Shop")
         self.frist.set(str(e.preisfrist_monate))
         self._ordner_zeilen(e.anfrageordner)
@@ -704,6 +710,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         e = self.app.einstellungen
         e.experimentell = self.experimentell.get()
         e.vorsortieren = self.vorsortieren.get()
+        e.ordner_eingang = self.eingang.get().strip().strip("/")
         e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "automatisch" else "pruefen",
                                          g.get(), "bestellung" if t.get() == "Bestellungen" else "anfrage")
                            for p, a, g, t in self.zeilen if p.get().strip()]
