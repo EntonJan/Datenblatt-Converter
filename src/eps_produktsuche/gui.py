@@ -1230,7 +1230,7 @@ class App(ctk.CTk):
         artikel = selectline.laden_gecacht(self.shop_pfad.parent / selectline.DATEI)
         if not artikel:
             return geraete, stand
-        geraete, self.selectline_bericht = selectline.anwenden(geraete, artikel, self.einstellungen.selectline_ohne_shop)
+        geraete, self.selectline_bericht = selectline.anwenden(geraete, artikel)   # nur Shopgeräte korrigieren
         return geraete, stand
 
     def _kunde_name(self) -> str:

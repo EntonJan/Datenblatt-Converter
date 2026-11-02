@@ -460,14 +460,6 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
                                   progress_color=("#52B4D7", "#52B4D7")))
         # Datenquelle
         g = self._gruppe(links, "Datenquelle")
-        self.sl_ohne_shop = tk.BooleanVar(value=e.selectline_ohne_shop)
-        bericht = getattr(app, "selectline_bericht", None)
-        self._zeile(g, "SelectLine-Artikel ohne Shopseite mitsuchen",
-                    (f"{bericht.ohne_shop} Geräte aus selectline-artikel.csv (Sonderanfertigungen, ältere Typen), "
-                     "in der Liste mit „nicht im Shop“ markiert" if bericht else
-                     "selectline-artikel.csv im Datenordner fehlt"),
-                    ctk.CTkSwitch(g, text="", variable=self.sl_ohne_shop, width=46,
-                                  progress_color=("#52B4D7", "#52B4D7")))
         self.quelle = tk.StringVar(value="Weclapp" if e.datenquelle == "weclapp" else "Shop")
         self._zeile(g, "Gerätedaten für die Suche", "Weclapp erst, wenn die Artikel dort angelegt sind",
                     ctk.CTkSegmentedButton(g, values=["Shop", "Weclapp"], variable=self.quelle, font=TH.schrift(12),
@@ -592,7 +584,6 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         self.dunkel_var.set(e.dunkelmodus)
         self.experimentell.set(e.experimentell)
         self.vorsortieren.set(e.vorsortieren)
-        self.sl_ohne_shop.set(e.selectline_ohne_shop)
         self.eingang.set(e.ordner_eingang)
         self.quelle.set("Weclapp" if e.datenquelle == "weclapp" else "Shop")
         self.frist.set(str(e.preisfrist_monate))
@@ -719,8 +710,6 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         e = self.app.einstellungen
         e.experimentell = self.experimentell.get()
         e.vorsortieren = self.vorsortieren.get()
-        sl_neu = self.sl_ohne_shop.get() != e.selectline_ohne_shop
-        e.selectline_ohne_shop = self.sl_ohne_shop.get()
         e.ordner_eingang = self.eingang.get().strip().strip("/")
         e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "automatisch" else "pruefen",
                                          g.get(), "bestellung" if t.get() == "Bestellungen" else "anfrage")
@@ -746,7 +735,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         anfragen = self.app.seiten.get("anfragen")
         if anfragen is not None:
             anfragen.ordner_aktualisieren()
-        if e.datenquelle != alte_quelle or sl_neu:
+        if e.datenquelle != alte_quelle:
             self.app.datenquelle_wechseln()
         self.gespeichert.configure(text="✓ Gespeichert")
         if self.quelle.get() == "Weclapp" and not e.weclapp_adresse:
