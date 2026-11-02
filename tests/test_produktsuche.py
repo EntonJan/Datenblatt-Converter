@@ -720,3 +720,21 @@ def test_drehstrom_beim_netzgeraet_meint_den_anschluss():
     a = Q.anfrage_lesen("AC/AC 400VAC 10kVA 3-phasig")
     assert a.spannung == 230 and a.erkannt[0] == "U = 400 V (L-L) → 230 V je Phase"
     assert Q.anfrage_lesen("AC/AC 400VAC 10kVA").spannung == 400          # ohne Drehstrom-Angabe bleibt es
+
+
+def test_reste_alter_updates_werden_entfernt(tmp_path):
+    from eps_produktsuche import aktualisierung as A
+    for n in ("EPS-Produktsuche-TEST.exe", "EPS-Produktsuche-TEST.alt103405.exe", "EPS-Produktsuche-v1.5.0.exe",
+              "EPS-Produktsuche-TEST.alt.exe", "Notizen.alt1.exe"):
+        (tmp_path / n).write_text("x")
+    for d in ("EPS-Produktsuche-TEST-Ordner", "EPS-Produktsuche-TEST-Ordner.alt121726", "EPS-Produktsuche-Daten"):
+        (tmp_path / d).mkdir()
+    (tmp_path / "EPS-Produktsuche-TEST-Ordner.alt121726" / "_internal").mkdir()
+    (tmp_path / "EPS-Produktsuche-TEST-Ordner" / "EPS-Produktsuche.exe").write_text("x")
+    # Ordner-Variante: läuft aus dem Unterordner, räumt im Ordner darüber auf
+    weg = A.reste_entfernen(tmp_path / "EPS-Produktsuche-TEST-Ordner" / "EPS-Produktsuche.exe", versuche=1)
+    assert sorted(weg) == ["EPS-Produktsuche-TEST-Ordner.alt121726", "EPS-Produktsuche-TEST.alt.exe",
+                           "EPS-Produktsuche-TEST.alt103405.exe"]
+    rest = sorted(p.name for p in tmp_path.iterdir())
+    assert rest == ["EPS-Produktsuche-Daten", "EPS-Produktsuche-TEST-Ordner", "EPS-Produktsuche-TEST.exe",
+                    "EPS-Produktsuche-v1.5.0.exe", "Notizen.alt1.exe"]

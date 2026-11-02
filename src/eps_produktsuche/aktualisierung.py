@@ -186,6 +186,46 @@ def test_ersetzen(url: str, fortschritt=None, exe: Path | None = None) -> Path:
     return exe
 
 
+def _programmordner(exe: Path) -> Path:
+    """Ordner mit den EXE-Dateien – bei der Ordner-Variante der Ordner über „EPS-Produktsuche…-Ordner“."""
+    return exe.parent.parent if exe.parent.name.startswith("EPS-Produktsuche") and \
+        exe.parent.name.endswith("-Ordner") else exe.parent
+
+
+_ALT_EXE = re.compile(r"^EPS-Produktsuche[\w.-]*\.alt\d*\.exe$", re.I)
+_ALT_ORDNER = re.compile(r"^EPS-Produktsuche[\w-]*-Ordner\.alt\d*$", re.I)
+
+
+def reste_entfernen(exe: Path | None = None, versuche: int = 15) -> list[str]:
+    """Liegengebliebene Reste früherer Updates löschen: „…TEST.alt123456.exe“, „…-Ordner.alt123456“ (die Datei
+    war beim Austausch gesperrt, weil das Programm lief). Die eigene EXE und der eigene Ordner bleiben."""
+    import shutil
+    exe = Path(exe or exe_pfad()).resolve()
+    ordner = _programmordner(exe)
+    eigener_ordner = exe.parent.resolve()
+    weg: list[str] = []
+    for _ in range(versuche):
+        offen = False
+        try:
+            eintraege = list(ordner.iterdir())
+        except OSError:
+            return weg
+        for p in eintraege:
+            try:
+                if p.is_file() and _ALT_EXE.match(p.name) and p.resolve() != exe:
+                    p.unlink()
+                    weg.append(p.name)
+                elif p.is_dir() and _ALT_ORDNER.match(p.name) and p.resolve() != eigener_ordner:
+                    shutil.rmtree(p)
+                    weg.append(p.name)
+            except OSError:
+                offen = True
+        if not offen:
+            break
+        time.sleep(1)
+    return weg
+
+
 def test_aufraeumen(exe: Path | None = None, versuche: int = 15) -> None:
     exe = Path(exe or exe_pfad())
     for _ in range(versuche):

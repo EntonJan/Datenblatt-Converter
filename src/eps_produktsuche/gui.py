@@ -493,6 +493,8 @@ class App(ctk.CTk):
             threading.Thread(target=aktualisierung.alte_entfernen, daemon=True).start()
         if aktualisierung.ist_exe() and TESTVERSION:
             threading.Thread(target=aktualisierung.test_aufraeumen, daemon=True).start()
+        if aktualisierung.ist_exe():                       # „…alt123456.exe“ / „…-Ordner.alt123456“ von Updates
+            threading.Thread(target=aktualisierung.reste_entfernen, daemon=True).start()
         if update_pruefen:
             self.after(2500, lambda: self.updates_suchen(still=True))
 
