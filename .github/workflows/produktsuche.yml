@@ -69,12 +69,15 @@ jobs:
         if: github.ref == 'refs/heads/main' && steps.version.outputs.neu == 'true'
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force dist\release | Out-Null
+          Copy-Item dist\EPS-Produktsuche.exe dist\release\EPS-Produktsuche.exe
           $env:EPS_ORDNER = "1"
-          $env:EPS_ORDNER_NAME = "EPS-Produktsuche"
+          $env:EPS_ORDNER_NAME = "EPS-Produktsuche-Ordner"
           pyinstaller --noconfirm packaging/eps-produktsuche.spec
-          $p = Start-Process -FilePath "dist\EPS-Produktsuche\EPS-Produktsuche.exe" -ArgumentList "--selbsttest", "$env:RUNNER_TEMP\selbsttest-ordner" -Wait -PassThru
+          $p = Start-Process -FilePath "dist\EPS-Produktsuche-Ordner\EPS-Produktsuche.exe" -ArgumentList "--selbsttest", "$env:RUNNER_TEMP\selbsttest-ordner" -Wait -PassThru
           if ($p.ExitCode -ne 0) { exit 1 }
-          Compress-Archive -Path dist\EPS-Produktsuche -DestinationPath dist\EPS-Produktsuche-Ordner.zip
+          Compress-Archive -Path dist\EPS-Produktsuche-Ordner -DestinationPath dist\release\EPS-Produktsuche-Ordner.zip
+          if (-not (Test-Path dist\release\EPS-Produktsuche.exe)) { Write-Error "EXE fehlt"; exit 1 }
       - name: Release anlegen (nur wenn die Versionsnummer neu ist)
         if: github.ref == 'refs/heads/main' && steps.version.outputs.neu == 'true'
         uses: softprops/action-gh-release@v2
@@ -83,8 +86,9 @@ jobs:
           name: EPS-Produktsuche ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           files: |
-            dist/EPS-Produktsuche.exe
-            dist/EPS-Produktsuche-Ordner.zip
+            dist/release/EPS-Produktsuche.exe
+            dist/release/EPS-Produktsuche-Ordner.zip
+          fail_on_unmatched_files: true
           make_latest: false
       - name: Testversion vom Branch weclapp (Vorabversion, wird vom Selbst-Update ignoriert)
         if: github.ref == 'refs/heads/weclapp'
