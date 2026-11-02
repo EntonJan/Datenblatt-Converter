@@ -1198,9 +1198,9 @@ class App(ctk.CTk):
         return " · ".join(x for x in (nr, self._kunde_name()) if x)
 
     def _vorgang_chip_zeigen(self):
-        titel = self._vorgang_titel()
-        if titel:
-            self.vorgang_chip.configure(text=f"{titel}   ✕")
+        nr = self.nummern.vorhanden(self.vorgang[0]) if self.vorgang else ""
+        if nr:                                         # nur die Nummer – Firmendaten gehören nicht in die Suche
+            self.vorgang_chip.configure(text=f"{nr}   ✕")
             self.vorgang_chip.pack(side="left", padx=(0, 10), before=self.feld)
         else:
             self.vorgang_chip.pack_forget()
