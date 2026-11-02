@@ -226,8 +226,8 @@ class AnfragenSeite(ctk.CTkFrame):
         def fertig(mails, fehler):
             if fehler and "gefunden" in str(fehler) and o.typ == "bestellung":
                 self._anzeigen([], o)                  # neue Ordnerstruktur: wird beim ersten Verschieben angelegt
-                self.status.configure(text=f"„{o.pfad}“ gibt es noch nicht – er wird angelegt, sobald die erste "
-                                           "Bestellung dorthin verschoben wird.")
+                self.status.configure(text=f"„{o.pfad}“ gibt es noch nicht – Einstellungen → „Fehlende Ordner in "
+                                           "Outlook anlegen“, oder er entsteht beim ersten Verschieben.")
                 return
             if fehler:
                 self.status.configure(text=f"Outlook: {fehler}")

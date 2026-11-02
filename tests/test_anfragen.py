@@ -362,3 +362,23 @@ def test_outlook_bestellungen_ordner_anlegen(tmp_path):
         raise AssertionError("Fehler erwartet")
     except outlook.OutlookFehler:
         pass
+
+
+def test_outlook_fehlende_ordner_anlegen():
+    """Knopf „Fehlende Ordner in Outlook anlegen“: Struktur wie bei Enton (Posteingang/Anfragen/… vorhanden)."""
+    from eps_produktsuche.einstellungen import Einstellungen
+    ns = _Namespace()
+    anfragen = ns.eingang.Add("Anfragen")
+    for n in ("Automatisch", "Erledigt", "Selbst prüfen"):
+        anfragen.Add(n)
+    e = Einstellungen(ordner_erledigt="Posteingang/Anfragen/Erledigt")
+    pfade = outlook.benoetigte_ordner(e)
+    assert pfade == ["Posteingang/Anfragen/Automatisch", "Posteingang/Anfragen/Erledigt",
+                     "Posteingang/Anfragen/Selbst prüfen", "Posteingang/Bestellungen/Automatisch",
+                     "Posteingang/Bestellungen/Erledigt", "Posteingang/Bestellungen/Selbst prüfen"]
+    ergebnis = dict(outlook.Outlook(namespace=ns).ordner_anlegen(pfade))
+    assert [p for p, st in ergebnis.items() if st == "angelegt"] == pfade[3:]
+    bestellungen = [k for k in ns.eingang._kinder if k.Name == "Bestellungen"]
+    assert len(bestellungen) == 1 and sorted(k.Name for k in bestellungen[0]._kinder) == \
+        ["Automatisch", "Erledigt", "Selbst prüfen"]
+    assert set(dict(outlook.Outlook(namespace=ns).ordner_anlegen(pfade)).values()) == {"vorhanden"}   # zweiter Klick

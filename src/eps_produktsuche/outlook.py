@@ -135,6 +135,22 @@ class Outlook:
             bester = bester.Folders.Add(name)
         return bester
 
+    def ordner_anlegen(self, pfade: list[str]) -> list[tuple[str, str]]:
+        """Alle Ordner sicherstellen → [(Pfad, "vorhanden" | "angelegt" | Fehlertext)]. Legt nur unter vorhandenen
+        Ordnern an (höchstens zwei Ebenen, siehe ordner), Doppelte werden einmal behandelt."""
+        ergebnis = []
+        for pfad in dict.fromkeys(p.strip().strip("/") for p in pfade if p and p.strip()):
+            try:
+                self.ordner(pfad)
+                ergebnis.append((pfad, "vorhanden"))
+            except OutlookFehler:
+                try:
+                    self.ordner(pfad, anlegen=True)
+                    ergebnis.append((pfad, "angelegt"))
+                except Exception as e:  # noqa: BLE001 – z. B. keine Rechte im gemeinsamen Postfach
+                    ergebnis.append((pfad, str(e)))
+        return ergebnis
+
     def ordner_waehlen(self) -> str:
         """Outlook-eigenen Ordnerdialog öffnen → Pfad im Format der Einstellungen („Postfach/Posteingang/…“) oder ""."""
         f = self.ns.PickFolder()
@@ -229,6 +245,18 @@ class Outlook:
         except Exception as e:  # noqa: BLE001
             raise OutlookFehler("Die Mail wurde nicht mehr gefunden – evtl. schon verschoben oder gelöscht.") from e
         item.Delete()
+
+
+def benoetigte_ordner(einstellungen) -> list[str]:
+    """Alle Ordner, die die eingestellte Struktur braucht: die Lese-Ordner, je Art das Erledigt-Ziel und bei
+    gemeinsamen Postfächern „In Bearbeitung“."""
+    pfade = []
+    for o in einstellungen.anfrageordner:
+        pfade.append(o.pfad)
+        pfade.append(unterordner(o.pfad, einstellungen.erledigt_fuer(o.typ)))
+        if o.gemeinsam:
+            pfade.append(unterordner(o.pfad, einstellungen.ordner_in_bearbeitung))
+    return list(dict.fromkeys(pfade))
 
 
 def unterordner(pfad: str, name: str) -> str:

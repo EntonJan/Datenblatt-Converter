@@ -489,6 +489,11 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         self.erledigt_b = tk.StringVar()
         self.bearbeitung = tk.StringVar()
         self.domains = tk.StringVar()
+        ok = ctk.CTkFrame(g, fg_color="transparent")
+        ok.pack(fill="x", padx=18, pady=(8, 2))
+        TH.knopf(ok, "+ Fehlende Ordner in Outlook anlegen", self.ordner_anlegen, height=32).pack(side="left")
+        self.ordner_status = TH.text(ok, "", 12, farbe=TH.GRAU, anchor="w", justify="left", wraplength=360)
+        self.ordner_status.pack(side="left", padx=10, fill="x", expand=True)
         self._zeile(g, "Erledigte Anfragen nach", "Name = Unterordner, mit „/“ = fester Ordner",
                     TH.eingabe(g, textvariable=self.erledigt, width=300))
         self._zeile(g, "Erledigte Bestellungen nach", "z. B. Posteingang/Bestellungen/Erledigt",
@@ -638,6 +643,53 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
                 messagebox.showerror("Einstellungen", f"Outlook: {ergebnis['fehler']}", parent=self)
             elif ergebnis.get("pfad"):
                 var.set(ergebnis["pfad"])
+
+        threading.Thread(target=lauf, daemon=True).start()
+        self.after(150, abfragen)
+
+    def _formular_einstellungen(self):
+        """Einstellungen so, wie sie gerade im Formular stehen (noch nicht gespeichert)."""
+        from .einstellungen import Einstellungen
+        e = Einstellungen()
+        e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "automatisch" else "pruefen",
+                                         g.get(), "bestellung" if t.get() == "Bestellungen" else "anfrage")
+                           for p, a, g, t in self.zeilen if p.get().strip()]
+        e.ordner_erledigt = self.erledigt.get().strip() or "Erledigt"
+        e.ordner_erledigt_bestellung = self.erledigt_b.get().strip()
+        e.ordner_in_bearbeitung = self.bearbeitung.get().strip() or "In Bearbeitung"
+        return e
+
+    def ordner_anlegen(self):
+        """Alle Ordner der eingestellten Struktur in Outlook anlegen (fehlende) – nur auf Klick."""
+        from . import outlook
+        if not outlook.verfuegbar():
+            self.ordner_status.configure(text="Klassisches Outlook ist auf diesem Rechner nicht verfügbar.")
+            return
+        pfade = outlook.benoetigte_ordner(self._formular_einstellungen())
+        self.ordner_status.configure(text=f"Prüfe {len(pfade)} Ordner …")
+        ergebnis: dict = {}
+
+        def lauf():
+            try:
+                with outlook.Outlook() as ol:
+                    ergebnis["liste"] = ol.ordner_anlegen(pfade)
+            except Exception as ex:  # noqa: BLE001
+                ergebnis["fehler"] = ex
+            ergebnis["fertig"] = True
+
+        def abfragen():
+            if not ergebnis.get("fertig"):
+                self.after(150, abfragen)
+                return
+            if "fehler" in ergebnis:
+                self.ordner_status.configure(text=f"Outlook: {ergebnis['fehler']}")
+                return
+            liste = ergebnis["liste"]
+            neu = [p for p, st in liste if st == "angelegt"]
+            fehler = [f"{p}: {st}" for p, st in liste if st not in ("angelegt", "vorhanden")]
+            text = (f"Angelegt: {', '.join(neu)}" if neu else "Alle Ordner sind schon vorhanden.") + \
+                (f"\nNicht möglich: {'; '.join(fehler)}" if fehler else "")
+            self.ordner_status.configure(text=text, text_color=TH.ORANGE if fehler else TH.GRUEN)
 
         threading.Thread(target=lauf, daemon=True).start()
         self.after(150, abfragen)
