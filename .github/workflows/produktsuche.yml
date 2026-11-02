@@ -65,6 +65,16 @@ jobs:
           "tag=produktsuche-v$v" >> $env:GITHUB_OUTPUT
           git fetch --tags --quiet
           if (git tag -l "produktsuche-v$v") { "neu=false" >> $env:GITHUB_OUTPUT } else { "neu=true" >> $env:GITHUB_OUTPUT }
+      - name: Ordner-Variante bauen (schnellerer Start, für das Selbst-Update)
+        if: github.ref == 'refs/heads/main' && steps.version.outputs.neu == 'true'
+        shell: pwsh
+        run: |
+          $env:EPS_ORDNER = "1"
+          $env:EPS_ORDNER_NAME = "EPS-Produktsuche"
+          pyinstaller --noconfirm packaging/eps-produktsuche.spec
+          $p = Start-Process -FilePath "dist\EPS-Produktsuche\EPS-Produktsuche.exe" -ArgumentList "--selbsttest", "$env:RUNNER_TEMP\selbsttest-ordner" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { exit 1 }
+          Compress-Archive -Path dist\EPS-Produktsuche -DestinationPath dist\EPS-Produktsuche-Ordner.zip
       - name: Release anlegen (nur wenn die Versionsnummer neu ist)
         if: github.ref == 'refs/heads/main' && steps.version.outputs.neu == 'true'
         uses: softprops/action-gh-release@v2
@@ -72,7 +82,9 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: EPS-Produktsuche ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          files: dist/EPS-Produktsuche.exe
+          files: |
+            dist/EPS-Produktsuche.exe
+            dist/EPS-Produktsuche-Ordner.zip
           make_latest: false
       - name: Testversion vom Branch weclapp (Vorabversion, wird vom Selbst-Update ignoriert)
         if: github.ref == 'refs/heads/weclapp'

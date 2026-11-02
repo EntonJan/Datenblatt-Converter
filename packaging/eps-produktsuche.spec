@@ -31,7 +31,7 @@ splash = Splash(str(ROOT / "assets" / "splash.png"), binaries=a.binaries, datas=
 import os
 
 if os.environ.get("EPS_ORDNER") == "1":
-    # Ordner-Variante (schneller Start: kein Entpacken bei jedem Start). Nur Testkanal, als ZIP.
+    # Ordner-Variante (schneller Start: kein Entpacken bei jedem Start), als ZIP im Release.
     exe = EXE(
         pyz, a.scripts, splash, [],
         exclude_binaries=True,
@@ -40,7 +40,8 @@ if os.environ.get("EPS_ORDNER") == "1":
         console=False,
         upx=False,
     )
-    coll = COLLECT(exe, splash.binaries, a.binaries, a.datas, upx=False, name="EPS-Produktsuche-TEST-Ordner")
+    coll = COLLECT(exe, splash.binaries, a.binaries, a.datas, upx=False,
+                   name=os.environ.get("EPS_ORDNER_NAME", "EPS-Produktsuche-TEST-Ordner"))
 else:
     exe = EXE(
         pyz, a.scripts, splash, splash.binaries, a.binaries, a.datas, [],

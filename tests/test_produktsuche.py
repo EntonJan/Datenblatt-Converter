@@ -731,6 +731,7 @@ def test_reste_alter_updates_werden_entfernt(tmp_path):
         (tmp_path / d).mkdir()
     (tmp_path / "EPS-Produktsuche-TEST-Ordner.alt121726" / "_internal").mkdir()
     (tmp_path / "EPS-Produktsuche-TEST-Ordner" / "EPS-Produktsuche.exe").write_text("x")
+    (tmp_path / "EPS-Produktsuche-TEST-Ordner" / "_internal").mkdir()
     # Ordner-Variante: läuft aus dem Unterordner, räumt im Ordner darüber auf
     weg = A.reste_entfernen(tmp_path / "EPS-Produktsuche-TEST-Ordner" / "EPS-Produktsuche.exe", versuche=1)
     assert sorted(weg) == ["EPS-Produktsuche-TEST-Ordner.alt121726", "EPS-Produktsuche-TEST.alt.exe",
@@ -738,3 +739,40 @@ def test_reste_alter_updates_werden_entfernt(tmp_path):
     rest = sorted(p.name for p in tmp_path.iterdir())
     assert rest == ["EPS-Produktsuche-Daten", "EPS-Produktsuche-TEST-Ordner", "EPS-Produktsuche-TEST.exe",
                     "EPS-Produktsuche-v1.5.0.exe", "Notizen.alt1.exe"]
+
+
+def test_update_waehlt_ordner_zip_und_installiert_ordner(tmp_path, monkeypatch):
+    import io
+    import zipfile
+    from eps_produktsuche import aktualisierung as A
+    rel = [{"tag_name": "produktsuche-v99.0.0", "assets": [
+        {"name": "EPS-Produktsuche.exe", "browser_download_url": "https://x/EPS-Produktsuche.exe"},
+        {"name": "EPS-Produktsuche-Ordner.zip", "browser_download_url": "https://x/EPS-Produktsuche-Ordner.zip"}]}]
+    assert A.neueste(releases=rel, ordner=False)[1].endswith(".exe")
+    assert A.neueste(releases=rel, ordner=True)[1].endswith("Ordner.zip")
+    alt = [{"tag_name": "produktsuche-v99.0.0", "assets": rel[0]["assets"][:1]}]
+    assert A.neueste(releases=alt, ordner=True)[1].endswith(".exe")       # ältere Releases ohne ZIP
+    # laufende Ordner-Variante 1.0.0 in <basis>/EPS-Produktsuche-v1.0.0/
+    basis = tmp_path
+    lauf = basis / "EPS-Produktsuche-v1.0.0"
+    (lauf / "_internal").mkdir(parents=True)
+    (lauf / "EPS-Produktsuche.exe").write_text("alt")
+    (basis / "EPS-Produktsuche-Daten").mkdir()
+    puffer = io.BytesIO()
+    with zipfile.ZipFile(puffer, "w") as z:
+        z.writestr("EPS-Produktsuche/EPS-Produktsuche.exe", "neu")
+        z.writestr("EPS-Produktsuche/_internal/x.dll", "d")
+
+    def laden(url, ziel, fortschritt=None):
+        ziel.write_bytes(puffer.getvalue())
+        return ziel
+    monkeypatch.setattr(A, "herunterladen", laden)
+    neu = A.ordner_installieren("https://x/EPS-Produktsuche-Ordner.zip", "EPS-Produktsuche-v99.0.0",
+                                exe=lauf / "EPS-Produktsuche.exe")
+    assert neu == basis / "EPS-Produktsuche-v99.0.0" / "EPS-Produktsuche.exe" and neu.read_text() == "neu"
+    assert sorted(p.name for p in basis.iterdir()) == ["EPS-Produktsuche-Daten", "EPS-Produktsuche-v1.0.0",
+                                                         "EPS-Produktsuche-v99.0.0"]
+    # die neue Version räumt den alten Ordner weg (eigene Version > 1.0.0)
+    weg = A.alte_ordner_entfernen(exe=neu, versuche=1)
+    assert weg == ["EPS-Produktsuche-v1.0.0"]
+    assert sorted(p.name for p in basis.iterdir()) == ["EPS-Produktsuche-Daten", "EPS-Produktsuche-v99.0.0"]

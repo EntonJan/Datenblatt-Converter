@@ -5,6 +5,11 @@ lädt das Programm „EPS-Produktsuche-v<Version>.exe“ in den Programmordner, 
 entfernt beim Start ältere „EPS-Produktsuche*.exe“ im selben Ordner (eine laufende EXE kann Windows nicht löschen).
 Die Shopdaten im Ordner „EPS-Produktsuche-Daten“ bleiben erhalten. Keine Admin-Rechte nötig.
 
+Ordner-Variante (ab 1.5.1): Jedes Release hat zusätzlich „EPS-Produktsuche-Ordner.zip“ (startet schneller, weil
+nichts bei jedem Start entpackt wird). Läuft das Programm schon als Ordner (neben der EXE liegt „_internal“) oder ist
+ORDNER_KANAL eingeschaltet, installiert das Update „EPS-Produktsuche-v<Version>\“ neben die alte Version, startet sie,
+und die neue Version löscht beim Start ältere Ordner und EXE-Dateien.
+
 Die Produktsuche-Releases sind nicht „latest“ (das ist der Converter) – deshalb wird die Release-Liste durchsucht.
 """
 from __future__ import annotations
@@ -25,6 +30,10 @@ API = f"https://api.github.com/repos/{REPO}/releases?per_page=40"
 SEITE = f"https://github.com/{REPO}/releases"
 PREFIX = "produktsuche-v"
 ASSET = "EPS-Produktsuche.exe"
+ORDNER_ASSET = "EPS-Produktsuche-Ordner.zip"
+# Schalter: True = auch die Einzel-EXE wechselt beim nächsten Update auf die Ordner-Variante (schnellerer Start).
+ORDNER_KANAL = False
+_ORDNER_MUSTER = re.compile(r"^EPS-Produktsuche-v(\d+(?:\.\d+){0,2})$", re.I)
 _MUSTER = re.compile(r"^EPS-Produktsuche(?:-v(\d+(?:\.\d+){0,2}))?\.exe$", re.I)
 
 
@@ -37,8 +46,24 @@ def _anfrage(url: str, timeout: float):
     return urllib.request.urlopen(req, timeout=timeout)
 
 
-def neueste(timeout: float = 6.0, releases: list | None = None) -> tuple[str, str] | None:
-    """(Version, Download-URL) der neuesten Produktsuche, falls neuer als die laufende – sonst None (auch offline)."""
+def ist_ordner_variante(exe: Path | None = None) -> bool:
+    """Läuft die Ordner-Variante (PyInstaller onedir: „_internal“ neben der EXE)?"""
+    exe = Path(exe or exe_pfad())
+    return (exe.parent / "_internal").is_dir()
+
+
+def _ordner_gewuenscht() -> bool:
+    return ist_exe() and (ist_ordner_variante() or ORDNER_KANAL)
+
+
+def _asset(rel: dict, name: str) -> str:
+    return next((a.get("browser_download_url", "") for a in rel.get("assets", []) if a.get("name") == name), "")
+
+
+def neueste(timeout: float = 6.0, releases: list | None = None, ordner: bool | None = None) -> tuple[str, str] | None:
+    """(Version, Download-URL) der neuesten Produktsuche, falls neuer als die laufende – sonst None (auch offline).
+    URL der ZIP (Ordner-Variante), wenn gewünscht und vorhanden, sonst der EXE."""
+    ordner = _ordner_gewuenscht() if ordner is None else ordner
     if releases is None:
         try:
             with _anfrage(API, timeout) as r:
@@ -50,7 +75,7 @@ def neueste(timeout: float = 6.0, releases: list | None = None) -> tuple[str, st
         tag = rel.get("tag_name", "")
         if not tag.startswith(PREFIX) or rel.get("draft") or rel.get("prerelease"):
             continue
-        url = next((a.get("browser_download_url", "") for a in rel.get("assets", []) if a.get("name") == ASSET), "")
+        url = (ordner and _asset(rel, ORDNER_ASSET)) or _asset(rel, ASSET)
         version = tag[len(PREFIX):]
         if url and (beste is None or tupel(version) > tupel(beste[0])):
             beste = (version, url)
@@ -99,7 +124,7 @@ def alte_entfernen(ordner: Path | None = None, eigene: Path | None = None, versu
     """Löscht ältere EPS-Produktsuche*.exe (auch die unnummerierte „EPS-Produktsuche.exe“) im Programmordner.
     Läuft eine alte Version noch, wird einige Sekunden lang erneut versucht."""
     eigene = (eigene or exe_pfad()).resolve()
-    ordner = ordner or eigene.parent
+    ordner = ordner or _programmordner(eigene)
     meine = tupel(__version__)
     geloescht: list[str] = []
     for _ in range(versuche):
@@ -136,6 +161,8 @@ def starten(ziel: Path) -> None:
 # sich selbst; die normale Version und ihr Update-Kanal bleiben unberührt.
 TEST_PREFIX = "produktsuche-test-"
 TEST_ASSET = "EPS-Produktsuche-TEST.exe"
+TEST_ORDNER_ASSET = "EPS-Produktsuche-TEST-Ordner.zip"
+_TEST_ORDNER_MUSTER = re.compile(r"^EPS-Produktsuche-TEST-(?:Ordner|b(\d+))$", re.I)
 
 
 def build() -> int:
@@ -147,8 +174,11 @@ def build() -> int:
         return 0
 
 
-def neueste_test(timeout: float = 6.0, releases: list | None = None, eigener_build: int | None = None):
-    """(Buildnummer, Download-URL) der neuesten Testversion, falls neuer als die laufende – sonst None."""
+def neueste_test(timeout: float = 6.0, releases: list | None = None, eigener_build: int | None = None,
+                 ordner: bool | None = None):
+    """(Buildnummer, Download-URL) der neuesten Testversion, falls neuer als die laufende – sonst None.
+    Läuft die Ordner-Variante, die URL der Ordner-ZIP."""
+    ordner = (ist_exe() and ist_ordner_variante()) if ordner is None else ordner
     if releases is None:
         try:
             with _anfrage(API, timeout) as r:
@@ -161,7 +191,7 @@ def neueste_test(timeout: float = 6.0, releases: list | None = None, eigener_bui
         tag = rel.get("tag_name", "")
         if not tag.startswith(TEST_PREFIX) or rel.get("draft") or not tag[len(TEST_PREFIX):].isdigit():
             continue
-        url = next((a.get("browser_download_url", "") for a in rel.get("assets", []) if a.get("name") == TEST_ASSET), "")
+        url = (ordner and _asset(rel, TEST_ORDNER_ASSET)) or _asset(rel, TEST_ASSET)
         nr = int(tag[len(TEST_PREFIX):])
         if url and nr > eigener and (beste is None or nr > beste[0]):
             beste = (nr, url)
@@ -187,9 +217,66 @@ def test_ersetzen(url: str, fortschritt=None, exe: Path | None = None) -> Path:
 
 
 def _programmordner(exe: Path) -> Path:
-    """Ordner mit den EXE-Dateien – bei der Ordner-Variante der Ordner über „EPS-Produktsuche…-Ordner“."""
-    return exe.parent.parent if exe.parent.name.startswith("EPS-Produktsuche") and \
-        exe.parent.name.endswith("-Ordner") else exe.parent
+    """Ordner mit den EXE-Dateien bzw. Programmordnern – bei der Ordner-Variante der Ordner darüber."""
+    return exe.parent.parent if ist_ordner_variante(exe) else exe.parent
+
+
+def ordner_installieren(url: str, zielname: str, fortschritt=None, exe: Path | None = None) -> Path:
+    """Ordner-ZIP laden und als „<Programmordner>/<zielname>/“ auspacken. Gibt die neue EXE zurück.
+    Die laufende Version bleibt unangetastet (Windows sperrt ihren Ordner) – die neue räumt sie beim Start weg."""
+    import shutil
+    import zipfile
+    basis = _programmordner(Path(exe or exe_pfad()).resolve())
+    ziel = basis / zielname
+    zip_datei = herunterladen(url, basis / f"{zielname}.zip", fortschritt)
+    tmp = basis / f"{zielname}.entpacken"
+    try:
+        shutil.rmtree(tmp, ignore_errors=True)
+        with zipfile.ZipFile(zip_datei) as z:
+            z.extractall(tmp)
+        kandidaten = [p.parent for p in tmp.rglob("EPS-Produktsuche.exe") if (p.parent / "_internal").is_dir()]
+        if not kandidaten:
+            raise IOError("Die ZIP enthält keine EPS-Produktsuche.exe mit _internal-Ordner")
+        if ziel.exists():
+            shutil.rmtree(ziel)
+        kandidaten[0].rename(ziel)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        zip_datei.unlink(missing_ok=True)
+    return ziel / "EPS-Produktsuche.exe"
+
+
+def alte_ordner_entfernen(exe: Path | None = None, test: bool = False, versuche: int = 15) -> list[str]:
+    """Ältere Programmordner löschen: normal „EPS-Produktsuche-v<ältere Version>“, Testkanal „…-TEST-b<kleinerer
+    Build>“ und „…-TEST-Ordner“. Nie den eigenen Ordner, nie Daten."""
+    import shutil
+    exe = Path(exe or exe_pfad()).resolve()
+    eigener = exe.parent.resolve()
+    basis = _programmordner(exe)
+    meine, mein_build = tupel(__version__), build()
+    weg: list[str] = []
+    for _ in range(versuche):
+        offen = False
+        for p in basis.iterdir() if basis.is_dir() else []:
+            if not p.is_dir() or p.resolve() == eigener:
+                continue
+            if test:
+                m = _TEST_ORDNER_MUSTER.match(p.name)
+                alt = bool(m) and (m.group(1) is None or int(m.group(1)) < mein_build)
+            else:
+                m = _ORDNER_MUSTER.match(p.name)
+                alt = bool(m) and tupel(m.group(1)) < meine
+            if not alt:
+                continue
+            try:
+                shutil.rmtree(p)
+                weg.append(p.name)
+            except OSError:
+                offen = True
+        if not offen:
+            break
+        time.sleep(1)
+    return weg
 
 
 _ALT_EXE = re.compile(r"^EPS-Produktsuche[\w.-]*\.alt\d*\.exe$", re.I)

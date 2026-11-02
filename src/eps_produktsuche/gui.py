@@ -495,6 +495,8 @@ class App(ctk.CTk):
             threading.Thread(target=aktualisierung.test_aufraeumen, daemon=True).start()
         if aktualisierung.ist_exe():                       # „…alt123456.exe“ / „…-Ordner.alt123456“ von Updates
             threading.Thread(target=aktualisierung.reste_entfernen, daemon=True).start()
+        if aktualisierung.ist_exe() and aktualisierung.ist_ordner_variante():     # ältere Programmordner
+            threading.Thread(target=lambda: aktualisierung.alte_ordner_entfernen(test=TESTVERSION), daemon=True).start()
         if update_pruefen:
             self.after(2500, lambda: self.updates_suchen(still=True))
 
@@ -1779,7 +1781,13 @@ class App(ctk.CTk):
 
         def lauf():
             try:
-                ergebnis["exe"] = aktualisierung.test_ersetzen(url, lambda g, t: stand.update(geladen=g, gesamt=t))
+                melden = lambda g, t: stand.update(geladen=g, gesamt=t)   # noqa: E731
+                if url.lower().endswith(".zip"):           # Ordner-Variante: neuer Ordner …-TEST-b<Build>
+                    nr = re.search(r"produktsuche-test-(\d+)", url)
+                    ergebnis["exe"] = aktualisierung.ordner_installieren(
+                        url, f"EPS-Produktsuche-TEST-b{nr.group(1) if nr else 'neu'}", melden)
+                else:
+                    ergebnis["exe"] = aktualisierung.test_ersetzen(url, melden)
             except Exception as e:  # noqa: BLE001
                 ergebnis["fehler"] = e
             ergebnis["fertig"] = True
@@ -1808,7 +1816,8 @@ class App(ctk.CTk):
         self.after(200, abfragen)
 
     def _update_laden(self, version: str, url: str):
-        ziel = aktualisierung.zieldatei(aktualisierung.exe_pfad().parent, version)
+        ordner = url.lower().endswith(".zip")               # Ordner-Variante: „EPS-Produktsuche-v<Version>\“
+        ziel = None if ordner else aktualisierung.zieldatei(aktualisierung.exe_pfad().parent, version)
         stand: dict = {"geladen": 0, "gesamt": 0}
         ergebnis: dict = {}
         self.fortschritt.configure(mode="determinate", value=0, maximum=100)
@@ -1819,7 +1828,10 @@ class App(ctk.CTk):
 
         def lauf():
             try:
-                aktualisierung.herunterladen(url, ziel, fortschritt)
+                if ordner:
+                    ergebnis["exe"] = aktualisierung.ordner_installieren(url, f"EPS-Produktsuche-v{version}", fortschritt)
+                else:
+                    ergebnis["exe"] = aktualisierung.herunterladen(url, ziel, fortschritt)
             except Exception as e:  # noqa: BLE001
                 ergebnis["fehler"] = e
             ergebnis["fertig"] = True
@@ -1837,9 +1849,9 @@ class App(ctk.CTk):
                                                "Das Programm läuft normal weiter.", parent=self)
                 return
             try:
-                aktualisierung.starten(ziel)
+                aktualisierung.starten(ergebnis["exe"])
             except OSError as e:
-                messagebox.showerror("Update", f"Neue Version geladen, konnte aber nicht gestartet werden:\n{e}\n\n{ziel}",
+                messagebox.showerror("Update", f"Neue Version geladen, konnte aber nicht gestartet werden:\n{e}\n\n{ergebnis['exe']}",
                                      parent=self)
                 return
             self.destroy()
