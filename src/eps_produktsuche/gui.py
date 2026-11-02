@@ -986,7 +986,9 @@ class App(ctk.CTk):
                                      "springt der Link direkt zum Gerät.")
 
     def _alternative_zu(self) -> str:
-        if self.fremd and self.eingabe.get().strip() == self.fremd_anfrage:
+        """Nur bei Vergleichsgeräten: „Alternative zu …“. Ein zu versorgendes Gerät (Waschmaschine) ist keine
+        Alternative – dann zeigen Empfehlung und Gegenüberstellung die Anforderung."""
+        if self.fremd and self.fremd.rolle != "verbraucher" and self.eingabe.get().strip() == self.fremd_anfrage:
             return self.fremd.hersteller_typ or self.fremd.modell
         return ""
 

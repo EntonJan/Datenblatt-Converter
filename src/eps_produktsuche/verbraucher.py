@@ -80,9 +80,10 @@ class Verbraucher:
         p = self.bedarf
         if p:
             teile.append(f"{_z(round(p / 1000, 2))}kVA" if p >= 1000 else f"{_z(p)}VA")
-        frequenzen = sorted(set(self.frequenzen) | {50, 60}) if self.zweck == "pruefung" else self.frequenzen
-        if frequenzen and frequenzen != [50]:
-            teile += [f"{f}Hz" for f in frequenzen]
+        if self.zweck == "pruefung":                   # Prüfung: beide Netzfrequenzen einstellbar
+            teile += [f"{f}Hz" for f in sorted(set(self.frequenzen) | {50, 60})]
+        elif len(self.frequenzen) == 1 and self.frequenzen != [50]:
+            teile.append(f"{self.frequenzen[0]}Hz")     # nur 60 Hz (USA) oder 400 Hz – mehrere = Maschine kann beides
         if self.versorgung == "dc" and self.dc_spannung:
             teile.append(f"Eingang {_z(self.dc_spannung)}VDC")
         return " ".join(teile)
@@ -132,7 +133,10 @@ class Verbraucher:
         if not self.spannung:
             h.append("Nicht gefunden: Anschlussspannung – bitte von Hand ins Suchfeld schreiben (z. B. „230VAC“).")
         if not (self.leistung or self.strom):
-            h.append("Nicht gefunden: Leistung/Stromaufnahme – bitte von Hand ergänzen (z. B. „3kVA“).")
+            grenze = (f" Die Absicherung {_z(self.absicherung)} A erlaubt höchstens ≈ "
+                      f"{_z(round(self.spannung * self.absicherung * self.phasen / 1000, 1))} kVA (Obergrenze, kein Bedarf)."
+                      if self.absicherung and self.spannung else "")
+            h.append("Nicht gefunden: Leistung/Stromaufnahme – bitte von Hand ergänzen (z. B. „3kVA“)." + grenze)
         if not self.frequenzen:
             h.append("Klären: Netzfrequenz der Maschine (50 oder 60 Hz) nicht im Datenblatt.")
         return h
@@ -183,30 +187,43 @@ def _zeilen(text: str, muster: str) -> list[str]:
     return [z for z in (text or "").splitlines() if re.search(muster, z, re.I)]
 
 
+_L_N = {380: 220, 400: 230, 415: 240, 440: 254, 480: 277, 690: 400}   # Außenleiter → Strang (L-N)
+
+
+def _strang(u: float) -> float:
+    """Drehstrom-Außenleiterspannung (L-L) → Strangspannung (L-N), so führen die Shopdaten AC-Geräte."""
+    return float(_L_N.get(round(u), round(u / 3 ** 0.5)))
+
+
+_V = r"\s*V(?:AC|olt|\s*AC|\s*~)?(?![A-Za-z])(?!\s*DC)"   # „230 V“, „230VAC“, „230 V AC“, „230 V~“, nicht „VA“/„V DC“
+
+
 def _spannung(text: str) -> tuple[float | None, str, int]:
     """(Spannung L-N, Originaltext, Phasen) aus den Anschlussangaben."""
-    kandidaten = _zeilen(text, r"spannung|voltage|anschluss|connection|netz|supply|power|elektr|rated|\bV\b") or \
+    kandidaten = _zeilen(text, r"spannung|voltage|anschluss|connection|netz|supply|power|elektr|rated|\dV") or \
         (text or "").splitlines()
     t_alle = " ".join(kandidaten)
     drei = bool(re.search(r"3\s*N?\s*~|3\s*/\s*N|3N\s*AC|\b3\s*ph|three[- ]phase|dreiphasig|drehstrom|400\s*V\s*3|"
                           r"3\s*x\s*400|\b(380|400|415|480)\s*V", t_alle, re.I))
     for z in kandidaten:
-        m = re.search(_ZAHL + r"\s*(?:-|–|/|\.\.\.|bis|to)\s*" + _ZAHL + r"\s*V(?!A)", z)
-        einzel = re.search(_ZAHL + r"\s*V(?:olt)?\b(?!A|DC|\s*DC)", z)
+        m = re.search(_ZAHL + r"\s*(?:-|–|/|\.\.\.|bis|to)\s*" + _ZAHL + _V, z)
+        einzel = re.search(_ZAHL + _V, z)
         if m:
             a, b = _f(m.group(1)), _f(m.group(2))
             if 80 <= a <= 690 and 80 <= b <= 690:
                 lo, hi = min(a, b), max(a, b)
                 if 1.6 <= hi / lo <= 1.85:            # 400/230 V: Außenleiter/Strang
                     return lo, m.group(0), 3
+                if lo >= 380:                          # 380-415 V Drehstrom
+                    return _strang(400 if lo <= 400 <= hi else hi), m.group(0), 3
                 u = 230.0 if lo <= 230 <= hi else (120.0 if lo <= 120 <= hi else hi)
-                return u, m.group(0), 3 if drei and u >= 380 else 1
+                return u, m.group(0), 1
         if einzel:
             u = _f(einzel.group(1))
             if 80 <= u <= 690:
-                if u >= 380 or (drei and re.search(r"3|three|drei|dreh", z, re.I)):
-                    return round(u / 3 ** 0.5, 0) if u >= 380 else u, einzel.group(0), 3
-                return u, einzel.group(0), 1
+                if u >= 380:
+                    return _strang(u), einzel.group(0), 3
+                return u, einzel.group(0), 3 if drei and re.search(r"3\s*N?\s*~|3/N|drehstrom|three", z, re.I) else 1
     return None, "", 3 if drei else 1
 
 
@@ -248,9 +265,10 @@ def _strom(text: str, muster: str) -> float | None:
 
 
 def _normalisieren(text: str) -> str:
-    """Tabellenzeilen „Name in Einheit Wert“ → „Name Wert Einheit“; Standby-/Verbrauchszeilen fallen weg."""
+    """Tabellenzeilen „Name in Einheit Wert“ → „Name Wert Einheit“; Standby-/Verbrauchszeilen fallen weg;
+    Tausenderpunkte („2.300 W“) werden entfernt."""
     zeilen = []
-    for z in (text or "").splitlines():
+    for z in re.sub(r"(?<=\d)\.(?=\d{3}(?!\d))", "", text or "").splitlines():
         if _NEBENSACHE.search(z):
             continue
         m = _TABELLE.match(z.strip())
@@ -288,16 +306,21 @@ def aus_dict(d: dict | None) -> Verbraucher | None:
 
 # ------------------------------------------------------------------------ Angaben aus der Kundenmail
 
-_DC = re.compile(r"batterie|akku|battery|bordnetz|dc[- ]?netz|gleichspannung|gleichstrom|\bdc\b|solar|photovoltaik|"
-                 r"pv[- ]anlage|lkw|fahrzeug|wohnmobil|boot|schiff|vehicle|truck", re.I)
-_NETZ = re.compile(r"steckdose|stromnetz|\bnetz(?:spannung|anschluss)?\b|drehstrom|generator|aggregat|mains|grid|"
-                   r"wall socket|\b(?:110|115|120|208|220|230|240|380|400|415|480)\s*v(?:olt)?\b(?!\s*dc)", re.I)
+# Schiffe haben meist ein AC-Bordnetz (400 V/60 Hz) – darum hier nur Fahrzeuge mit typischem 12/24-V-Netz
+_DC = re.compile(r"batterie|akku|battery|dc[- ]?netz|gleichspannung|gleichstrom|\d\s*v\s*dc|dc[- ]bordnetz|"
+                 r"solar|photovoltaik|pv[- ]anlage|lkw|wohnmobil|camper|truck", re.I)
+# Nur Wörter für das, was der Kunde HAT – eine bloße Spannungsangabe („Die Maschine hat 230 V“) zählt nicht
+_NETZ = re.compile(r"steckdose|stromnetz|\bnetz(?:spannung|anschluss|es)?\b|drehstrom|generator|aggregat|"
+                   r"\bmains\b|\bgrid\b|wall socket|ac[- ]bordnetz|landstrom|shore power", re.I)
 _ZWECK = [("notstrom", re.compile(r"notstrom|\busv\b|\bups\b|stromausfall|netzausfall|backup|emergency power", re.I)),
-          ("pruefung", re.compile(r"prüf|\btest|export|zertifizier|abnahme|labor|messung|simulier|nachbild|"
+          # „Bitte prüfen Sie …“ ist kein Prüfzweck
+          ("pruefung", re.compile(r"prüfstand|prüfplatz|prüfling|prüfung(?:en)?\b(?! (?:ihres|unserer|des angebot))|"
+                                  r"\b(?:zu|wir|ich|müssen|muss|sollen|soll|wollen|will|möchten|möchte) (?:\S+ ){0,6}?(?:prüfen|testen)\b|"
+                                  r"\btests?\b|testlauf|export|zertifizier|abnahme|labor|simulier|nachbild|"
                                   r"verschiedene(?:n)? (?:spannung|frequenz|länder)|andere(?:n)? (?:spannung|frequenz)",
                                   re.I)),
           ("dauer", re.compile(r"dauerbetrieb|dauerhaft|rund um die uhr|24/7|täglich|im (?:alltag|einsatz)|"
-                               r"fahrzeug|wohnmobil|boot|schiff|container|baustelle|camping", re.I))]
+                               r"fahrzeug|wohnmobil|camper|boot|schiff|container|baustelle|camping", re.I))]
 
 
 def _saetze(text: str) -> list[str]:

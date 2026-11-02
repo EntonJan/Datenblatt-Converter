@@ -143,3 +143,35 @@ def test_angaben_aus_der_kundenmail():
     v = V.lesen(TABELLE)
     assert V.aus_mail(v, "Anbei das Datenblatt, bitte um ein Angebot.") == []
     assert (v.versorgung, v.zweck) == ("unbekannt", "unbekannt")
+
+
+def test_fehlerquellen_datenblatt():
+    """Schreibweisen aus der Fehlersuche vom 02.11.2026."""
+    def suche(text):
+        v = V.lesen(text)
+        v.versorgung = "netz"
+        return v, v.anfrage()
+    assert suche("Waschmaschine\nAnschluss 230VAC 50Hz\nLeistungsaufnahme 2300 W")[1] == "AC/AC 230VAC 3,45kVA"
+    assert suche("Waschmaschine\nNennspannung 230 V\nAnschlusswert 2.300 W")[0].leistung == 2300      # Tausenderpunkt
+    v, a = suche("Industriewaschmaschine\nAnschlussspannung 380-415 V 3N~\nAnschlusswert 9 kW")
+    assert (v.spannung, v.phasen) == (230, 3)                                                       # L-L → L-N
+    assert suche("Trockner\nAnschluss 400 V 3N~ 50 Hz\nGesamtanschlusswert 7,5 kW")[0].spannung == 230
+    assert suche("Kompressor\nSpannung 230 V 50/60 Hz\nLeistungsaufnahme 1,5 kW")[1] == "AC/AC 230VAC 3kVA"  # kann beides
+    assert suche("Washer\nRated voltage 120 V 60 Hz\nPower consumption 1100 W")[1] == "AC/AC 120VAC 1,65kVA 60Hz"
+    assert suche("Pumpe\nNetzanschluss 230 V~ 50 Hz\nLeistungsaufnahme 750 W")[0].spannung == 230
+    v, _ = suche("Waschmaschine\nSpannung 230 V\nAbsicherung 10 A")
+    assert any("höchstens ≈ 2,3 kVA" in h for h in v.hinweise())
+
+
+def test_fehlerquellen_mail():
+    def lesen(mail):
+        v = V.lesen("Waschmaschine\nSpannung 230 V\nAnschlusswert 2 kW")
+        V.aus_mail(v, mail)
+        return v.versorgung, v.dc_spannung, v.zweck
+    assert lesen("Bitte prüfen Sie, ob Sie dafür ein passendes Gerät haben.") == ("unbekannt", None, "unbekannt")
+    assert lesen("Wir möchten die Maschine mit 60 Hz testen.")[2] == "pruefung"
+    assert lesen("Die Maschine soll auf unserem Schiff laufen.")[0] == "unbekannt"        # Schiff: oft AC-Bordnetz
+    assert lesen("Die Waschmaschine hat 230 V. Was können Sie anbieten?")[0] == "unbekannt"
+    assert lesen("Wir haben hier nur 120 V Steckdosen (USA).")[0] == "netz"
+    assert lesen("Für unser Wohnmobil, Bordnetz 12 V.")[:2] == ("dc", 12)
+    assert lesen("Versorgung erfolgt aus 48 V DC.")[:2] == ("dc", 48)
