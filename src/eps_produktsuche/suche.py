@@ -382,6 +382,8 @@ def textsuche(geraete: list[Geraet], text: str) -> list[Geraet]:
     worte = [w.lower() for w in re.split(r"\s+", text.strip()) if w]
     if not worte:
         return []
+    if len(worte) > 1 and all(re.fullmatch(r"\d{6}", w) for w in worte):   # mehrere Bestellnummern: jede einzeln
+        return [g for g in geraete if g.bestellnummer in worte]
     return [g for g in geraete if all(w in f"{g.bestellnummer} {g.name} {g.serie}".lower() for w in worte)]
 
 

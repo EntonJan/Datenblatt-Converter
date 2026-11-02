@@ -184,7 +184,18 @@ class Outlook:
                     inner = msg_lesen(ziel, anhang_ordner / f"eingebettet{j}")
                     m.eingebettet.append(inner)
                     m.anhaenge.extend(inner.anhaenge)
+                    m.daten = m.daten or inner.daten
                 except Exception:  # noqa: BLE001 – Weiterleitung als Text funktioniert trotzdem
+                    pass
+                continue
+            if name.lower().endswith(".json") and m.daten is None:   # EPS-Anfrage.json (Homepage/Konfigurator)
+                anhang_ordner.mkdir(parents=True, exist_ok=True)
+                ziel = anhang_ordner / _sicherer_name(name)
+                try:
+                    a.SaveAsFile(str(ziel))
+                    from .anfrage_format import ist_anfrage_json
+                    m.daten = ist_anfrage_json(name, ziel.read_bytes())
+                except Exception:  # noqa: BLE001 – dann gilt der Textblock
                     pass
                 continue
             if name.lower().endswith(ANHANG_ENDUNGEN):

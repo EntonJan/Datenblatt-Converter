@@ -1,0 +1,27 @@
+{
+  "format": "eps-anfrage",
+  "version": 1,
+  "anfrage_nr": "EPS-20261102-120112-A1B2",
+  "erstellt": "2026-11-02T12:01:12+01:00",
+  "quelle": "anfrageformular",
+  "sprache": "de",
+  "kunde": {
+    "firma": "Beispiel Labor",
+    "rechtsform": "AG",
+    "anrede": "Frau",
+    "vorname": "Erika",
+    "nachname": "Beispiel",
+    "email": "e.beispiel@example.org",
+    "telefon": "",
+    "strasse": "",
+    "plz": "80331",
+    "ort": "München",
+    "land": "DE",
+    "ust_id": ""
+  },
+  "positionen": [],
+  "suche": {"text": "", "geraetetyp": "", "filter": {}},
+  "wunschtermin": "ASAP",
+  "nachricht": "Wir suchen ein Netzgerät 0-80 V, 3 kW im 19\"-Gehäuse.\nMenge: 3 Stück\n--- Ende ---\nDanke!",
+  "datenschutz": true
+}

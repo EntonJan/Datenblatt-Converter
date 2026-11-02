@@ -1,0 +1,26 @@
+--- EPS-Anfrage ---
+Format: EPS-Anfrage 1
+Anfrage-Nr.: EPS-20261102-130500-0C9D
+Erstellt: 2026-11-02T13:05:00+01:00
+Quelle: Produktkonfigurator
+Sprache: en
+Firma: Demo Power
+Rechtsform: Ltd
+Anrede: Mr
+Vorname: John
+Nachname: Example
+E-Mail: john@example.co.uk
+Telefon: +44 20 1234 5678
+Straße: 1 Example Street
+PLZ: EC1A 1BB
+Ort: London
+Land: GB
+USt-IdNr.: GB123456789
+Position 1: 400151 · EPS/PV15TT-FB AC/AC Frequenzwandler · Menge 1
+Suche: AC/AC 230VAC 13,5kVA 3-phasig
+Gerätetyp: AC/AC
+Filter: phases=3
+Wunschtermin: 2027-01-15
+Datenschutz: zugestimmt
+Nachricht: 
+--- Ende ---

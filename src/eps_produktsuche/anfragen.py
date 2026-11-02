@@ -309,7 +309,7 @@ class AnfragenSeite(ctk.CTkFrame):
         self.termin.set(e.termin)
         self.suchtext.set(e.suchtext)
         self.text.delete("1.0", "end")
-        kopf = f"{m.betreff}\n\n"
+        kopf = f"{m.betreff}\n" + (f"Anfrage-Nr. {e.anfrage_nr}\n" if e.anfrage_nr else "") + "\n"
         if e.weitergeleitet_von:
             kopf += f"▶ Weitergeleitet von {e.weitergeleitet_von}" + (f":\n{e.notiz}\n" if e.notiz else "\n") + \
                 "\n▶ Original-Anfrage des Kunden:\n"
@@ -321,11 +321,14 @@ class AnfragenSeite(ctk.CTkFrame):
         hinweis = (f"Weitergeleitet von {e.weitergeleitet_von} – Kunde aus der Original-Mail. " if e.weitergeleitet_von
                    else "") + (("Bitte prüfen: " + " · ".join(e.unsicher)) if e.unsicher else "")
         hinweis = hinweis or \
-            ("Homepage-Formular – vollständig erkannt" if e.formular else "")
+            ((f"EPS-Anfrage {e.anfrage_nr} – vollständig erkannt" if e.anfrage_nr else "Homepage-Formular – vollständig erkannt") if e.formular else "")
         self.unsicher.configure(text=hinweis, fg_color=TH.GELB if e.unsicher else (TH.GRUEN_BG if hinweis else "transparent"),
                                 text_color=TH.GELB_TEXT if e.unsicher else TH.GRUEN)
-        self.herkunft.configure(text="Homepage-Formular" if e.formular else ("weitergeleitet" if e.weitergeleitet_von
-                                                                            else "aus Mail/Signatur"))
+        herkunft = {"produktkonfigurator": f"Produktkonfigurator · {len(e.positionen)} Artikel" if e.positionen
+                    else "Produktkonfigurator", "anfrageformular": "Homepage-Anfrage", "shop": "Shop"}
+        self.herkunft.configure(text=herkunft.get(e.quelle) or ("Homepage-Formular" if e.formular else
+                                                                 ("weitergeleitet" if e.weitergeleitet_von
+                                                                  else "aus Mail/Signatur")))
         self.herkunft.pack(side="left", padx=10)
         o = self.ordner_von.get(i)
         self.knopf_erledigt.configure(state="normal" if o else "disabled")

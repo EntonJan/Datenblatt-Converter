@@ -69,6 +69,11 @@ class Erkennung:
     unsicher: list[str] = field(default_factory=list)   # Felder, die geprüft werden sollten
     weitergeleitet_von: str = "" # interne Weiterleitung (z. B. vom Chef) – Kunde stammt aus der Original-Mail
     notiz: str = ""              # Text des Weiterleitenden über der Original-Mail
+    # EPS-Anfrage (Homepage-Anfragefeld, Produktkonfigurator): vom Kunden gewählte Artikel und seine Suche
+    positionen: list[dict] = field(default_factory=list)   # [{"bestellnummer", "name", "menge"}]
+    anfrage_nr: str = ""
+    quelle: str = ""             # "produktkonfigurator" / "anfrageformular" / "shop" / "" (normale Mail)
+    sprache: str = ""
 
 
 INTERN = ("eps-germany.de",)     # eigene Domains: Mails von hier sind Weiterleitungen, nie der Kunde
@@ -412,7 +417,49 @@ def original_mail(mail: Mail, intern=INTERN) -> tuple[Mail | None, str]:
     return None, ""
 
 
+def _aus_anfrage(d: dict, mail: Mail) -> Erkennung:
+    """EPS-Anfrage (JSON-Anhang oder Textblock, siehe anfrage_format) → Erkennung."""
+    kd = d["kunde"]
+    k = Kunde(firma=kd["firma"], rechtsform=kd["rechtsform"], anrede=kd["anrede"], vorname=kd["vorname"],
+              nachname=kd["nachname"], email=(kd["email"] or mail.absender_email).lower(), telefon=kd["telefon"],
+              strasse=kd["strasse"], plz=kd["plz"], ort=kd["ort"], ust_id=re.sub(r"\s", "", kd["ust_id"]))
+    if not k.rechtsform and k.firma:
+        m = _RF.search(k.firma)
+        if m:
+            k.firma, k.rechtsform = k.firma[:m.start()].strip(" ,"), m.group(1)
+    land = kd["land"]
+    k.land = land.upper() if re.fullmatch(r"[A-Za-z]{2}", land) else LAENDER.get(land.lower(), land)
+    k.web = "www." + k.email.split("@")[-1] if "@" in k.email and k.email.split("@")[-1] not in FREEMAIL else ""
+    pos = d["positionen"]
+    zeilen = [f"{p['menge']} × {p['name'] or p['bestellnummer']} ({p['bestellnummer']})" for p in pos]
+    e = Erkennung(kunde=k, anfrage="\n\n".join(x for x in ("\n".join(zeilen), d["nachricht"]) if x).strip(),
+                  formular=True, termin=d["wunschtermin"] or "ASAP", positionen=pos, anfrage_nr=d["anfrage_nr"],
+                  quelle=d["quelle"] or "anfrageformular", sprache=d["sprache"])
+    if len(pos) == 1:
+        e.menge = pos[0]["menge"]
+    if d["suche"]["text"]:
+        e.suchtext = d["suche"]["text"]
+    elif pos:
+        e.suchtext = " ".join(p["bestellnummer"] for p in pos if p["bestellnummer"])
+    else:                                                 # reine Textanfrage: Werte, Menge, Termin aus der Nachricht
+        e.suchtext = suchtext(d["nachricht"])
+        mm = _MENGE.search(d["nachricht"])
+        if mm:
+            e.menge = int(mm.group(1) or mm.group(2))
+        tm = _TERMIN.search(d["nachricht"])
+        if tm and e.termin == "ASAP" and not re.search(r"(?i)asap|so schnell|as soon", tm.group(1)):
+            e.termin = tm.group(1).strip()
+        if not e.suchtext:
+            e.unsicher.append("Keine technischen Werte in der Anfrage – Text prüfen")
+    e.unsicher += [f for f, v in (("Firma", k.firma), ("E-Mail", k.email), ("Land", k.land)) if not v]
+    return e
+
+
 def erkennen(mail: Mail, intern=INTERN) -> Erkennung:
+    from . import anfrage_format
+    struktur = getattr(mail, "daten", None) or anfrage_format.aus_text(mail.text)
+    if struktur is not None:
+        return _aus_anfrage(struktur, mail)
     werte = _formular(mail.text)
     if werte is not None:
         k = Kunde(firma=werte.get("firma", ""), rechtsform=werte.get("rechtsform", ""), anrede=werte.get("anrede", ""),

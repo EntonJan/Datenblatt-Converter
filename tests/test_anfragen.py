@@ -334,3 +334,13 @@ def test_interne_mail_ohne_original():
     assert not e.weitergeleitet_von and e.unsicher[0].startswith("Absender ist EPS-intern")
     assert e.suchtext == "60V 100A"
     assert K.ist_intern("x@eps-germany.de") and K.ist_intern("x@mail.eps-germany.de") and not K.ist_intern("x@eps.de")
+
+
+def test_outlook_json_anhang_eps_anfrage(tmp_path):
+    from pathlib import Path
+    ns = _Namespace()
+    auto = ns.eingang.Add("Anfragen").Add("Automatisch")
+    daten = (Path(__file__).parent / "eps-anfrage" / "1_konfigurator_anfragekorb.json").read_bytes()
+    _Item(auto, "Anfrage über die Homepage", "Neue Anfrage", [("EPS-Anfrage.json", daten)])
+    m = outlook.Outlook(namespace=ns).mails("Posteingang/Anfragen/Automatisch", tmp_path)[0]
+    assert m.daten["positionen"][1]["bestellnummer"] == "200961" and m.anhaenge == []

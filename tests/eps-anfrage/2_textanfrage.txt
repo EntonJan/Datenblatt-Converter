@@ -1,0 +1,25 @@
+--- EPS-Anfrage ---
+Format: EPS-Anfrage 1
+Anfrage-Nr.: EPS-20261102-120112-A1B2
+Erstellt: 2026-11-02T12:01:12+01:00
+Quelle: Anfrageformular
+Sprache: de
+Firma: Beispiel Labor
+Rechtsform: AG
+Anrede: Frau
+Vorname: Erika
+Nachname: Beispiel
+E-Mail: e.beispiel@example.org
+Telefon: 
+Straße: 
+PLZ: 80331
+Ort: München
+Land: DE
+USt-IdNr.: 
+Wunschtermin: ASAP
+Datenschutz: zugestimmt
+Nachricht: Wir suchen ein Netzgerät 0-80 V, 3 kW im 19"-Gehäuse.
+Menge: 3 Stück
+– Ende –
+Danke!
+--- Ende ---

@@ -1,0 +1,29 @@
+{
+  "format": "eps-anfrage",
+  "version": 1,
+  "anfrage_nr": "EPS-20261102-130500-0C9D",
+  "erstellt": "2026-11-02T13:05:00+01:00",
+  "quelle": "produktkonfigurator",
+  "sprache": "en",
+  "kunde": {
+    "firma": "Demo Power",
+    "rechtsform": "Ltd",
+    "anrede": "Mr",
+    "vorname": "John",
+    "nachname": "Example",
+    "email": "john@example.co.uk",
+    "telefon": "+44 20 1234 5678",
+    "strasse": "1 Example Street",
+    "plz": "EC1A 1BB",
+    "ort": "London",
+    "land": "GB",
+    "ust_id": "GB123456789"
+  },
+  "positionen": [
+    {"bestellnummer": "400151", "name": "EPS/PV15TT-FB AC/AC Frequenzwandler", "menge": 1}
+  ],
+  "suche": {"text": "AC/AC 230VAC 13,5kVA 3-phasig", "geraetetyp": "AC/AC", "filter": {"phases": 3}},
+  "wunschtermin": "2027-01-15",
+  "nachricht": "",
+  "datenschutz": true
+}

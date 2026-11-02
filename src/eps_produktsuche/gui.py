@@ -1133,10 +1133,11 @@ class App(ctk.CTk):
             return
         mail, erk = self.vorgang
         menge = erk.menge or 1
+        je_artikel = {p["bestellnummer"]: p["menge"] for p in getattr(erk, "positionen", []) if p.get("bestellnummer")}
         geraete = []
         for g in auswahl:
             if g.bestellnummer not in [x[0] for x in geraete]:
-                geraete.append((g.bestellnummer, g.name, menge))
+                geraete.append((g.bestellnummer, g.name, je_artikel.get(g.bestellnummer, menge)))
         self._merken("In Weclapp vorbereitet", [self._treffer_zu(g) for g in auswahl])
         WeclappDialog(self, erk.kunde, geraete, erk.termin, notiz=(f"Anfrage: {mail.betreff}" if mail.betreff else ""))
 
@@ -1150,14 +1151,41 @@ class App(ctk.CTk):
         self.fremd_rahmen.pack_forget()
         self.typ.set("automatisch")
         self.seite_zeigen("suche")
+        k = erkennung.kunde
+        if erkennung.positionen:                      # Anfragekorb: Kunde hat die Geräte schon gewählt
+            self.eingabe.set(erkennung.suchtext)
+            n = self._positionen_markieren(erkennung.positionen)
+            self.info.configure(text=f"Anfrage {erkennung.anfrage_nr} von {k.firmenname or k.email} übernommen – "
+                                     f"{len(erkennung.positionen)} Artikel vom Kunden gewählt, {n} davon markiert")
+            self.feld.focus_set()
+            return
         if mail.anhaenge:
             self.datenblatt_laden(mail.anhaenge[0], mailtext=f"{mail.betreff}\n{erkennung.anfrage or mail.text}")
         else:
             self.eingabe.set(erkennung.suchtext)
-        k = erkennung.kunde
         self.info.configure(text=f"Anfrage von {k.firmenname or k.email} übernommen"
                                  + (f" – {len(mail.anhaenge)} Anhang/Anhänge" if mail.anhaenge else ""))
         self.feld.focus_set()
+
+    def _positionen_markieren(self, positionen: list[dict]) -> int:
+        """Vom Kunden gewählte Artikel in Karten und Liste auswählen. Gibt die Zahl der gefundenen zurück."""
+        nummern = {p["bestellnummer"] for p in positionen if p.get("bestellnummer")}
+        gefunden = set()
+        for nr, (t, _, _) in enumerate(self.karten_treffer):
+            if t.g.bestellnummer in nummern:
+                self.karten_gewaehlt.add(nr)
+                gefunden.add(t.g.bestellnummer)
+        self._karten_zeigen()
+        sel = [iid for iid, i in self.iid_index.items() if self.zeilen_geraete[i].bestellnummer in nummern]
+        for iid in sel:
+            gefunden.add(self.zeilen_geraete[self.iid_index[iid]].bestellnummer)
+            eltern = self.tv.parent(iid)
+            if eltern:
+                self.tv.item(eltern, open=True)
+        if sel:
+            self.tv.selection_set(sel)
+            self.tv.see(sel[0])
+        return len(gefunden)
 
     def verlauf_uebernehmen(self, e: dict):
         from . import datenblatt
