@@ -25,8 +25,11 @@ a = Analysis(
     excludes=["pytest"],
 )
 pyz = PYZ(a.pure)
+# Startbild: erscheint sofort beim Doppelklick, während die EXE sich entpackt (schließt das Programm selbst)
+splash = Splash(str(ROOT / "assets" / "splash.png"), binaries=a.binaries, datas=a.datas, text_pos=None,
+                minify_script=True, always_on_top=False)
 exe = EXE(
-    pyz, a.scripts, a.binaries, a.datas, [],
+    pyz, a.scripts, splash, splash.binaries, a.binaries, a.datas, [],
     name="EPS-Produktsuche",
     icon=str(ROOT / "assets" / "icon.ico"),
     console=False,

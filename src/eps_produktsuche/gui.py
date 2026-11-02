@@ -516,16 +516,17 @@ class App(ctk.CTk):
         self.fortschritt = TH.Fortschritt(haupt)
         inhalt = ctk.CTkFrame(haupt, fg_color="transparent")
         inhalt.grid(row=1, column=0, sticky="nsew", padx=24, pady=(16, 16))
+        inhalt.rowconfigure(0, weight=1)
+        inhalt.columnconfigure(0, weight=1)
         self.inhalt = inhalt
         self._suchseite(inhalt)
-        from .anfragen import AnfragenSeite
-        from .seiten import VerlaufSeite, GegenueberstellungSeite, EinstellungenSeite
-        self.seiten["anfragen"] = AnfragenSeite(inhalt, self)
-        self.seiten["verlauf"] = VerlaufSeite(inhalt, self)
-        self.seiten["vergleich"] = GegenueberstellungSeite(inhalt, self)
-        self.seiten["einstellungen"] = EinstellungenSeite(inhalt, self)
+        self._stapeln(self.seiten["suche"])
         self._experimentell_zeigen()
         self.seite_zeigen("suche")
+        # Die übrigen Seiten erst nach dem ersten Zeichnen bauen, nacheinander – der Start wartet nicht darauf,
+        # und der erste Wechsel ist trotzdem sofort da
+        self.after(400, self._seiten_vorbereiten)
+        self.after(50, startbild_schliessen)                 # Fenster steht – Startbild weg
 
         self.eingabe.trace_add("write", lambda *a: self.suchen())
         self.max_par.trace_add("write", lambda *a: self.after_idle(self.suchen))
@@ -684,17 +685,53 @@ class App(ctk.CTk):
         self.info.pack(fill="x", side="bottom", pady=(6, 0))
         self.tabelle_rahmen.pack(fill="both", expand=True)
 
+    SEITEN = ("anfragen", "verlauf", "vergleich", "einstellungen")
+
+    def seite(self, key: str):
+        """Seite holen – beim ersten Mal bauen. Alle Seiten liegen übereinander im selben Rasterfeld; ein Wechsel
+        hebt nur die gewünschte nach vorn (kein neues Einpassen ins Fenster)."""
+        if key not in self.seiten:
+            from .anfragen import AnfragenSeite
+            from .seiten import VerlaufSeite, GegenueberstellungSeite, EinstellungenSeite
+            klasse = {"anfragen": AnfragenSeite, "verlauf": VerlaufSeite, "vergleich": GegenueberstellungSeite,
+                      "einstellungen": EinstellungenSeite}[key]
+            seite = klasse(self.inhalt, self)
+            self.seiten[key] = seite
+            self._stapeln(seite)
+            if key == "vergleich":
+                e = self.einstellungen
+                seite.weclapp_zeigen(e.experimentell and bool(e.weclapp_adresse))
+            aktiv = self.seiten.get(getattr(self, "aktive_seite", "suche"))
+            if aktiv is not None and aktiv is not seite:
+                self._rahmen(aktiv).tkraise()
+        return self.seiten[key]
+
+    @staticmethod
+    def _rahmen(seite):
+        return getattr(seite, "_parent_frame", seite)          # CTkScrollableFrame steckt in einem Rahmen
+
+    def _stapeln(self, seite):
+        self._rahmen(seite).grid(row=0, column=0, sticky="nsew")
+
+    def _seiten_vorbereiten(self):
+        offen = [k for k in self.SEITEN if k not in self.seiten]
+        if offen:
+            self.seite(offen[0])
+            self.after(120, self._seiten_vorbereiten)
+
     def seite_zeigen(self, key: str):
-        for k, s in self.seiten.items():
-            if k != key:
-                s.pack_forget()
-        self.seiten[key].pack(fill="both", expand=True)
+        seite = self.seite(key)
+        self._rahmen(seite).tkraise()
+        if not hasattr(self, "_nav_schrift"):
+            self._nav_schrift = (TH.schrift(14), TH.schrift(14, True))
         for k, b in self.nav.items():
             aktiv = k == key
-            b.configure(fg_color=TH.CHIP if aktiv else "transparent", text_color=TH.LINK if aktiv else TH.TEXT,
-                        font=TH.schrift(14, aktiv))
+            if aktiv != getattr(b, "_aktiv", None):
+                b._aktiv = aktiv
+                b.configure(fg_color=TH.CHIP if aktiv else "transparent", text_color=TH.LINK if aktiv else TH.TEXT,
+                            font=self._nav_schrift[aktiv])
         self.aktive_seite = key
-        zeigen = getattr(self.seiten[key], "zeigen", None)
+        zeigen = getattr(seite, "zeigen", None)
         if zeigen:
             zeigen()
         if key == "suche":
@@ -1011,7 +1048,7 @@ class App(ctk.CTk):
             self.info.configure(text="Bitte zuerst bis zu vier Geräte auswählen (Karten „Auswählen“ oder Strg + Klick).")
             return
         fremd = self.fremd if self._alternative_zu() else None
-        self.seiten["vergleich"].setzen(tr, self.anfrage(), fremd, self._kunde_name())
+        self.seite("vergleich").setzen(tr, self.anfrage(), fremd, self._kunde_name())
         self.seite_zeigen("vergleich")
 
     def gegenueberstellung(self, sprache: str, tr: list[Q.Treffer] | None = None, a: Q.Anfrage | None = None,
@@ -1166,7 +1203,7 @@ class App(ctk.CTk):
         mails = [p for p in alle if p.suffix.lower() in (".msg", ".eml")]
         if mails and self.einstellungen.experimentell:
             self.seite_zeigen("anfragen")
-            self.after(10, lambda: self.seiten["anfragen"].dateien_laden(mails))
+            self.after(10, lambda: self.seite("anfragen").dateien_laden(mails))
             return "copy"
         pfade = [p for p in alle if p.suffix.lower() in (".pdf", ".docx", ".docm")]
         if pfade:
@@ -1613,9 +1650,19 @@ class App(ctk.CTk):
         self.after(200, abfragen)
 
 
+def startbild_schliessen() -> None:
+    """Startbild der EXE (PyInstaller-Splash, erscheint sofort beim Doppelklick) schließen."""
+    try:
+        import pyi_splash  # noqa: PLC0415 – gibt es nur in der fertigen EXE
+        pyi_splash.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["--selbsttest"]:
+        startbild_schliessen()
         from .selbsttest import selbsttest
         return selbsttest(Path(argv[1]) if len(argv) > 1 else Path.cwd())
     App().mainloop()

@@ -85,8 +85,16 @@ class VerlaufSeite(ctk.CTkFrame):
         self.eintraege: list[dict] = []
 
     def zeigen(self):
-        self.fuellen()
-        self._zahlen()
+        stand = []
+        for pfad in (self.app.verlauf_pfad, self.app.pfad):       # Verlauf und Shopdaten (Kachel „Shopdaten …“)
+            try:
+                stand.append(pfad.stat().st_mtime)
+            except OSError:
+                stand.append(None)
+        if stand != getattr(self, "_stand", "neu"):
+            self._stand = stand
+            self.fuellen()
+            self._zahlen()
 
     def _zahlen(self):
         z = verlauf.kennzahlen(verlauf.laden(self.app.verlauf_pfad))
@@ -147,13 +155,23 @@ class VerlaufSeite(ctk.CTkFrame):
         i = self._gewaehlt()
         if i is not None and messagebox.askyesno("Verlauf", "Diesen Eintrag löschen?", parent=self):
             verlauf.loeschen(self.app.verlauf_pfad, i)
+            self._stand = "neu"
             self.zeigen()
 
     # ---------------------------------------------------------------- Shop-Änderungen
     def _aenderungen(self) -> dict | None:
+        """Unterschied zum vorigen Stand – zwischengespeichert, bis sich eine der beiden Dateien ändert."""
         vorher_pfad = self.app.pfad.with_name(self.app.pfad.stem + "_vorher.json")
-        if not vorher_pfad.exists():
+        try:
+            schluessel = (str(self.app.pfad), vorher_pfad.stat().st_mtime, self.app.pfad.stat().st_mtime,
+                          len(self.app.geraete))
+        except OSError:
             return None
+        if getattr(self, "_cache", (None,))[0] != schluessel:
+            self._cache = (schluessel, self._aenderungen_berechnen(vorher_pfad))
+        return self._cache[1]
+
+    def _aenderungen_berechnen(self, vorher_pfad) -> dict | None:
         alt, _ = shop.laden(vorher_pfad)
         if not alt:
             return None
@@ -491,7 +509,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         unten = ctk.CTkFrame(self, fg_color="transparent")
         unten.pack(fill="x", pady=(14, 4))
         TH.knopf(unten, "Speichern", self.speichern, haupt=True, width=140).pack(side="left")
-        TH.knopf(unten, "Verwerfen", self.zeigen).pack(side="left", padx=8)
+        TH.knopf(unten, "Verwerfen", self.fuellen).pack(side="left", padx=8)
         self.gespeichert = TH.text(unten, "", 12, farbe=TH.GRUEN)
         self.gespeichert.pack(side="left", padx=8)
         self.zeigen()
@@ -537,6 +555,11 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
             self.zeilen.append((pfad, art, gem))
 
     def zeigen(self):
+        if not getattr(self, "_gefuellt", False):
+            self.fuellen()
+
+    def fuellen(self):
+        self._gefuellt = True
         e = self.app.einstellungen
         self.dunkel_var.set(e.dunkelmodus)
         self.experimentell.set(e.experimentell)
