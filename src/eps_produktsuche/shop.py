@@ -65,6 +65,8 @@ class Geraet:
     seite_url: str = ""             # Shopseite, auf der das Gerät steht (Serie/Folgeseite) + Sprungmarke zur Zeile
     u_eingang: float | None = None  # DC-Nenneingangsspannung (Wechselrichter, DC/DC), aus der Typbezeichnung
     phasen: int | None = None       # AC-Ausgang: 3 = dreiphasig, 1 = einphasig, None = nicht angegeben
+    herkunft: str = ""              # "" = Shop, "shop+selectline" = mit SelectLine abgeglichen, "selectline" = ohne Shopseite
+    hersteller_nr: str = ""         # Hersteller-/Lieferanten-Artikelnummer (SelectLine)
 
     @property
     def kann_senken(self) -> bool:

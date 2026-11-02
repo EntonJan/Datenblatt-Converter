@@ -466,7 +466,7 @@ class App(ctk.CTk):
         self.shop_pfad = self.pfad                # Shopdaten (auch Grundlage für den Weclapp-Demo-Modus)
         if self.einstellungen.datenquelle == "weclapp":
             self.pfad = self.pfad.with_name("weclappdaten.json")
-        self.geraete, self.stand = shop.laden(self.pfad)
+        self.geraete, self.stand = self._mit_selectline(*shop.laden(self.pfad))
         self.treffer: list[Q.Treffer] = []
         self.zeilen_geraete: list[shop.Geraet] = []
         self.iid_index: dict[str, int] = {}
@@ -1074,7 +1074,8 @@ class App(ctk.CTk):
         typ = g.geraetetyp + (" (bidir.)" if g.bidirektional and g.geraetetyp != shop.LAST else "") + \
             {3: " 3~", 1: " 1~"}.get(g.phasen, "")
         self.tv.insert(eltern, "end", iid=iid, tags=tags, open=False,
-                       values=[self._vorgang_spalte, bew, g.bestellnummer, g.name, typ, g.spannung or "–", g.strom or "–", g.leistung or "–",
+                       values=[self._vorgang_spalte, bew, g.bestellnummer,
+                               g.name + ("  · nicht im Shop" if g.herkunft == "selectline" else ""), typ, g.spannung or "–", g.strom or "–", g.leistung or "–",
                                reserve, hinweis])
         return iid
 
@@ -1218,6 +1219,19 @@ class App(ctk.CTk):
         self.eingabe.set("")
         self.info.configure(text="")
         self.feld.focus_set()
+
+    # ------------------------------------------------------------------ SelectLine
+    def _mit_selectline(self, geraete, stand):
+        """Shopdaten mit selectline-artikel.csv abgleichen (SelectLine gewinnt). Nur bei Datenquelle Shop."""
+        self.selectline_bericht = None
+        if self.einstellungen.datenquelle == "weclapp" or not geraete:
+            return geraete, stand
+        from . import selectline
+        artikel = selectline.laden_gecacht(self.shop_pfad.parent / selectline.DATEI)
+        if not artikel:
+            return geraete, stand
+        geraete, self.selectline_bericht = selectline.anwenden(geraete, artikel, self.einstellungen.selectline_ohne_shop)
+        return geraete, stand
 
     def _kunde_name(self) -> str:
         if not self.vorgang:
@@ -1533,7 +1547,7 @@ class App(ctk.CTk):
         """Nach Änderung in den Einstellungen: andere Datei laden (shopdaten.json / weclappdaten.json), ggf. neu lesen."""
         self.pfad = self.shop_pfad.with_name("weclappdaten.json") if self.einstellungen.datenquelle == "weclapp" \
             else self.shop_pfad
-        self.geraete, self.stand = shop.laden(self.pfad)
+        self.geraete, self.stand = self._mit_selectline(*shop.laden(self.pfad))
         self.knopf_laden.configure(text=self._quelle("Shop neu einlesen", "Weclapp neu laden"))
         self._status()
         self.suchen()
@@ -1549,7 +1563,9 @@ class App(ctk.CTk):
                 st = datetime.fromisoformat(self.stand).strftime("%d.%m.%Y, %H:%M")
             except ValueError:
                 st = self.stand
-            self.stand_lbl.configure(text=f"{self._quelle('Shopdaten', 'Weclapp')}: {len(self.geraete)} Geräte\nStand {st}")
+            b = getattr(self, "selectline_bericht", None)
+            self.stand_lbl.configure(text=f"{self._quelle('Shopdaten', 'Weclapp')}: {len(self.geraete)} Geräte\nStand {st}"
+                                          + (f"\n{b.text()}" if b else ""))
         else:
             self.stand_lbl.configure(text=self._quelle("Shopdaten: noch nicht eingelesen", "Weclapp: noch nicht geladen"))
 
@@ -1662,9 +1678,10 @@ class App(ctk.CTk):
                 g.phasen = shop.phasen_aus(g)
             self.geraete = neu
             try:
-                shop.speichern(self.geraete, self.pfad)
+                shop.speichern(self.geraete, self.pfad)          # Shopstand ohne SelectLine (für „Shop-Änderungen“)
             except OSError as e:
                 messagebox.showwarning("Shop einlesen", f"Daten gelesen, aber nicht gespeichert:\n{e}")
+            self.geraete, _ = self._mit_selectline(self.geraete, "")
             self.stand = datetime.now().isoformat(timespec="minutes")
             self._status()
             if fehlend:
