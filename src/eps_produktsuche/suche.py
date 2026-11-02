@@ -76,6 +76,7 @@ class Anfrage:
     wasser: bool = False
     frequenzen: list[float] = field(default_factory=list)
     eingang: float | None = None # DC-Eingangsspannung (Wechselrichter, DC/DC), z. B. „Eingang 125VDC“
+    phasen: int | None = None    # 3 = dreiphasiger Ausgang gefordert („3-phasig“, „3ph“, „Drehstrom“)
 
     @property
     def leistung_bedarf(self) -> float | None:
@@ -151,6 +152,8 @@ def anfrage_lesen(text: str) -> Anfrage:
         a.erkannt.append(" / ".join(zahl_text(f, "Hz") for f in a.frequenzen))
     if a.eingang:
         a.erkannt.append(f"Eingang {zahl_text(a.eingang, 'V')} DC")
+    if a.phasen == 3:
+        a.erkannt.append("3-phasig")
     return a
 
 
@@ -169,6 +172,10 @@ def merkmale_lesen(a: Anfrage, tl: str) -> None:
     a.rueckspeisung = bool(re.search(r"rückspeis|ruckspeis|regenerativ|regenerative|energy recovery", tl))
     a.wasser = bool(re.search(r"wassergek(ü|ue)hlt|wasserk(ü|ue)hlung|water.?cool|\bwc\b", tl))
     a.frequenzen = sorted({float(x.replace(",", ".")) for x in re.findall(r"(\d+(?:[.,]\d+)?)\s*hz\b", tl)})
+    if re.search(r"\b3\s*-?\s*phasig|dreiphasig|\b3\s*-?\s*ph\b|\b3\s*n?\s*~|drehstrom|three[- ]phase", tl):
+        a.phasen = 3
+        if not a.ausgang and not a.geraetetyp:
+            a.ausgang = "AC"
     if a.frequenzen and not a.ausgang and not a.geraetetyp:
         a.ausgang = "AC"                           # eine Ausgangsfrequenz gibt es nur bei AC-Ausgängen
 
@@ -246,6 +253,12 @@ def merkmale_pruefen(g: Geraet, a: Anfrage) -> tuple[bool, list[str]]:
             hinweise.append("Wasserkühlung als Option")
         elif w != "ja":
             return False, []
+    if a.phasen == 3:
+        ph = getattr(g, "phasen", None)
+        if ph == 1:
+            return False, []
+        if ph is None:
+            hinweise.append("Phasenzahl nicht im Shop angegeben – prüfen")
     if a.eingang and g.geraetetyp in ("DC/AC", "DC/DC"):
         ue = getattr(g, "u_eingang", None)
         if ue is None:

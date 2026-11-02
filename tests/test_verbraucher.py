@@ -175,3 +175,11 @@ def test_fehlerquellen_mail():
     assert lesen("Wir haben hier nur 120 V Steckdosen (USA).")[0] == "netz"
     assert lesen("Für unser Wohnmobil, Bordnetz 12 V.")[:2] == ("dc", 12)
     assert lesen("Versorgung erfolgt aus 48 V DC.")[:2] == ("dc", 48)
+
+
+def test_drehstrom_verbraucher_sucht_dreiphasig():
+    v = V.lesen(INDUSTRIE)
+    v.versorgung = "netz"
+    a = Q.anfrage_lesen(v.anfrage())
+    assert v.anfrage().endswith("3-phasig") and a.phasen == 3
+    assert not any(h.startswith("Klären: Dreiphasig") for h in v.hinweise())

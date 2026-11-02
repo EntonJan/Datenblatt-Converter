@@ -84,6 +84,8 @@ class Verbraucher:
             teile += [f"{f}Hz" for f in sorted(set(self.frequenzen) | {50, 60})]
         elif len(self.frequenzen) == 1 and self.frequenzen != [50]:
             teile.append(f"{self.frequenzen[0]}Hz")     # nur 60 Hz (USA) oder 400 Hz – mehrere = Maschine kann beides
+        if self.phasen == 3:
+            teile.append("3-phasig")
         if self.versorgung == "dc" and self.dc_spannung:
             teile.append(f"Eingang {_z(self.dc_spannung)}VDC")
         return " ".join(teile)
@@ -128,8 +130,8 @@ class Verbraucher:
             h.append(f"Klären: Anlaufstrom {_z(self.anlaufstrom)} A (≈ {_z(round(s / 1000, 1))} kVA kurzzeitig) – "
                      "Überlastfähigkeit des EPS-Geräts im Datenblatt prüfen.")
         if self.phasen == 3:
-            h.append("Klären: Dreiphasiger Anschluss – Gerät mit dreiphasigem Ausgang (bzw. drei gekoppelte Geräte) "
-                     "wählen; Leistung ist die Summe aller Phasen.")
+            h.append("Dreiphasiger Anschluss: gesucht werden Geräte mit dreiphasigem Ausgang (Leistung = Summe aller "
+                     "Phasen); Geräte ohne Phasenangabe im Shop bleiben mit Hinweis in der Liste.")
         if not self.spannung:
             h.append("Nicht gefunden: Anschlussspannung – bitte von Hand ins Suchfeld schreiben (z. B. „230VAC“).")
         if not (self.leistung or self.strom):

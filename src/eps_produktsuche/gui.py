@@ -427,7 +427,8 @@ class TrefferKarte(ctk.CTkFrame):
         for (w, d), (wert, res) in zip(self.werte, werte):
             w.configure(text=wert)
             d.configure(text=_prozent(res) if res is not None else "nicht gefragt")
-        merkmale = [g.geraetetyp + (" bidirektional" if g.bidirektional and g.geraetetyp != shop.LAST else "")]
+        merkmale = [g.geraetetyp + (" bidirektional" if g.bidirektional and g.geraetetyp != shop.LAST else "")
+                    + {3: " · 3-phasig", 1: " · 1-phasig"}.get(g.phasen, "")]
         merkmale += [x for x in (g.bauart, "wassergekühlt" if g.wasser == "ja" else "", "Netzrückspeisung" if g.rueckspeisung
                                  else "", f"bis {g.parallel_max} parallel" if g.parallel_max else "") if x]
         self.info.configure(text=" · ".join(merkmale))
@@ -930,7 +931,8 @@ class App(ctk.CTk):
         iid = str(len(self.zeilen_geraete))
         self.zeilen_geraete.append(g)
         self.iid_index[iid] = int(iid)
-        typ = g.geraetetyp + (" (bidir.)" if g.bidirektional and g.geraetetyp != shop.LAST else "")
+        typ = g.geraetetyp + (" (bidir.)" if g.bidirektional and g.geraetetyp != shop.LAST else "") + \
+            {3: " 3~", 1: " 1~"}.get(g.phasen, "")
         self.tv.insert(eltern, "end", iid=iid, tags=tags, open=False,
                        values=[bew, g.bestellnummer, g.name, typ, g.spannung or "–", g.strom or "–", g.leistung or "–",
                                reserve, hinweis])
@@ -1439,6 +1441,8 @@ class App(ctk.CTk):
                     self.info.configure(text=f"Neue Shopdaten verworfen: {grund}")
                     self.stand_lbl.configure(text=self.stand_lbl.cget("text") + "\nneues Einlesen verworfen")
                     return
+            for g in neu:
+                g.phasen = shop.phasen_aus(g)
             self.geraete = neu
             try:
                 shop.speichern(self.geraete, self.pfad)

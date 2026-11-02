@@ -233,6 +233,8 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
             fg.hinweise.append(f"Leistung berechnet ({'√3 × U(L-L)' if l_l else '3 × U(L-N)'} × I = {_z(fg.pmax)} VA).")
     _eingang_setzen(fg, volltext)
     fg.merkmale = merkmale(volltext, fg.ac)
+    if drehstrom:
+        fg.merkmale.append("3-phasig")
     if fg.merkmale:
         fg.hinweise.append(_merkmal_hinweis(fg.merkmale, "Datenblatt"))
     ht = w.get("hersteller_typ") or w.get("typbezeichnung")
