@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import tempfile
 import threading
+from dataclasses import dataclass, field
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +29,64 @@ FELDER = [("firma", "Firma"), ("rechtsform", "Rechtsform"), ("anrede", "Anrede")
           ("strasse", "Straße"), ("plz", "PLZ"), ("ort", "Ort"), ("land", "Land (ISO)"), ("web", "Web"),
           ("ust_id", "USt-IdNr.")]
 DATEIEN = "– geöffnete Mail-Dateien –"
+
+
+VORSORTIEREN_MAX = 80
+
+
+@dataclass
+class Vorsortierung:
+    anfragen: int = 0
+    bestellungen: int = 0
+    unsicher: int = 0
+    falsch: list = field(default_factory=list)       # (Ordner, Mail, Erkennung)
+
+    def text(self) -> str:
+        teile = [f"{self.anfragen} Anfrage{'n' if self.anfragen != 1 else ''}",
+                 f"{self.bestellungen} Bestellung{'en' if self.bestellungen != 1 else ''}"]
+        if self.unsicher:
+            teile.append(f"{self.unsicher} unklar")
+        if self.falsch:
+            teile.append(f"{len(self.falsch)} falsch einsortiert")
+        return " · ".join(teile)
+
+
+def vorsortierung(ergebnis, interne_domains=()) -> Vorsortierung:
+    """[(Ordner, [Mail])] → Zählung. Gezählt wird nach erkannter Art, nicht nach Ordner."""
+    v = Vorsortierung()
+    for o, mails in ergebnis:
+        for m in mails:
+            e = K.erkennen(m, tuple(interne_domains))
+            if e.art == "bestellung":
+                v.bestellungen += 1
+            else:
+                v.anfragen += 1
+            if not e.art_sicher:
+                v.unsicher += 1
+            elif e.art != o.typ and not o.gemeinsam:
+                v.falsch.append((o, m, e))
+    return v
+
+
+def _sicher(arbeit, fertig, widget):
+    """Arbeit im Thread; der Tk-Thread fragt nach und ruft fertig(wert, fehler) auf (Tk nie aus dem Thread)."""
+    erg: dict = {}
+
+    def lauf():
+        try:
+            erg["wert"] = arbeit()
+        except Exception as ex:  # noqa: BLE001
+            erg["fehler"] = ex
+        erg["fertig"] = True
+
+    def abfragen():
+        if not erg.get("fertig"):
+            widget.after(200, abfragen)
+        elif widget.winfo_exists():
+            fertig(erg.get("wert"), erg.get("fehler"))
+
+    threading.Thread(target=lauf, daemon=True).start()
+    widget.after(200, abfragen)
 
 
 class AnfragenSeite(ctk.CTkFrame):
@@ -274,6 +333,60 @@ class AnfragenSeite(ctk.CTkFrame):
         kinder = self.tv.get_children()
         if kinder and self.app.aktive_seite == "anfragen":     # Öffnen kann eine Mail verschieben – nur sichtbar
             self.tv.selection_set(kinder[0])
+
+    # ---------------------------------------------------------------- Vorsortieren beim Start
+    def vorsortieren(self):
+        """Alle eingestellten Ordner im Hintergrund lesen und zählen: Anfragen, Bestellungen, falsch einsortiert,
+        unsicher. Verschiebt nichts – das Ergebnis erscheint in der Seitenleiste (App.vorsortierung_zeigen)."""
+        ordner = list(self.app.einstellungen.anfrageordner)
+        if not ordner or not outlook.verfuegbar():
+            return
+        ziel = self.anhang_ordner / ("vorsortieren-" + datetime.now().strftime("%H%M%S"))
+
+        def arbeit():
+            ergebnis = []
+            with outlook.Outlook() as ol:
+                for o in ordner:
+                    try:
+                        ergebnis.append((o, ol.mails(o.pfad, ziel / str(len(ergebnis)), maximal=VORSORTIEREN_MAX)))
+                    except Exception:  # noqa: BLE001 – fehlender Ordner (z. B. Bestellungen noch nicht angelegt)
+                        continue
+            return ergebnis
+
+        def fertig(ergebnis, fehler):
+            if fehler or not ergebnis:
+                return
+            self.vorsortiert = vorsortierung(ergebnis, tuple(self.app.einstellungen.interne_domains))
+            self.app.vorsortierung_zeigen(self.vorsortiert)
+
+        _sicher(arbeit, fertig, self)
+
+    def falsche_verschieben(self, fertig_cb=None):
+        """Alle sicher falsch einsortierten Mails in den Ordner ihrer Art verschieben – nur nach Klick."""
+        v = getattr(self, "vorsortiert", None)
+        if not v or not v.falsch:
+            return
+        auftraege = [(m.quelle, self._zielordner(e.art)) for _, m, e in v.falsch]
+
+        def arbeit():
+            ok = 0
+            with outlook.Outlook() as ol:
+                for quelle, ziel in auftraege:
+                    try:
+                        ol.verschieben(quelle, ziel)
+                        ok += 1
+                    except Exception:  # noqa: BLE001
+                        pass
+            return ok
+
+        def fertig(ok, fehler):
+            v.falsch = []
+            if fertig_cb:
+                fertig_cb(ok or 0, len(auftraege), fehler)
+            if self.geladen:
+                self.laden()
+
+        _sicher(arbeit, fertig, self)
 
     # ---------------------------------------------------------------- Anfrage oder Bestellung
     def _falscher_ordner(self, i: int) -> bool:

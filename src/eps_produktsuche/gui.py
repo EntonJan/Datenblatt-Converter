@@ -526,6 +526,7 @@ class App(ctk.CTk):
         # Die übrigen Seiten erst nach dem ersten Zeichnen bauen, nacheinander – der Start wartet nicht darauf,
         # und der erste Wechsel ist trotzdem sofort da
         self.after(400, self._seiten_vorbereiten)
+        self.after(2500, self._vorsortieren_starten)
         self.after(50, startbild_schliessen)                 # Fenster steht – Startbild weg
 
         self.eingabe.trace_add("write", lambda *a: self.suchen())
@@ -573,6 +574,15 @@ class App(ctk.CTk):
             self.nav[key] = b
         self.badge = ctk.CTkLabel(self.nav["anfragen"], text="", fg_color=CYAN, text_color="#0B2A3A", corner_radius=9,
                                   height=20, width=26, font=TH.schrift(11, True))
+
+        # Vorsortieren: erscheint nach dem Start, wenn die Outlook-Ordner gelesen sind
+        self.sortier_box = ctk.CTkFrame(leiste, fg_color=TH.CHIP, corner_radius=10)
+        self.sortier_lbl = TH.text(self.sortier_box, "", 12, farbe=TH.CHIP_TEXT, anchor="w", justify="left",
+                                   wraplength=190)
+        self.sortier_lbl.pack(fill="x", padx=12, pady=(10, 6))
+        self.sortier_knopf = TH.knopf(self.sortier_box, "", self._falsche_verschieben, haupt=True, height=30)
+        TH.knopf(self.sortier_box, "Ansehen", lambda: self.seite_zeigen("anfragen"), height=30).pack(
+            fill="x", padx=10, pady=(0, 10), side="bottom")
 
         unten = ctk.CTkFrame(leiste, fg_color="transparent")
         unten.pack(side="bottom", fill="x", padx=12, pady=14)
@@ -736,6 +746,36 @@ class App(ctk.CTk):
             zeigen()
         if key == "suche":
             self.feld.focus_set()
+
+    def _vorsortieren_starten(self):
+        e = self.einstellungen
+        if e.experimentell and e.vorsortieren and e.anfrageordner:
+            self.seite("anfragen").vorsortieren()
+
+    def vorsortierung_zeigen(self, v):
+        """Ergebnis von AnfragenSeite.vorsortieren in der Seitenleiste – verschoben wird nur per Klick."""
+        if not (v.anfragen or v.bestellungen):
+            self.sortier_box.pack_forget()
+            return
+        self.sortier_lbl.configure(text="Im Postfach:\n" + v.text())
+        if v.falsch:
+            self.sortier_knopf.configure(text=f"{len(v.falsch)} richtig einsortieren", state="normal")
+            self.sortier_knopf.pack(fill="x", padx=10, pady=(0, 6))
+        else:
+            self.sortier_knopf.pack_forget()
+        self.sortier_box.pack(fill="x", padx=12, pady=(14, 0), after=self.nav_rahmen)
+
+    def _falsche_verschieben(self):
+        self.sortier_knopf.configure(state="disabled", text="Verschiebe …")
+
+        def fertig(ok, gesamt, fehler):
+            self.sortier_knopf.pack_forget()
+            text = self.sortier_lbl.cget("text").split(" · ")
+            text = [t for t in text if "falsch" not in t]
+            meldung = f"{ok} von {gesamt} verschoben" if ok != gesamt else f"{ok} verschoben"
+            self.sortier_lbl.configure(text=" · ".join(text) + f"\n✓ {meldung}")
+
+        self.seite("anfragen").falsche_verschieben(fertig)
 
     def anfragen_anzahl(self, n: int | None):
         if n:

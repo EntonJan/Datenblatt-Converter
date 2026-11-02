@@ -53,6 +53,7 @@ class Einstellungen:
     weclapp_adresse: str = ""                       # z. B. „eps.weclapp.com“; „demo“ = nachgebautes Weclapp
     datenquelle: str = "shop"                       # "shop" oder "weclapp" (Gerätedaten für die Suche)
     dunkelmodus: bool = False
+    vorsortieren: bool = True          # beim Start alle Anfrage-/Bestellordner lesen und zählen (verschiebt nichts)
 
     @staticmethod
     def laden(pfad: Path) -> "Einstellungen":
@@ -62,7 +63,7 @@ class Einstellungen:
             return Einstellungen()
         e = Einstellungen()
         for k in ("experimentell", "ordner_erledigt", "ordner_in_bearbeitung", "preisfrist_monate", "interne_domains",
-                  "weclapp_adresse", "datenquelle", "dunkelmodus", "ordner_erledigt_bestellung"):
+                  "weclapp_adresse", "datenquelle", "dunkelmodus", "ordner_erledigt_bestellung", "vorsortieren"):
             if k in d:
                 setattr(e, k, d[k])
         if isinstance(d.get("anfrageordner"), list):

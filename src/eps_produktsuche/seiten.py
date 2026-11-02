@@ -494,6 +494,11 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         TH.knopf(ok, "+ Fehlende Ordner in Outlook anlegen", self.ordner_anlegen, height=32).pack(side="left")
         self.ordner_status = TH.text(ok, "", 12, farbe=TH.GRAU, anchor="w", justify="left", wraplength=360)
         self.ordner_status.pack(side="left", padx=10, fill="x", expand=True)
+        self.vorsortieren = tk.BooleanVar(value=e.vorsortieren)
+        self._zeile(g, "Beim Start vorsortieren", "Ordner lesen und zählen (Anfragen, Bestellungen, falsch einsortiert) – "
+                                                  "verschoben wird nur per Klick",
+                    ctk.CTkSwitch(g, text="", variable=self.vorsortieren, width=46,
+                                  progress_color=("#52B4D7", "#52B4D7")))
         self._zeile(g, "Erledigte Anfragen nach", "Name = Unterordner, mit „/“ = fester Ordner",
                     TH.eingabe(g, textvariable=self.erledigt, width=300))
         self._zeile(g, "Erledigte Bestellungen nach", "z. B. Posteingang/Bestellungen/Erledigt",
@@ -573,6 +578,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         e = self.app.einstellungen
         self.dunkel_var.set(e.dunkelmodus)
         self.experimentell.set(e.experimentell)
+        self.vorsortieren.set(e.vorsortieren)
         self.quelle.set("Weclapp" if e.datenquelle == "weclapp" else "Shop")
         self.frist.set(str(e.preisfrist_monate))
         self._ordner_zeilen(e.anfrageordner)
@@ -697,6 +703,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
     def speichern(self):
         e = self.app.einstellungen
         e.experimentell = self.experimentell.get()
+        e.vorsortieren = self.vorsortieren.get()
         e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "automatisch" else "pruefen",
                                          g.get(), "bestellung" if t.get() == "Bestellungen" else "anfrage")
                            for p, a, g, t in self.zeilen if p.get().strip()]

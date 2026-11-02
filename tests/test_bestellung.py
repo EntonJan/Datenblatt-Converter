@@ -72,3 +72,21 @@ def test_bestellung_sucht_die_bestellten_artikel():
     e = art("Bestellung 4500123456", "hiermit bestellen wir:\n2 Stück EPS/HC 40030-1000-WC (202307)\n"
             "1 Stück EPS/HC 40030-1200-M (200961)\nBestell-Nr.: 4500123456")
     assert e.art == "bestellung" and e.suchtext == "202307 200961" and e.bestell_nr == "4500123456"
+
+
+def test_vorsortierung_zaehlt_und_findet_falsch_einsortierte():
+    from eps_produktsuche.anfragen import vorsortierung
+    from eps_produktsuche.einstellungen import Anfrageordner
+    from eps_produktsuche.mail import Mail
+    anfr = Anfrageordner("Posteingang/Anfragen/Automatisch", "automatisch")
+    best = Anfrageordner("Posteingang/Bestellungen/Selbst prüfen", "pruefen")
+    bestellung = Mail(betreff="Bestellung 4711", absender_name="Einkauf", absender_email="einkauf@kunde.de",
+                      empfangen="2026-11-02T08:00", text="Hiermit bestellen wir gemäß Ihrem Angebot AN-1234:\n"
+                      "2 Stück 202307\nUnsere Bestellnummer: PO-88231", quelle="1")
+    anfrage = Mail(betreff="Anfrage Netzteil", absender_name="Max", absender_email="max@kunde.de",
+                   empfangen="2026-11-02T09:00", text="Bitte um ein Angebot für ein Netzteil 0-60V 20A.", quelle="2")
+    assert anfr.typ == "anfrage" and best.typ == "bestellung"
+    v = vorsortierung([(anfr, [bestellung, anfrage]), (best, [])])
+    assert (v.anfragen, v.bestellungen) == (1, 1)
+    assert [m.quelle for _, m, _ in v.falsch] == ["1"]
+    assert "falsch einsortiert" in v.text()
