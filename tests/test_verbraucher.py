@@ -56,7 +56,7 @@ def test_waschmaschine_us_auf_batterie():
     v = V.lesen(WASHER_US)
     assert (v.spannung, v.frequenzen, v.leistung, v.strom) == (120, [60], 1100, 9.5)
     v.versorgung, v.dc_spannung = "dc", 48
-    assert v.anfrage() == "DC/AC 120VAC 2,2kVA 60Hz Eingang 48VDC"
+    assert v.anfrage() == "DC/AC 120VAC 1,65kVA 60Hz Eingang 48VDC"   # Waschmaschine = Motor + Heizung → ×1,5
     a = Q.anfrage_lesen(v.anfrage())
     assert a.geraetetyp == "DC/AC" and a.frequenzen == [60] and a.eingang == 48
 
