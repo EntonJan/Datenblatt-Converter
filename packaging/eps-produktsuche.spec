@@ -28,10 +28,24 @@ pyz = PYZ(a.pure)
 # Startbild: erscheint sofort beim Doppelklick, während die EXE sich entpackt (schließt das Programm selbst)
 splash = Splash(str(ROOT / "assets" / "splash.png"), binaries=a.binaries, datas=a.datas, text_pos=None,
                 minify_script=True, always_on_top=False)
-exe = EXE(
-    pyz, a.scripts, splash, splash.binaries, a.binaries, a.datas, [],
-    name="EPS-Produktsuche",
-    icon=str(ROOT / "assets" / "icon.ico"),
-    console=False,
-    upx=False,
-)
+import os
+
+if os.environ.get("EPS_ORDNER") == "1":
+    # Ordner-Variante (schneller Start: kein Entpacken bei jedem Start). Nur Testkanal, als ZIP.
+    exe = EXE(
+        pyz, a.scripts, splash, [],
+        exclude_binaries=True,
+        name="EPS-Produktsuche",
+        icon=str(ROOT / "assets" / "icon.ico"),
+        console=False,
+        upx=False,
+    )
+    coll = COLLECT(exe, splash.binaries, a.binaries, a.datas, upx=False, name="EPS-Produktsuche-TEST-Ordner")
+else:
+    exe = EXE(
+        pyz, a.scripts, splash, splash.binaries, a.binaries, a.datas, [],
+        name="EPS-Produktsuche",
+        icon=str(ROOT / "assets" / "icon.ico"),
+        console=False,
+        upx=False,
+    )

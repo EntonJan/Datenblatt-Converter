@@ -77,7 +77,11 @@ jobs:
       - name: Testversion vom Branch weclapp (Vorabversion, wird vom Selbst-Update ignoriert)
         if: github.ref == 'refs/heads/weclapp'
         shell: pwsh
-        run: Copy-Item dist\EPS-Produktsuche.exe dist\EPS-Produktsuche-TEST.exe
+        run: |
+          Copy-Item dist\EPS-Produktsuche.exe dist\EPS-Produktsuche-TEST.exe
+          $env:EPS_ORDNER = "1"
+          pyinstaller --noconfirm packaging/eps-produktsuche.spec
+          Compress-Archive -Path dist\EPS-Produktsuche-TEST-Ordner -DestinationPath dist\EPS-Produktsuche-TEST-Ordner.zip
       - name: Vorabversion veröffentlichen
         if: github.ref == 'refs/heads/weclapp'
         uses: softprops/action-gh-release@v2
@@ -85,6 +89,8 @@ jobs:
           tag_name: produktsuche-test-${{ github.run_number }}
           name: EPS-Produktsuche Testversion ${{ github.run_number }} (Branch weclapp)
           target_commitish: ${{ github.sha }}
-          files: dist/EPS-Produktsuche-TEST.exe
+          files: |
+            dist/EPS-Produktsuche-TEST.exe
+            dist/EPS-Produktsuche-TEST-Ordner.zip
           prerelease: true
           make_latest: false

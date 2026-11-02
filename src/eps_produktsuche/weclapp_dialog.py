@@ -3,13 +3,15 @@ legt nach „Anlegen“ Angebotsentwurf und ggf. Herstelleranfrage an und zeigt 
 from __future__ import annotations
 
 import threading
-import tkinter as tk
 import webbrowser
-from tkinter import ttk, messagebox
 
-from . import weclapp as W, zugang
+import customtkinter as ctk
 
-GRAU, ROT, GRUEN = "#6A7380", "#B71C1C", "#2E7D32"
+from . import thema as TH, weclapp as W, zugang
+
+ROT = ("#B71C1C", "#FF8A80")
+ROT_BG = ("#FDECEA", "#3A1A1A")
+INFO_BG = ("#EEF4FA", "#1E2A42")
 
 
 def verbindung(einstellungen, geraete=()) -> W.Weclapp:
@@ -53,42 +55,48 @@ def _hintergrund(widget, arbeit, fertig):
     widget.after(120, abfragen)
 
 
-class WeclappDialog(tk.Toplevel):
+class WeclappDialog(ctk.CTkToplevel):
     def __init__(self, app, kunde, positionen: list[tuple[str, str, int]], termin: str, notiz: str = ""):
         """positionen: (Bestellnummer, Name, Menge)."""
-        super().__init__(app)
+        super().__init__(app, fg_color=TH.BG)
         self.app, self.kunde, self.termin, self.notiz = app, kunde, termin or "ASAP", notiz
         self.title("In Weclapp vorbereiten" + ("  –  DEMO" if app.einstellungen.weclapp_adresse.lower() == "demo" else ""))
         self.transient(app)
-        self.geometry("900x520")
+        self.geometry("920x560")
+        self.minsize(640, 400)
         self.plan: W.Plan | None = None
-        fr = ttk.Frame(self, padding=12)
-        fr.pack(fill="both", expand=True)
-        self.kunde_lbl = ttk.Label(fr, text="Kunde: …", font=("Segoe UI", 10, "bold"))
+        fr = ctk.CTkFrame(self, fg_color="transparent")
+        fr.pack(fill="both", expand=True, padx=18, pady=(16, 0))
+        self.kunde_lbl = TH.text(fr, "Kunde: …", 15, True, anchor="w")
         self.kunde_lbl.pack(anchor="w")
-        ttk.Label(fr, text="Mengen hier anpassen (Doppelklick auf die Menge):", foreground=GRAU).pack(anchor="w", pady=(8, 2))
+        TH.text(fr, "Mengen hier anpassen (Doppelklick auf die Menge):", 12, farbe=TH.GRAU).pack(anchor="w", pady=(6, 6))
         sp = [("nr", "Bestellnr.", 80), ("name", "Gerät", 300), ("menge", "Menge", 60), ("ek", "Letzter EK-Preis", 120),
               ("status", "Preis", 170), ("lief", "Lieferant", 160)]
-        self.tv = ttk.Treeview(fr, columns=[x[0] for x in sp], show="headings", height=8)
-        for k, t, b in sp:
-            self.tv.heading(k, text=t)
-            self.tv.column(k, width=b, stretch=k == "name")
-        self.tv.tag_configure("alt", foreground="#8E5A00")
-        self.tv.tag_configure("fehler", foreground=ROT)
-        self.tv.pack(fill="both", expand=True)
+        rahmen, self.tv = TH.tabelle(fr, sp, dehnen=("name",))
+        self.tv.tag_configure("alt", foreground=TH.f(TH.ORANGE))
+        self.tv.tag_configure("fehler", foreground=TH.f(ROT))
+        rahmen.pack(fill="both", expand=True)
         self.tv.bind("<Double-1>", self._menge_aendern)
         self.mengen = {nr: menge for nr, _, menge in positionen}
         self.namen = {nr: name for nr, name, _ in positionen}
-        self.plan_lbl = tk.Label(fr, text="Prüfe Kunde und Artikel in Weclapp …", justify="left", anchor="w",
-                                 bg="#EEF4FA", padx=10, pady=8, wraplength=840)
-        self.plan_lbl.pack(fill="x", pady=(10, 0))
-        unten = ttk.Frame(self, padding=(12, 0, 12, 12))
-        unten.pack(fill="x")
-        self.knopf = ttk.Button(unten, text="Anlegen", command=self.anlegen, state="disabled")
+        self.plan_box = ctk.CTkFrame(fr, fg_color=INFO_BG, corner_radius=10)
+        self.plan_box.pack(fill="x", pady=(10, 0))
+        self.plan_lbl = TH.text(self.plan_box, "Prüfe Kunde und Artikel in Weclapp …", 12, anchor="w", justify="left",
+                                wraplength=840)
+        self.plan_lbl.pack(fill="x", padx=12, pady=10)
+        self.leiste_rahmen = fr
+        unten = ctk.CTkFrame(self, fg_color="transparent")
+        unten.pack(fill="x", padx=18, pady=14)
+        self.knopf = TH.knopf(unten, "Anlegen", self.anlegen, haupt=True, width=130, state="disabled")
         self.knopf.pack(side="right")
-        ttk.Button(unten, text="Abbrechen", command=self.destroy).pack(side="right", padx=6)
+        TH.knopf(unten, "Abbrechen", self.destroy, width=110).pack(side="right", padx=8)
         self.bind("<Escape>", lambda e: self.destroy())
+        self.after(80, self.lift)
         self.planen()
+
+    def _meldung(self, text: str, bg=INFO_BG, fg=TH.TEXT):
+        self.plan_box.configure(fg_color=bg)
+        self.plan_lbl.configure(text=text, text_color=fg)
 
     def planen(self):
         einst = self.app.einstellungen
@@ -102,7 +110,7 @@ class WeclappDialog(tk.Toplevel):
 
     def _plan_zeigen(self, wert, fehler):
         if fehler:
-            self.plan_lbl.configure(text=f"Weclapp: {fehler}", bg="#FDECEA", fg=ROT)
+            self._meldung(f"Weclapp: {fehler}", ROT_BG, ROT)
             return
         self.wc, self.plan = wert
         p = self.plan
@@ -120,7 +128,7 @@ class WeclappDialog(tk.Toplevel):
                            values=[x.bestellnummer, x.name or self.namen.get(x.bestellnummer, ""), x.menge,
                                    x.ek_datum.strftime("%d.%m.%Y") if x.ek_datum else "–", status, x.lieferant])
         if p.fehler:
-            self.plan_lbl.configure(text="Nicht anlegbar:\n" + "\n".join(p.fehler), bg="#FDECEA", fg=ROT)
+            self._meldung("Nicht anlegbar:\n" + "\n".join(p.fehler), ROT_BG, ROT)
             return
         teile = []
         if p.kunde_neu:
@@ -131,17 +139,21 @@ class WeclappDialog(tk.Toplevel):
         else:
             teile.append("• keine Herstelleranfrage (alle Einkaufspreise aktuell)")
         teile.append("Es wird nichts verschickt – Prüfen und Versand machst du in Weclapp.")
-        self.plan_lbl.configure(text="Wird angelegt:\n" + "\n".join(teile), bg="#EEF4FA", fg="#1C2633")
+        self._meldung("Wird angelegt:\n" + "\n".join(teile))
         self.knopf.configure(state="normal")
 
     def _menge_aendern(self, e):
         iid = self.tv.identify_row(e.y)
         if not iid or self.tv.identify_column(e.x) != "#3":
             return
-        from tkinter import simpledialog
-        neu = simpledialog.askinteger("Menge", f"Menge für {iid}:", initialvalue=self.mengen.get(iid, 1), minvalue=1,
-                                      parent=self)
-        if neu:
+        eingabe = ctk.CTkInputDialog(title="Menge", text=f"Menge für {iid} (bisher {self.mengen.get(iid, 1)}):",
+                                     fg_color=TH.BG, button_fg_color=TH.AKZENT, button_hover_color=TH.AKZENT_HOVER,
+                                     button_text_color=TH.AKZENT_TEXT, entry_fg_color=TH.EINGABE, text_color=TH.TEXT)
+        try:
+            neu = int((eingabe.get_input() or "").strip())
+        except ValueError:
+            neu = 0
+        if neu >= 1:
             self.mengen[iid] = neu
             if self.plan:
                 for x in self.plan.positionen:
@@ -153,12 +165,12 @@ class WeclappDialog(tk.Toplevel):
         if not self.plan:
             return
         self.knopf.configure(state="disabled")
-        self.plan_lbl.configure(text="Lege in Weclapp an …")
+        self._meldung("Lege in Weclapp an …")
         _hintergrund(self, lambda: self.wc.ausfuehren(self.plan, self.kunde, self.notiz), self._fertig)
 
     def _fertig(self, erg: W.Ergebnis, fehler):
         if fehler:
-            self.plan_lbl.configure(text=f"Fehler beim Anlegen: {fehler}", bg="#FDECEA", fg=ROT)
+            self._meldung(f"Fehler beim Anlegen: {fehler}", ROT_BG, ROT)
             self.knopf.configure(state="normal")
             return
         text = [f"Angelegt: Angebotsentwurf {erg.angebot_nummer or erg.angebot_id}"]
@@ -166,14 +178,14 @@ class WeclappDialog(tk.Toplevel):
             text.append("Neuer Kunde angelegt")
         if erg.anfrage_ids:
             text.append(f"{len(erg.anfrage_ids)} Herstelleranfrage(n) erzeugt")
-        self.plan_lbl.configure(text=" · ".join(text), bg="#E8F5E9", fg=GRUEN)
-        leiste = ttk.Frame(self.plan_lbl.master)
+        self._meldung(" · ".join(text), TH.GRUEN_BG, TH.GRUEN)
+        leiste = ctk.CTkFrame(self.leiste_rahmen, fg_color="transparent")
         leiste.pack(fill="x", pady=(8, 0))
         if not erg.links:
-            ttk.Label(leiste, text="Demo-Modus: angelegt wurde nur im nachgebauten Weclapp (bis zum Programmende).",
-                      foreground=GRAU).pack(side="left")
+            TH.text(leiste, "Demo-Modus: angelegt wurde nur im nachgebauten Weclapp (bis zum Programmende).", 12,
+                    farbe=TH.GRAU).pack(side="left")
         for name, url in erg.links.items():
-            ttk.Button(leiste, text=f"{name} öffnen", command=lambda u=url: webbrowser.open(u)).pack(side="left", padx=(0, 6))
+            TH.knopf(leiste, f"{name} öffnen", lambda u=url: webbrowser.open(u)).pack(side="left", padx=(0, 6))
         self.knopf.configure(text="Schließen", state="normal", command=self.destroy)
         try:
             self.app._merken(f"Weclapp: Angebot {erg.angebot_nummer or erg.angebot_id}")

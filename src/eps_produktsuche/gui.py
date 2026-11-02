@@ -1160,12 +1160,27 @@ class App(ctk.CTk):
             self.feld.focus_set()
             return
         if mail.anhaenge:
-            self.datenblatt_laden(mail.anhaenge[0], mailtext=f"{mail.betreff}\n{erkennung.anfrage or mail.text}")
+            anhang = self._anhang_waehlen(mail.anhaenge)
+            if anhang is None:
+                self.eingabe.set(erkennung.suchtext)
+            else:
+                self.datenblatt_laden(anhang, mailtext=f"{mail.betreff}\n{erkennung.anfrage or mail.text}")
         else:
             self.eingabe.set(erkennung.suchtext)
         self.info.configure(text=f"Anfrage von {k.firmenname or k.email} übernommen"
                                  + (f" – {len(mail.anhaenge)} Anhang/Anhänge" if mail.anhaenge else ""))
         self.feld.focus_set()
+
+    def _anhang_waehlen(self, anhaenge: list):
+        """Bei mehreren Anhängen fragen, welcher das Datenblatt ist (PDFs zuerst). None = nur den Mailtext nutzen."""
+        from pathlib import Path
+        liste = sorted(anhaenge, key=lambda a: Path(str(a)).suffix.lower() != ".pdf")
+        if len(liste) == 1:
+            return liste[0]
+        d = AuswahlDialog(self, "Anhang wählen", f"Die Mail hat {len(liste)} Anhänge. Welcher ist das Datenblatt "
+                                                 "bzw. die Gerätebeschreibung?",
+                          [Path(str(a)).name for a in liste], "Ohne Anhang (nur Mailtext)")
+        return liste[d.ergebnis] if isinstance(d.ergebnis, int) and not isinstance(d.ergebnis, bool) else None
 
     def _positionen_markieren(self, positionen: list[dict]) -> int:
         """Vom Kunden gewählte Artikel in Karten und Liste auswählen. Gibt die Zahl der gefundenen zurück."""
