@@ -116,3 +116,12 @@ def test_tabellen_datenblatt_einheit_im_namen():
     assert (v.spannung, v.frequenzen, v.leistung, v.absicherung, v.lastart) == (230, [50], 2400, 10, "gemischt")
     v.versorgung = "netz"
     assert v.anfrage() == "AC/AC 230VAC 3,6kVA"
+
+
+def test_zweck_und_kundenfragen():
+    v = V.lesen(TABELLE)
+    assert len(v.kundenfragen()) == 3                         # Versorgung, Zweck, Anlaufstrom
+    v.versorgung, v.zweck, v.anlaufstrom = "netz", "pruefung", 12
+    assert v.kundenfragen() == []
+    assert v.anfrage() == "AC/AC 230VAC 3,6kVA 50Hz 60Hz"     # Prüfung: 50 und 60 Hz einstellbar
+    assert not any(h.startswith("Klären: Wofür") for h in v.hinweise())

@@ -59,6 +59,7 @@ class Verbraucher:
     versorgung: str = "unbekannt"       # netz / dc / unbekannt
     dc_spannung: float | None = None    # Batterie-/DC-Spannung, falls versorgung == dc
     reserve: float = 1.5
+    zweck: str = "unbekannt"            # dauer / pruefung / notstrom / unbekannt
 
     @property
     def bedarf(self) -> float | None:
@@ -79,8 +80,9 @@ class Verbraucher:
         p = self.bedarf
         if p:
             teile.append(f"{_z(round(p / 1000, 2))}kVA" if p >= 1000 else f"{_z(p)}VA")
-        if self.frequenzen and self.frequenzen != [50]:
-            teile += [f"{f}Hz" for f in self.frequenzen]
+        frequenzen = sorted(set(self.frequenzen) | {50, 60}) if self.zweck == "pruefung" else self.frequenzen
+        if frequenzen and frequenzen != [50]:
+            teile += [f"{f}Hz" for f in frequenzen]
         if self.versorgung == "dc" and self.dc_spannung:
             teile.append(f"Eingang {_z(self.dc_spannung)}VDC")
         return " ".join(teile)
@@ -112,8 +114,11 @@ class Verbraucher:
                      "Davon hängt ab, ob ein Frequenzumrichter/AC-Quelle (AC/AC) oder ein Wechselrichter (DC/AC) passt.")
         elif self.versorgung == "dc" and not self.dc_spannung:
             h.append("Klären: Spannung der Batterie bzw. des DC-Netzes beim Kunden (z. B. 24/48/110 V).")
-        h.append("Klären: Wofür? Dauerbetrieb, Prüfung mit veränderter Spannung/Frequenz (z. B. Exportvariante) oder "
-                 "Notstrom – bei Prüfungen muss das Gerät Spannung und Frequenz einstellbar liefern.")
+        if self.zweck == "unbekannt":
+            h.append("Klären: Wofür? Dauerbetrieb, Prüfung mit veränderter Spannung/Frequenz (z. B. Exportvariante) "
+                     "oder Notstrom – bei Prüfungen muss das Gerät Spannung und Frequenz einstellbar liefern.")
+        elif self.zweck == "pruefung":
+            h.append("Prüfung: Gerät muss Spannung und Frequenz einstellbar liefern – gesucht wird mit 50 und 60 Hz.")
         if self.lastart in ("motor", "gemischt") and not self.anlaufstrom:
             h.append(f"Klären: Anlaufstrom des Motors/Kompressors (nicht im Datenblatt) – gerechnet mit Reserve "
                      f"×{_z(self.reserve)}; ggf. beim Hersteller der Maschine erfragen.")
@@ -131,6 +136,28 @@ class Verbraucher:
         if not self.frequenzen:
             h.append("Klären: Netzfrequenz der Maschine (50 oder 60 Hz) nicht im Datenblatt.")
         return h
+
+    def kundenfragen(self) -> list[str]:
+        """Die offenen „Klären“-Punkte als Fragen, die man dem Kunden so schicken kann."""
+        f = []
+        if self.versorgung == "unbekannt":
+            f.append("Welche Stromversorgung steht am Einsatzort zur Verfügung – Stromnetz (bitte Spannung und "
+                     "Frequenz angeben) oder Batterie bzw. DC-Netz (bitte Spannung angeben)?")
+        elif self.versorgung == "dc" and not self.dc_spannung:
+            f.append("Welche Spannung hat Ihre Batterie bzw. Ihr DC-Netz?")
+        if self.zweck == "unbekannt":
+            f.append("Wofür soll das Gerät betrieben werden – im Dauerbetrieb, für Prüfungen mit veränderter Spannung "
+                     "bzw. Frequenz (z. B. für eine Exportvariante) oder als Notstromversorgung?")
+        if self.lastart in ("motor", "gemischt") and not self.anlaufstrom:
+            f.append("Ist Ihnen der Anlauf- bzw. Einschaltstrom des Geräts bekannt? (Steht oft im Service-Handbuch "
+                     "oder ist beim Hersteller erhältlich.)")
+        if not self.frequenzen:
+            f.append("Mit welcher Netzfrequenz wird das Gerät betrieben (50 oder 60 Hz)?")
+        if not self.spannung:
+            f.append("Mit welcher Anschlussspannung wird das Gerät betrieben?")
+        if not (self.leistung or self.strom):
+            f.append("Wie hoch ist die Leistungs- bzw. Stromaufnahme des Geräts?")
+        return f
 
     def als_dict(self) -> dict:
         return asdict(self)

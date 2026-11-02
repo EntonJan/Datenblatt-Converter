@@ -123,7 +123,7 @@ class RolleDialog(ctk.CTkToplevel):
         self.V, self.v, self.ergebnis = V, v, None
         self.title(f"Kunden-Dokument – {datei}")
         self.transient(master)
-        self.geometry("640x660")
+        self.geometry("680x760")
         self.minsize(560, 560)
         rahmen = ctk.CTkFrame(self, fg_color="transparent")
         rahmen.pack(fill="both", expand=True, padx=20, pady=16)
@@ -175,8 +175,23 @@ class RolleDialog(ctk.CTkToplevel):
                 TH.eingabe(z, textvariable=self.dc, width=70, height=28).pack(side="left", padx=(8, 4))
                 TH.text(z, "V DC", 11, farbe=TH.GRAU).pack(side="left")
 
+        TH.text(innen, "Wofür?", 12, True, farbe=TH.GRAU, anchor="w").pack(anchor="w", pady=(12, 2))
+        zw = ctk.CTkFrame(innen, fg_color="transparent")
+        zw.pack(fill="x")
+        self.zweck = tk.StringVar(value=v.zweck)
+        for wert, titel in (("dauer", "Dauerbetrieb"), ("pruefung", "Prüfung (U/f einstellbar)"),
+                            ("notstrom", "Notstrom"), ("unbekannt", "offen")):
+            ctk.CTkRadioButton(zw, text=titel, variable=self.zweck, value=wert, font=TH.schrift(12),
+                               text_color=TH.TEXT, fg_color=TH.AKZENT).pack(side="left", padx=(0, 14))
+
         r = ctk.CTkFrame(innen, fg_color="transparent")
         r.pack(fill="x", pady=(12, 0))
+        TH.text(r, "Anlaufstrom (A), falls bekannt", 12, True, farbe=TH.GRAU).pack(side="left")
+        self.anlauf = tk.StringVar(value=_zahl(v.anlaufstrom))
+        TH.eingabe(r, textvariable=self.anlauf, width=80, height=28).pack(side="left", padx=10)
+
+        r = ctk.CTkFrame(innen, fg_color="transparent")
+        r.pack(fill="x", pady=(10, 0))
         TH.text(r, "Reserve auf die Leistung", 12, True, farbe=TH.GRAU).pack(side="left")
         werte_r = ["1,2", "1,5", "2", "3"]
         self.reserve = tk.StringVar(value=_zahl(v.reserve))
@@ -222,6 +237,12 @@ class RolleDialog(ctk.CTkToplevel):
         v.versorgung = self.versorgung.get()
         v.dc_spannung = _als_zahl(self.dc.get()) if v.versorgung == "dc" else None
         v.reserve = _als_zahl(self.reserve.get()) or v.reserve
+        v.zweck = self.zweck.get()
+        anlauf = _als_zahl(self.anlauf.get())
+        if anlauf and anlauf != v.anlaufstrom:
+            v.anlaufstrom = anlauf
+            if self.reserve.get() == _zahl(self.V.RESERVE[v.lastart]):   # Vorschlag nicht von Hand geändert
+                v.reserve = 1.2
         self.ergebnis = v
         self.destroy()
 
@@ -238,40 +259,70 @@ def _als_zahl(t: str) -> float | None:
 
 
 class OffenePunkteDialog(ctk.CTkToplevel):
-    """Warnung nach dem Einlesen einer Anfrage: Punkte, die das Programm nicht prüfen konnte – zum Abhaken/Kopieren."""
+    """Nach dem Einlesen: was das Dokument nicht beantwortet („Beim Kunden nachfragen“) und was die Suche nicht selbst
+    prüfen kann (Pflichtpunkte, unsichere Werte) – zum Abhaken, Kopieren oder als Rückfrage an den Kunden."""
 
-    def __init__(self, master, punkte: list[str], datei: str = ""):
+    def __init__(self, master, punkte: list[str], datei: str = "", kundenfragen: list[str] | None = None):
         super().__init__(master, fg_color=TH.BG)
-        self.title("Ungeklärte Punkte" + (f" – {datei}" if datei else ""))
+        self.title("Offene Punkte" + (f" – {datei}" if datei else ""))
         self.transient(master)
-        self.geometry("900x480")
-        kopf = ctk.CTkFrame(self, fg_color=TH.GELB, corner_radius=10)
+        self.geometry("900x520")
+        self.punkte, self.kundenfragen_liste = punkte, kundenfragen or []
+        fragen = [p for p in punkte if p.startswith("Klären:")]
+        pruefen = [p for p in punkte if not p.startswith("Klären:")]
+        kopf = ctk.CTkFrame(self, fg_color=TH.CHIP if not pruefen else TH.GELB, corner_radius=10)
         kopf.pack(fill="x", padx=12, pady=(12, 6))
-        TH.text(kopf, f"⚠  {len(punkte)} Punkte konnte das Programm nicht anhand der Gerätedaten prüfen.\n"
-                      "Markierte Stellen (Pflicht) müssen genau erfüllt sein – vor dem Angebot im EPS-Datenblatt "
-                      "nachsehen oder mit der Technik/dem Hersteller klären.",
-                farbe=TH.GELB_TEXT, justify="left", anchor="w", wraplength=840).pack(fill="x", padx=12, pady=10)
+        zeilen = []
+        if fragen:
+            zeilen.append(f"{len(fragen)} Angabe(n) stehen nicht im Dokument – das ist kein Lesefehler, sondern muss "
+                          "beim Kunden nachgefragt werden.")
+        if pruefen:
+            zeilen.append(f"⚠  {len(pruefen)} Punkt(e) kann das Programm nicht anhand der Gerätedaten prüfen – "
+                          "markierte Stellen (Pflicht) müssen genau erfüllt sein; im EPS-Datenblatt nachsehen oder mit "
+                          "der Technik/dem Hersteller klären.")
+        TH.text(kopf, "\n".join(zeilen), farbe=TH.CHIP_TEXT if not pruefen else TH.GELB_TEXT, justify="left",
+                anchor="w", wraplength=840).pack(fill="x", padx=12, pady=10)
         innen = ctk.CTkScrollableFrame(self, fg_color=TH.FLAECHE, corner_radius=10)
         innen.pack(fill="both", expand=True, padx=12)
-        self.vars: list[tk.BooleanVar] = []
-        self.punkte = punkte
-        for p in punkte:
-            v = tk.BooleanVar(value=False)
-            self.vars.append(v)
-            ctk.CTkCheckBox(innen, text=p, variable=v, font=TH.schrift(12), text_color=TH.TEXT,
-                            fg_color=TH.AKZENT).pack(anchor="w", fill="x", pady=3, padx=6)
+        self.vars: list[tuple[str, tk.BooleanVar]] = []
+        for titel, liste in (("Beim Kunden nachfragen", fragen), ("Vor dem Angebot prüfen", pruefen)):
+            if not liste:
+                continue
+            TH.text(innen, titel, 14, True, anchor="w").pack(fill="x", padx=8, pady=(10, 4))
+            for p in liste:
+                v = tk.BooleanVar(value=False)
+                self.vars.append((p, v))
+                z = ctk.CTkFrame(innen, fg_color="transparent")
+                z.pack(fill="x", padx=6, pady=3)
+                ctk.CTkCheckBox(z, text="", variable=v, width=24, fg_color=TH.AKZENT).pack(side="left", anchor="n")
+                lbl = TH.text(z, p.removeprefix("Klären: "), 12, anchor="w", justify="left", wraplength=780)
+                lbl.pack(side="left", fill="x", expand=True)
+                lbl.bind("<Button-1>", lambda e, var=v: var.set(not var.get()))
         unten = ctk.CTkFrame(self, fg_color="transparent")
         unten.pack(fill="x", padx=12, pady=12)
-        TH.knopf(unten, "Als Liste kopieren", self.kopieren).pack(side="left")
-        TH.knopf(unten, "OK", self.destroy, haupt=True).pack(side="right")
+        if self.kundenfragen_liste:
+            TH.knopf(unten, "Rückfrage an den Kunden kopieren", self.rueckfrage, haupt=True).pack(side="left")
+        TH.knopf(unten, "Als Liste kopieren", self.kopieren).pack(side="left", padx=8)
+        self.meldung = TH.text(unten, "", 12, farbe=TH.GRUEN)
+        self.meldung.pack(side="left", padx=8)
+        TH.knopf(unten, "OK", self.destroy, width=90).pack(side="right")
         self.bind("<Escape>", lambda e: self.destroy())
         _zentrieren(self, master)
         self.after(50, self.lift)
 
     def kopieren(self):
-        text = "\n".join(("[x] " if v.get() else "[ ] ") + p for p, v in zip(self.punkte, self.vars))
+        text = "\n".join(("[x] " if v.get() else "[ ] ") + p for p, v in self.vars)
         self.clipboard_clear()
         self.clipboard_append(text)
+        self.meldung.configure(text="✓ Liste kopiert")
+
+    def rueckfrage(self):
+        fragen = "\n".join(f"{i}. {f}" for i, f in enumerate(self.kundenfragen_liste, 1))
+        self.clipboard_clear()
+        self.clipboard_append("Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Anfrage. Damit wir Ihnen die "
+                              "passende Stromversorgung anbieten können, benötigen wir noch folgende Angaben:\n\n"
+                              f"{fragen}\n\nVielen Dank im Voraus.\n\nMit freundlichen Grüßen")
+        self.meldung.configure(text="✓ Rückfrage kopiert – in die Antwort-Mail einfügen")
 
 
 def _fehlertext(e: Exception) -> str:
@@ -568,7 +619,7 @@ class App(ctk.CTk):
                                     height=30)
         self.fremd_lbl.pack(side="left", fill="x", expand=True, padx=14, pady=8)
         self.fremd_lbl.bind("<Button-1>", lambda e: self.offene_punkte() and
-                            OffenePunkteDialog(self, self.offene_punkte(), self.fremd.datei))
+                            OffenePunkteDialog(self, self.offene_punkte(), self.fremd.datei, self._kundenfragen()))
 
         self.top_kopf = ctk.CTkFrame(seite, fg_color="transparent")
         TH.text(self.top_kopf, "Top 3", 16, True).pack(side="left")
@@ -1189,16 +1240,22 @@ class App(ctk.CTk):
         hinweise = [t.hinweis for t in self.treffer[:3] if t.hinweis]
         return anforderung.offene_punkte(self.fremd, hinweise)
 
+    def _kundenfragen(self) -> list[str]:
+        if self.fremd and self.fremd.rolle == "verbraucher" and self.fremd.verbraucher:
+            from . import verbraucher as V
+            return V.aus_dict(self.fremd.verbraucher).kundenfragen()
+        return []
+
     def _offene_punkte_zeigen(self, still: bool = True):
         """Warnung am Ende des Einlesens: was die Suche nicht selbst klären konnte."""
         offen = self.offene_punkte()
         if offen:
             self.fremd_lbl.configure(text=self.fremd_lbl.cget("text") +
-                                     f"\n⚠ {len(offen)} ungeklärte Punkte – vor dem Angebot klären (hier klicken für die Liste)")
+                                     f"\n⚠ {len(offen)} offene Punkte – beim Kunden nachfragen bzw. vor dem Angebot klären (hier klicken)")
             self.fremd_rahmen.configure(fg_color=TH.GELB)
             self.fremd_lbl.configure(text_color=TH.GELB_TEXT)
         if offen and not still:
-            OffenePunkteDialog(self, offen, self.fremd.datei)
+            OffenePunkteDialog(self, offen, self.fremd.datei, self._kundenfragen())
 
     def _fremd_anzeigen(self, fg, aus_verlauf: bool = False):
         self.fremd = fg
