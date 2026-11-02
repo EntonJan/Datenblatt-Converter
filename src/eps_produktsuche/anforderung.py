@@ -166,7 +166,7 @@ def offene_punkte(fremd, treffer_hinweise: list[str] | None = None) -> list[str]
     aus dem Einlesen und Hinweise der besten Treffer („Frequenz nicht im Shop angegeben – prüfen“)."""
     offen = [f"Pflicht (markiert): {p}" for p in getattr(fremd, "pflicht", []) if not ist_geprueft(p)]
     for h in getattr(fremd, "hinweise", []):
-        if re.match(r"Nicht gefunden|Gerätetyp geschätzt|Ohne feste Bezeichnung|Das PDF enthält keinen", h):
+        if re.match(r"Nicht gefunden|Gerätetyp geschätzt|Ohne feste Bezeichnung|Das PDF enthält keinen|Klären:", h):
             offen.append(h)
     for h in treffer_hinweise or []:
         for teil in h.split("; "):

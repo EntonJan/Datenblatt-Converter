@@ -85,6 +85,7 @@ def tabelle_tags(tv: ttk.Treeview) -> None:
         tv.tag_configure(kat, foreground=f(paar))
     tv.tag_configure("serie", font=(SCHRIFT, 10, "bold"))
     tv.tag_configure("formular", foreground=f(GRUEN))
+    tv.tag_configure("vorschlag", foreground=f(ORANGE))
     tv.tag_configure("grau", foreground=f(GRAU))
 
 

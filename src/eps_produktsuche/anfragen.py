@@ -56,7 +56,7 @@ class AnfragenSeite(ctk.CTkFrame):
                                   if not outlook.verfuegbar() else "Keine Anfrage-Ordner eingestellt (Einstellungen).")
 
     def ordner_aktualisieren(self):
-        werte = [o.anzeige for o in self.app.einstellungen.anfrageordner] + [DATEIEN]
+        werte = [b for b, _ in self._bezeichnungen()] + [DATEIEN]
         self.ordner_cb.configure(values=werte)
         if self.ordner_cb.get() not in werte:
             self.ordner_cb.set(werte[0])
@@ -65,7 +65,7 @@ class AnfragenSeite(ctk.CTkFrame):
     def _aufbauen(self):
         kopf = ctk.CTkFrame(self, fg_color="transparent")
         kopf.pack(fill="x", pady=(0, 14))
-        TH.text(kopf, "Anfragen", 24, True, anchor="w").pack(anchor="w")
+        TH.text(kopf, "Anfragen & Bestellungen", 24, True, anchor="w").pack(anchor="w")
         self.status = TH.text(kopf, "", 13, farbe=TH.GRAU, anchor="w")
         self.status.pack(anchor="w")
 
@@ -79,12 +79,12 @@ class AnfragenSeite(ctk.CTkFrame):
         links.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
         oben = ctk.CTkFrame(links, fg_color="transparent")
         oben.pack(fill="x", padx=12, pady=(12, 6))
-        werte = [o.anzeige for o in self.app.einstellungen.anfrageordner] + [DATEIEN]
+        werte = [b for b, _ in self._bezeichnungen()] + [DATEIEN]
         self.ordner_cb = TH.auswahl(oben, werte, command=lambda v: self.laden(), breite=260)
         self.ordner_cb.set(werte[0])
         self.ordner_cb.pack(side="left", fill="x", expand=True)
         TH.knopf(oben, "Aktualisieren", self.laden, height=34, width=110).pack(side="left", padx=(6, 0))
-        sp = [("zeit", "Eingang", 95), ("von", "Absender", 150), ("betreff", "Betreff", 220), ("art", "Art", 75)]
+        sp = [("zeit", "Eingang", 90), ("art", "Art", 95), ("von", "Absender", 130), ("betreff", "Betreff", 200)]
         t_rahmen, self.tv = TH.tabelle(links, sp, dehnen=("betreff",))
         t_rahmen.configure(border_width=0)
         t_rahmen.pack(fill="both", expand=True, padx=4)
@@ -159,7 +159,8 @@ class AnfragenSeite(ctk.CTkFrame):
         self.knopf_bearbeitung.pack(side="left", padx=(8, 0))
         self.knopf_erledigt = TH.knopf(unten, "Erledigt", self.erledigt)
         self.knopf_erledigt.pack(side="left", padx=(8, 0))
-        TH.text(unten, "Angelegt wird hier nichts.", 11, farbe=TH.GRAU).pack(side="right")
+        self.knopf_art = TH.knopf(unten, "Ist eine Bestellung", self.art_wechseln)
+        self.knopf_art.pack(side="left", padx=(8, 0))
 
     def _dnd(self):
         try:
@@ -203,7 +204,13 @@ class AnfragenSeite(ctk.CTkFrame):
 
     def _gewaehlter_ordner(self) -> Anfrageordner | None:
         wahl = self.ordner_cb.get()
-        return next((o for o in self.app.einstellungen.anfrageordner if o.anzeige == wahl), None)
+        return next((o for b, o in self._bezeichnungen() if b == wahl), None)
+
+    def _bezeichnungen(self) -> list[tuple[str, Anfrageordner]]:
+        """Kurze Namen für die Ordnerauswahl; doppelte Namen bekommen den Pfad dazu."""
+        ordner = self.app.einstellungen.anfrageordner
+        namen = [o.anzeige for o in ordner]
+        return [(n if namen.count(n) == 1 else f"{n} · {o.pfad}", o) for n, o in zip(namen, ordner)]
 
     # ---------------------------------------------------------------- Laden
     def laden(self):
@@ -217,6 +224,11 @@ class AnfragenSeite(ctk.CTkFrame):
                 return ol.mails(o.pfad, ziel)
 
         def fertig(mails, fehler):
+            if fehler and "gefunden" in str(fehler) and o.typ == "bestellung":
+                self._anzeigen([], o)                  # neue Ordnerstruktur: wird beim ersten Verschieben angelegt
+                self.status.configure(text=f"„{o.pfad}“ gibt es noch nicht – Einstellungen → „Fehlende Ordner in "
+                                           "Outlook anlegen“, oder er entsteht beim ersten Verschieben.")
+                return
             if fehler:
                 self.status.configure(text=f"Outlook: {fehler}")
                 return
@@ -253,13 +265,59 @@ class AnfragenSeite(ctk.CTkFrame):
                 zeit = datetime.fromisoformat(m.empfangen).strftime("%d.%m. %H:%M")
             except ValueError:
                 zeit = m.empfangen
-            self.tv.insert("", "end", iid=str(i), tags=("formular",) if e.formular else (),
-                           values=[zeit, m.absender_name or m.absender_email, m.betreff,
-                                   "Formular" if e.formular else "Mail", len(m.anhaenge) or ""])
+            vorschlag = self._falscher_ordner(i)
+            art = ("Bestellung" if e.art == "bestellung" else "Anfrage") + ("" if e.art_sicher else "?")
+            self.tv.insert("", "end", iid=str(i), tags=("vorschlag",) if vorschlag else (("formular",) if e.formular else ()),
+                           values=[zeit, ("→ " + art) if vorschlag else art, m.absender_name or m.absender_email,
+                                   m.betreff])
         self._leeren()
         kinder = self.tv.get_children()
         if kinder and self.app.aktive_seite == "anfragen":     # Öffnen kann eine Mail verschieben – nur sichtbar
             self.tv.selection_set(kinder[0])
+
+    # ---------------------------------------------------------------- Anfrage oder Bestellung
+    def _falscher_ordner(self, i: int) -> bool:
+        """Liegt die Mail im Ordner der anderen Art (z. B. Bestellung unter Anfragen)? Nur bei sicherer Erkennung."""
+        o, e = self.ordner_von.get(i), self.erkennungen.get(i)
+        return bool(o and e and e.art_sicher and e.art != o.typ)
+
+    def _zielordner(self, typ: str) -> str:
+        """Ordner der anderen Art zum Hineinverschieben: dort „Selbst prüfen“, sonst der erste dieser Art."""
+        ordner = [o for o in self.app.einstellungen.anfrageordner if o.typ == typ and not o.gemeinsam]
+        pruefen = [o for o in ordner if o.art == "pruefen"]
+        if pruefen or ordner:
+            return (pruefen or ordner)[0].pfad
+        from .einstellungen import _bestellpfad
+        return _bestellpfad("Posteingang/Anfragen/Selbst prüfen") if typ == "bestellung" else "Posteingang/Anfragen/Selbst prüfen"
+
+    def art_wechseln(self):
+        """Mail in den Ordner der anderen Art verschieben (Anfragen ↔ Bestellungen), nur nach Klick."""
+        if self.aktuell is None or not self.ordner_von.get(self.aktuell):
+            return
+        i = self.aktuell
+        o, m = self.ordner_von[i], self.mails[i]
+        neu = "anfrage" if o.typ == "bestellung" else "bestellung"
+        ziel = self._zielordner(neu)
+        self._formular_lesen()
+
+        def arbeit():
+            with outlook.Outlook() as ol:
+                return ol.verschieben(m.quelle, ziel)
+
+        def fertig(_, fehler):
+            if fehler:
+                messagebox.showerror("Anfragen", f"Verschieben fehlgeschlagen:\n{fehler}", parent=self)
+                return
+            self.tv.delete(str(i))
+            self.aktuell = None
+            self._leeren()
+            self.app.anfragen_anzahl(len(self.tv.get_children()))
+            self.status.configure(text=f"Nach „{ziel}“ verschoben.")
+            rest = self.tv.get_children()
+            if rest:
+                self.tv.selection_set(rest[0])
+
+        self._im_hintergrund(arbeit, fertig, f"Verschiebe nach „{ziel}“ …")
 
     # ---------------------------------------------------------------- Auswahl
     def _leeren(self):
@@ -276,6 +334,8 @@ class AnfragenSeite(ctk.CTkFrame):
             e.configure(fg_color=TH.EINGABE)
         self.knopf_erledigt.configure(state="disabled")
         self.knopf_bearbeitung.configure(state="disabled")
+        self.knopf_art.configure(state="disabled", text="Ist eine Bestellung", fg_color=TH.FLAECHE,
+                                 text_color=TH.TEXT)
 
     def _formular_lesen(self):
         if self.aktuell is None:
@@ -309,7 +369,7 @@ class AnfragenSeite(ctk.CTkFrame):
         self.termin.set(e.termin)
         self.suchtext.set(e.suchtext)
         self.text.delete("1.0", "end")
-        kopf = f"{m.betreff}\n\n"
+        kopf = f"{m.betreff}\n" + (f"Anfrage-Nr. {e.anfrage_nr}\n" if e.anfrage_nr else "") + "\n"
         if e.weitergeleitet_von:
             kopf += f"▶ Weitergeleitet von {e.weitergeleitet_von}" + (f":\n{e.notiz}\n" if e.notiz else "\n") + \
                 "\n▶ Original-Anfrage des Kunden:\n"
@@ -321,14 +381,33 @@ class AnfragenSeite(ctk.CTkFrame):
         hinweis = (f"Weitergeleitet von {e.weitergeleitet_von} – Kunde aus der Original-Mail. " if e.weitergeleitet_von
                    else "") + (("Bitte prüfen: " + " · ".join(e.unsicher)) if e.unsicher else "")
         hinweis = hinweis or \
-            ("Homepage-Formular – vollständig erkannt" if e.formular else "")
+            ((f"EPS-Anfrage {e.anfrage_nr} – vollständig erkannt" if e.anfrage_nr else "Homepage-Formular – vollständig erkannt") if e.formular else "")
         self.unsicher.configure(text=hinweis, fg_color=TH.GELB if e.unsicher else (TH.GRUEN_BG if hinweis else "transparent"),
                                 text_color=TH.GELB_TEXT if e.unsicher else TH.GRUEN)
-        self.herkunft.configure(text="Homepage-Formular" if e.formular else ("weitergeleitet" if e.weitergeleitet_von
-                                                                            else "aus Mail/Signatur"))
-        self.herkunft.pack(side="left", padx=10)
+        herkunft = {"produktkonfigurator": f"Produktkonfigurator · {len(e.positionen)} Artikel" if e.positionen
+                    else "Produktkonfigurator", "anfrageformular": "Homepage-Anfrage", "shop": "Shop"}
+        text = herkunft.get(e.quelle) or ("Homepage-Formular" if e.formular else
+                                          ("weitergeleitet" if e.weitergeleitet_von else "aus Mail/Signatur"))
+        if e.art == "bestellung":
+            text = "Bestellung" + (f" · Bestell-Nr. {e.bestell_nr}" if e.bestell_nr else "") + \
+                (f" · zu Angebot {e.angebots_nr}" if e.angebots_nr else "") + f" · {text}"
+        self.herkunft.configure(text=text, fg_color=TH.GELB if e.art == "bestellung" else TH.CHIP,
+                                text_color=TH.GELB_TEXT if e.art == "bestellung" else TH.CHIP_TEXT)
         o = self.ordner_von.get(i)
+        falsch = self._falscher_ordner(i)
+        if falsch or not e.art_sicher:
+            vorschlag = (f"Sieht aus wie eine {'Bestellung' if e.art == 'bestellung' else 'Anfrage'} "
+                         f"(liegt unter {('Bestellungen' if o.typ == 'bestellung' else 'Anfragen') if o else '–'}): "
+                         if falsch else "Anfrage oder Bestellung? ") + " · ".join(e.art_gruende)
+            hinweis = (vorschlag + ("\n" + hinweis if hinweis else "")).strip()
+            self.unsicher.configure(text=hinweis, fg_color=TH.GELB, text_color=TH.GELB_TEXT)
+        self.herkunft.pack(side="left", padx=10)
         self.knopf_erledigt.configure(state="normal" if o else "disabled")
+        if o:
+            ziel = "Anfrage" if o.typ == "bestellung" else "Bestellung"
+            self.knopf_art.configure(state="normal", text=f"Ist eine {ziel} → verschieben",
+                                     fg_color=TH.AKZENT if falsch else TH.FLAECHE,
+                                     text_color=TH.AKZENT_TEXT if falsch else TH.TEXT)
         self.knopf_bearbeitung.configure(state="normal" if o and not getattr(m, "_in_bearbeitung", False) else "disabled")
         if o and o.gemeinsam and not getattr(m, "_in_bearbeitung", False):
             self._in_bearbeitung(i, o)
@@ -372,6 +451,9 @@ class AnfragenSeite(ctk.CTkFrame):
         m.add_command(label="Nach „In Bearbeitung“", command=self.in_bearbeitung,
                       state="normal" if o and not getattr(self.mails[i], "_in_bearbeitung", False) else "disabled")
         m.add_command(label="Erledigt", command=self.erledigt, state="normal" if o else "disabled")
+        if o:
+            m.add_command(label=f"Ist eine {'Anfrage' if o.typ == 'bestellung' else 'Bestellung'} → verschieben",
+                          command=self.art_wechseln)
         m.add_separator()
         m.add_command(label="Löschen …" if o else "Aus der Liste entfernen", command=self.loeschen)
         try:
@@ -438,7 +520,7 @@ class AnfragenSeite(ctk.CTkFrame):
             return
         self._formular_lesen()
         m = self.mails[i]
-        ziel = outlook.unterordner(o.pfad, self.app.einstellungen.ordner_erledigt)
+        ziel = outlook.unterordner(o.pfad, self.app.einstellungen.erledigt_fuer(o.typ))
 
         def arbeit():
             with outlook.Outlook() as ol:

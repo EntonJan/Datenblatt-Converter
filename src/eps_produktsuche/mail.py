@@ -30,6 +30,7 @@ class Mail:
     quelle: str = ""                 # Dateipfad oder Outlook-EntryID
     ordner: str = ""                 # Outlook-Ordner (Anzeige)
     eingebettet: list["Mail"] = field(default_factory=list)   # als Anhang weitergeleitete Mails
+    daten: dict | None = None        # Anhang „EPS-Anfrage.json“ (anfrage_format), falls vorhanden
 
     @property
     def kennung(self) -> str:
@@ -80,6 +81,10 @@ def _aus_message(msg, anhang_ordner: Path, quelle: str) -> Mail:
                 m.eingebettet.append(_aus_message(inneres, anhang_ordner / f"eingebettet{len(m.eingebettet) + 1}", quelle))
             continue
         dateiname = a.get_filename() or ""
+        if dateiname.lower().endswith(".json"):
+            from .anfrage_format import ist_anfrage_json
+            m.daten = m.daten or ist_anfrage_json(dateiname, a.get_payload(decode=True) or b"")
+            continue
         if dateiname.lower().endswith(ANHANG_ENDUNGEN):
             m.anhaenge.append(_ablegen(anhang_ordner, dateiname, a.get_payload(decode=True) or b""))
         elif dateiname.lower().endswith((".msg", ".eml")):
@@ -90,6 +95,7 @@ def _aus_message(msg, anhang_ordner: Path, quelle: str) -> Mail:
                 pass
     for inner in m.eingebettet:                              # Anhänge der Original-Mail gehören zur Anfrage
         m.anhaenge.extend(inner.anhaenge)
+        m.daten = m.daten or inner.daten
     return m
 
 
@@ -126,10 +132,14 @@ def _aus_extract(msg, anhang_ordner: Path, quelle: str) -> Mail:
         daten = getattr(a, "data", None)
         if daten is not None and not isinstance(daten, bytes) and hasattr(daten, "subject"):
             m.eingebettet.append(_aus_extract(daten, anhang_ordner / f"eingebettet{len(m.eingebettet) + 1}", quelle))
+        elif dateiname.lower().endswith(".json") and isinstance(daten, bytes):
+            from .anfrage_format import ist_anfrage_json
+            m.daten = m.daten or ist_anfrage_json(dateiname, daten)
         elif dateiname.lower().endswith(ANHANG_ENDUNGEN) and isinstance(daten, bytes):
             m.anhaenge.append(_ablegen(anhang_ordner, dateiname, daten))
     for inner in m.eingebettet:
         m.anhaenge.extend(inner.anhaenge)
+        m.daten = m.daten or inner.daten
     return m
 
 

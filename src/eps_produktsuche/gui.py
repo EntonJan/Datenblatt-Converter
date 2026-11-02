@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import sys
 import threading
 import tkinter as tk
@@ -110,41 +111,223 @@ def modell_waehlen(master, modelle, datei: str = ""):
     return d.ergebnis if d.ergebnis in (None, False) else modelle[d.ergebnis]
 
 
-class OffenePunkteDialog(ctk.CTkToplevel):
-    """Warnung nach dem Einlesen einer Anfrage: Punkte, die das Programm nicht prüfen konnte – zum Abhaken/Kopieren."""
+class RolleDialog(ctk.CTkToplevel):
+    """Was ist das Kunden-Dokument? Vergleichsgerät/Anforderung (wie bisher) oder ein Gerät, das der Kunde mit unserem
+    Gerät betreiben will (Waschmaschine, Motor …). Im zweiten Fall: Was hat der Kunde zur Verfügung, wie viel Reserve?
 
-    def __init__(self, master, punkte: list[str], datei: str = ""):
+    ergebnis: verbraucher.Verbraucher, False = Vergleichsgerät, None = abgebrochen."""
+
+    def __init__(self, master, v, datei: str, vorschlag: str = "verbraucher", aus_mail: list[str] | None = None):
+        from . import verbraucher as V
         super().__init__(master, fg_color=TH.BG)
-        self.title("Ungeklärte Punkte" + (f" – {datei}" if datei else ""))
+        self.V, self.v, self.ergebnis = V, v, None
+        self.title(f"Kunden-Dokument – {datei}")
         self.transient(master)
-        self.geometry("900x480")
-        kopf = ctk.CTkFrame(self, fg_color=TH.GELB, corner_radius=10)
+        self.geometry("680x760")
+        self.minsize(560, 560)
+        rahmen = ctk.CTkFrame(self, fg_color="transparent")
+        rahmen.pack(fill="both", expand=True, padx=20, pady=16)
+        TH.text(rahmen, "Was ist das für ein Dokument?", 18, True, anchor="w").pack(anchor="w")
+        TH.text(rahmen, datei, 12, farbe=TH.GRAU, anchor="w").pack(anchor="w", pady=(0, 10))
+        self.rolle = tk.StringVar(value=vorschlag)
+        for wert, titel, unter in (
+                ("verbraucher", "Gerät, das der Kunde damit betreiben will",
+                 "z. B. Waschmaschine, Motor, Pumpe – sein Anschluss wird unser Ausgang"),
+                ("vergleich", "Vergleichsgerät oder Anforderung (wie bisher)",
+                 "Netzgerät des Kunden/Wettbewerbers oder Lastenheft – gleiche Ausgangswerte gesucht")):
+            z = ctk.CTkFrame(rahmen, fg_color="transparent")
+            z.pack(fill="x", pady=2)
+            ctk.CTkRadioButton(z, text=titel, variable=self.rolle, value=wert, font=TH.schrift(13, True),
+                               text_color=TH.TEXT, fg_color=TH.AKZENT, command=self._umschalten).pack(anchor="w")
+            TH.text(z, unter, 11, farbe=TH.GRAU, anchor="w").pack(anchor="w", padx=(28, 0))
+
+        self.teil = TH.karte(rahmen)
+        self.teil.pack(fill="both", expand=True, pady=(12, 0))
+        innen = ctk.CTkFrame(self.teil, fg_color="transparent")
+        innen.pack(fill="both", expand=True, padx=16, pady=12)
+        if aus_mail:
+            box = ctk.CTkFrame(innen, fg_color=TH.GRUEN_BG, corner_radius=8)
+            box.pack(fill="x", pady=(0, 10))
+            TH.text(box, "Aus der Kundenmail übernommen (bitte kurz prüfen):\n" + "\n".join(f"„{x}“" for x in aus_mail),
+                    11, farbe=TH.GRUEN, anchor="w", justify="left", wraplength=600).pack(fill="x", padx=10, pady=6)
+        TH.text(innen, "Erkannt aus dem Datenblatt (änderbar)", 12, True, farbe=TH.GRAU, anchor="w").pack(anchor="w")
+        werte = ctk.CTkFrame(innen, fg_color="transparent")
+        werte.pack(fill="x", pady=(4, 8))
+        self.u = tk.StringVar(value=_zahl(v.spannung))
+        self.p = tk.StringVar(value=_zahl(v.leistung or ((v.spannung or 0) * (v.strom or 0) * v.phasen) or None))
+        self.f = tk.StringVar(value="/".join(str(x) for x in v.frequenzen))
+        self.phasen = tk.StringVar(value="3-phasig" if v.phasen == 3 else "1-phasig")
+        for i, (titel, var, breite) in enumerate((("Spannung (V, L-N)", self.u, 110), ("Leistung (W)", self.p, 110),
+                                                  ("Frequenz (Hz)", self.f, 100))):
+            TH.text(werte, titel, 11, farbe=TH.GRAU, anchor="w").grid(row=0, column=i, sticky="w", padx=(0, 10))
+            TH.eingabe(werte, textvariable=var, width=breite).grid(row=1, column=i, sticky="w", padx=(0, 10))
+        TH.text(werte, "Anschluss", 11, farbe=TH.GRAU, anchor="w").grid(row=0, column=3, sticky="w")
+        TH.auswahl(werte, ["1-phasig", "3-phasig"], self.phasen, breite=110).grid(row=1, column=3, sticky="w")
+        TH.text(innen, v.zusammenfassung(), 11, farbe=TH.GRAU, anchor="w", justify="left", wraplength=560
+                ).pack(anchor="w")
+
+        TH.text(innen, "Was hat der Kunde zur Verfügung?", 12, True, farbe=TH.GRAU, anchor="w").pack(anchor="w", pady=(12, 2))
+        self.versorgung = tk.StringVar(value=v.versorgung)
+        self.dc = tk.StringVar(value=_zahl(v.dc_spannung))
+        for wert, titel in (("netz", "Stromnetz (andere Spannung/Frequenz, Prüfplatz) → Frequenzumrichter/AC-Quelle (AC/AC)"),
+                            ("dc", "Batterie / DC-Netz → Wechselrichter (DC/AC)"),
+                            ("unbekannt", "Weiß ich nicht – offen lassen, kommt in die Liste zum Klären")):
+            z = ctk.CTkFrame(innen, fg_color="transparent")
+            z.pack(fill="x", pady=1)
+            ctk.CTkRadioButton(z, text=titel, variable=self.versorgung, value=wert, font=TH.schrift(12),
+                               text_color=TH.TEXT, fg_color=TH.AKZENT).pack(side="left")
+            if wert == "dc":
+                TH.eingabe(z, textvariable=self.dc, width=70, height=28).pack(side="left", padx=(8, 4))
+                TH.text(z, "V DC", 11, farbe=TH.GRAU).pack(side="left")
+
+        TH.text(innen, "Wofür?", 12, True, farbe=TH.GRAU, anchor="w").pack(anchor="w", pady=(12, 2))
+        zw = ctk.CTkFrame(innen, fg_color="transparent")
+        zw.pack(fill="x")
+        self.zweck = tk.StringVar(value=v.zweck)
+        for wert, titel in (("dauer", "Dauerbetrieb"), ("pruefung", "Prüfung (U/f einstellbar)"),
+                            ("notstrom", "Notstrom"), ("unbekannt", "offen")):
+            ctk.CTkRadioButton(zw, text=titel, variable=self.zweck, value=wert, font=TH.schrift(12),
+                               text_color=TH.TEXT, fg_color=TH.AKZENT).pack(side="left", padx=(0, 14))
+
+        r = ctk.CTkFrame(innen, fg_color="transparent")
+        r.pack(fill="x", pady=(12, 0))
+        TH.text(r, "Anlaufstrom (A), falls bekannt", 12, True, farbe=TH.GRAU).pack(side="left")
+        self.anlauf = tk.StringVar(value=_zahl(v.anlaufstrom))
+        TH.eingabe(r, textvariable=self.anlauf, width=80, height=28).pack(side="left", padx=10)
+
+        r = ctk.CTkFrame(innen, fg_color="transparent")
+        r.pack(fill="x", pady=(10, 0))
+        TH.text(r, "Reserve auf die Leistung", 12, True, farbe=TH.GRAU).pack(side="left")
+        werte_r = ["1,2", "1,5", "2", "3"]
+        self.reserve = tk.StringVar(value=_zahl(v.reserve))
+        TH.auswahl(r, werte_r, self.reserve, breite=80).pack(side="left", padx=10)
+        TH.text(r, f"vorgeschlagen für: {V.LASTART_TEXT[v.lastart]}" + (" (Anlaufstrom bekannt)" if v.anlaufstrom else ""),
+                11, farbe=TH.GRAU).pack(side="left")
+
+        unten = ctk.CTkFrame(self, fg_color="transparent")
+        unten.pack(fill="x", padx=20, pady=(0, 16))
+        TH.knopf(unten, "Übernehmen", self.ok, haupt=True, width=130).pack(side="right")
+        TH.knopf(unten, "Abbrechen", self.destroy, width=100).pack(side="right", padx=8)
+        self.bind("<Escape>", lambda e: self.destroy())
+        self._umschalten()
+        _zentrieren(self, master)
+        self.after(80, self._modal)
+        self.wait_window()
+
+    def _modal(self):
+        try:
+            self.lift()
+            self.grab_set()
+        except tk.TclError:
+            self.after(80, self._modal)
+
+    def _umschalten(self):
+        if self.rolle.get() == "verbraucher":
+            self.teil.pack(fill="both", expand=True, pady=(12, 0))
+        else:
+            self.teil.pack_forget()
+
+    def ok(self):
+        if self.rolle.get() == "vergleich":
+            self.ergebnis = False
+            self.destroy()
+            return
+        v = self.v
+        v.spannung = _als_zahl(self.u.get()) or v.spannung
+        neu_p = _als_zahl(self.p.get())
+        if neu_p:
+            v.leistung = neu_p
+        v.frequenzen = sorted({int(x) for x in re.findall(r"\d+", self.f.get()) if 10 <= int(x) <= 2000})
+        v.phasen = 3 if self.phasen.get() == "3-phasig" else 1
+        v.versorgung = self.versorgung.get()
+        v.dc_spannung = _als_zahl(self.dc.get()) if v.versorgung == "dc" else None
+        v.reserve = _als_zahl(self.reserve.get()) or v.reserve
+        v.zweck = self.zweck.get()
+        anlauf = _als_zahl(self.anlauf.get())
+        if anlauf and anlauf != v.anlaufstrom:
+            v.anlaufstrom = anlauf
+            if self.reserve.get() == _zahl(self.V.RESERVE[v.lastart]):   # Vorschlag nicht von Hand geändert
+                v.reserve = 1.2
+        self.ergebnis = v
+        self.destroy()
+
+
+def _zahl(x) -> str:
+    return "" if not x else f"{x:g}".replace(".", ",")
+
+
+def _als_zahl(t: str) -> float | None:
+    try:
+        return float((t or "").strip().replace(",", ".")) or None
+    except ValueError:
+        return None
+
+
+class OffenePunkteDialog(ctk.CTkToplevel):
+    """Nach dem Einlesen: was das Dokument nicht beantwortet („Beim Kunden nachfragen“) und was die Suche nicht selbst
+    prüfen kann (Pflichtpunkte, unsichere Werte) – zum Abhaken, Kopieren oder als Rückfrage an den Kunden."""
+
+    def __init__(self, master, punkte: list[str], datei: str = "", kundenfragen: list[str] | None = None):
+        super().__init__(master, fg_color=TH.BG)
+        self.title("Offene Punkte" + (f" – {datei}" if datei else ""))
+        self.transient(master)
+        self.geometry("900x520")
+        self.punkte, self.kundenfragen_liste = punkte, kundenfragen or []
+        fragen = [p for p in punkte if p.startswith("Klären:")]
+        pruefen = [p for p in punkte if not p.startswith("Klären:")]
+        kopf = ctk.CTkFrame(self, fg_color=TH.CHIP if not pruefen else TH.GELB, corner_radius=10)
         kopf.pack(fill="x", padx=12, pady=(12, 6))
-        TH.text(kopf, f"⚠  {len(punkte)} Punkte konnte das Programm nicht anhand der Gerätedaten prüfen.\n"
-                      "Markierte Stellen (Pflicht) müssen genau erfüllt sein – vor dem Angebot im EPS-Datenblatt "
-                      "nachsehen oder mit der Technik/dem Hersteller klären.",
-                farbe=TH.GELB_TEXT, justify="left", anchor="w", wraplength=840).pack(fill="x", padx=12, pady=10)
+        zeilen = []
+        if fragen:
+            zeilen.append(f"{len(fragen)} Angabe(n) stehen nicht im Dokument – das ist kein Lesefehler, sondern muss "
+                          "beim Kunden nachgefragt werden.")
+        if pruefen:
+            zeilen.append(f"⚠  {len(pruefen)} Punkt(e) kann das Programm nicht anhand der Gerätedaten prüfen – "
+                          "markierte Stellen (Pflicht) müssen genau erfüllt sein; im EPS-Datenblatt nachsehen oder mit "
+                          "der Technik/dem Hersteller klären.")
+        TH.text(kopf, "\n".join(zeilen), farbe=TH.CHIP_TEXT if not pruefen else TH.GELB_TEXT, justify="left",
+                anchor="w", wraplength=840).pack(fill="x", padx=12, pady=10)
         innen = ctk.CTkScrollableFrame(self, fg_color=TH.FLAECHE, corner_radius=10)
         innen.pack(fill="both", expand=True, padx=12)
-        self.vars: list[tk.BooleanVar] = []
-        self.punkte = punkte
-        for p in punkte:
-            v = tk.BooleanVar(value=False)
-            self.vars.append(v)
-            ctk.CTkCheckBox(innen, text=p, variable=v, font=TH.schrift(12), text_color=TH.TEXT,
-                            fg_color=TH.AKZENT).pack(anchor="w", fill="x", pady=3, padx=6)
+        self.vars: list[tuple[str, tk.BooleanVar]] = []
+        for titel, liste in (("Beim Kunden nachfragen", fragen), ("Vor dem Angebot prüfen", pruefen)):
+            if not liste:
+                continue
+            TH.text(innen, titel, 14, True, anchor="w").pack(fill="x", padx=8, pady=(10, 4))
+            for p in liste:
+                v = tk.BooleanVar(value=False)
+                self.vars.append((p, v))
+                z = ctk.CTkFrame(innen, fg_color="transparent")
+                z.pack(fill="x", padx=6, pady=3)
+                ctk.CTkCheckBox(z, text="", variable=v, width=24, fg_color=TH.AKZENT).pack(side="left", anchor="n")
+                lbl = TH.text(z, p.removeprefix("Klären: "), 12, anchor="w", justify="left", wraplength=780)
+                lbl.pack(side="left", fill="x", expand=True)
+                lbl.bind("<Button-1>", lambda e, var=v: var.set(not var.get()))
         unten = ctk.CTkFrame(self, fg_color="transparent")
         unten.pack(fill="x", padx=12, pady=12)
-        TH.knopf(unten, "Als Liste kopieren", self.kopieren).pack(side="left")
-        TH.knopf(unten, "OK", self.destroy, haupt=True).pack(side="right")
+        if self.kundenfragen_liste:
+            TH.knopf(unten, "Rückfrage an den Kunden kopieren", self.rueckfrage, haupt=True).pack(side="left")
+        TH.knopf(unten, "Als Liste kopieren", self.kopieren).pack(side="left", padx=8)
+        self.meldung = TH.text(unten, "", 12, farbe=TH.GRUEN)
+        self.meldung.pack(side="left", padx=8)
+        TH.knopf(unten, "OK", self.destroy, width=90).pack(side="right")
         self.bind("<Escape>", lambda e: self.destroy())
         _zentrieren(self, master)
         self.after(50, self.lift)
 
     def kopieren(self):
-        text = "\n".join(("[x] " if v.get() else "[ ] ") + p for p, v in zip(self.punkte, self.vars))
+        text = "\n".join(("[x] " if v.get() else "[ ] ") + p for p, v in self.vars)
         self.clipboard_clear()
         self.clipboard_append(text)
+        self.meldung.configure(text="✓ Liste kopiert")
+
+    def rueckfrage(self):
+        fragen = "\n".join(f"{i}. {f}" for i, f in enumerate(self.kundenfragen_liste, 1))
+        self.clipboard_clear()
+        self.clipboard_append("Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Anfrage. Damit wir Ihnen die "
+                              "passende Stromversorgung anbieten können, benötigen wir noch folgende Angaben:\n\n"
+                              f"{fragen}\n\nVielen Dank im Voraus.\n\nMit freundlichen Grüßen")
+        self.meldung.configure(text="✓ Rückfrage kopiert – in die Antwort-Mail einfügen")
 
 
 def _fehlertext(e: Exception) -> str:
@@ -244,7 +427,8 @@ class TrefferKarte(ctk.CTkFrame):
         for (w, d), (wert, res) in zip(self.werte, werte):
             w.configure(text=wert)
             d.configure(text=_prozent(res) if res is not None else "nicht gefragt")
-        merkmale = [g.geraetetyp + (" bidirektional" if g.bidirektional and g.geraetetyp != shop.LAST else "")]
+        merkmale = [g.geraetetyp + (" bidirektional" if g.bidirektional and g.geraetetyp != shop.LAST else "")
+                    + {3: " · 3-phasig", 1: " · 1-phasig"}.get(g.phasen, "")]
         merkmale += [x for x in (g.bauart, "wassergekühlt" if g.wasser == "ja" else "", "Netzrückspeisung" if g.rueckspeisung
                                  else "", f"bis {g.parallel_max} parallel" if g.parallel_max else "") if x]
         self.info.configure(text=" · ".join(merkmale))
@@ -332,16 +516,17 @@ class App(ctk.CTk):
         self.fortschritt = TH.Fortschritt(haupt)
         inhalt = ctk.CTkFrame(haupt, fg_color="transparent")
         inhalt.grid(row=1, column=0, sticky="nsew", padx=24, pady=(16, 16))
+        inhalt.rowconfigure(0, weight=1)
+        inhalt.columnconfigure(0, weight=1)
         self.inhalt = inhalt
         self._suchseite(inhalt)
-        from .anfragen import AnfragenSeite
-        from .seiten import VerlaufSeite, GegenueberstellungSeite, EinstellungenSeite
-        self.seiten["anfragen"] = AnfragenSeite(inhalt, self)
-        self.seiten["verlauf"] = VerlaufSeite(inhalt, self)
-        self.seiten["vergleich"] = GegenueberstellungSeite(inhalt, self)
-        self.seiten["einstellungen"] = EinstellungenSeite(inhalt, self)
+        self._stapeln(self.seiten["suche"])
         self._experimentell_zeigen()
         self.seite_zeigen("suche")
+        # Die übrigen Seiten erst nach dem ersten Zeichnen bauen, nacheinander – der Start wartet nicht darauf,
+        # und der erste Wechsel ist trotzdem sofort da
+        self.after(400, self._seiten_vorbereiten)
+        self.after(50, startbild_schliessen)                 # Fenster steht – Startbild weg
 
         self.eingabe.trace_add("write", lambda *a: self.suchen())
         self.max_par.trace_add("write", lambda *a: self.after_idle(self.suchen))
@@ -379,7 +564,7 @@ class App(ctk.CTk):
         self.nav: dict[str, ctk.CTkButton] = {}
         self.nav_rahmen = ctk.CTkFrame(leiste, fg_color="transparent")
         self.nav_rahmen.pack(fill="x", padx=12)
-        for key, titel in (("suche", "Suche"), ("anfragen", "Anfragen"), ("verlauf", "Verlauf"),
+        for key, titel in (("suche", "Suche"), ("anfragen", "Anfragen & Bestellungen"), ("verlauf", "Verlauf"),
                            ("vergleich", "Gegenüberstellungen"), ("einstellungen", "Einstellungen")):
             b = ctk.CTkButton(self.nav_rahmen, text=titel, anchor="w", height=40, corner_radius=8, font=TH.schrift(14),
                               fg_color="transparent", hover_color=TH.KNOPF_HOVER, text_color=TH.TEXT,
@@ -437,9 +622,11 @@ class App(ctk.CTk):
         self.fremd_rahmen = ctk.CTkFrame(seite, fg_color=TH.CHIP, corner_radius=10)
         self.fremd_lbl = TH.text(self.fremd_rahmen, "", 12, farbe=TH.TEXT, anchor="w", justify="left", wraplength=1100,
                                  cursor="hand2")
-        self.fremd_lbl.pack(fill="x", padx=14, pady=8)
+        self.rolle_knopf = TH.knopf(self.fremd_rahmen, "Als zu versorgendes Gerät …", lambda: self.rolle_wechseln(),
+                                    height=30)
+        self.fremd_lbl.pack(side="left", fill="x", expand=True, padx=14, pady=8)
         self.fremd_lbl.bind("<Button-1>", lambda e: self.offene_punkte() and
-                            OffenePunkteDialog(self, self.offene_punkte(), self.fremd.datei))
+                            OffenePunkteDialog(self, self.offene_punkte(), self.fremd.datei, self._kundenfragen()))
 
         self.top_kopf = ctk.CTkFrame(seite, fg_color="transparent")
         TH.text(self.top_kopf, "Top 3", 16, True).pack(side="left")
@@ -498,17 +685,53 @@ class App(ctk.CTk):
         self.info.pack(fill="x", side="bottom", pady=(6, 0))
         self.tabelle_rahmen.pack(fill="both", expand=True)
 
+    SEITEN = ("anfragen", "verlauf", "vergleich", "einstellungen")
+
+    def seite(self, key: str):
+        """Seite holen – beim ersten Mal bauen. Alle Seiten liegen übereinander im selben Rasterfeld; ein Wechsel
+        hebt nur die gewünschte nach vorn (kein neues Einpassen ins Fenster)."""
+        if key not in self.seiten:
+            from .anfragen import AnfragenSeite
+            from .seiten import VerlaufSeite, GegenueberstellungSeite, EinstellungenSeite
+            klasse = {"anfragen": AnfragenSeite, "verlauf": VerlaufSeite, "vergleich": GegenueberstellungSeite,
+                      "einstellungen": EinstellungenSeite}[key]
+            seite = klasse(self.inhalt, self)
+            self.seiten[key] = seite
+            self._stapeln(seite)
+            if key == "vergleich":
+                e = self.einstellungen
+                seite.weclapp_zeigen(e.experimentell and bool(e.weclapp_adresse))
+            aktiv = self.seiten.get(getattr(self, "aktive_seite", "suche"))
+            if aktiv is not None and aktiv is not seite:
+                self._rahmen(aktiv).tkraise()
+        return self.seiten[key]
+
+    @staticmethod
+    def _rahmen(seite):
+        return getattr(seite, "_parent_frame", seite)          # CTkScrollableFrame steckt in einem Rahmen
+
+    def _stapeln(self, seite):
+        self._rahmen(seite).grid(row=0, column=0, sticky="nsew")
+
+    def _seiten_vorbereiten(self):
+        offen = [k for k in self.SEITEN if k not in self.seiten]
+        if offen:
+            self.seite(offen[0])
+            self.after(120, self._seiten_vorbereiten)
+
     def seite_zeigen(self, key: str):
-        for k, s in self.seiten.items():
-            if k != key:
-                s.pack_forget()
-        self.seiten[key].pack(fill="both", expand=True)
+        seite = self.seite(key)
+        self._rahmen(seite).tkraise()
+        if not hasattr(self, "_nav_schrift"):
+            self._nav_schrift = (TH.schrift(14), TH.schrift(14, True))
         for k, b in self.nav.items():
             aktiv = k == key
-            b.configure(fg_color=TH.CHIP if aktiv else "transparent", text_color=TH.LINK if aktiv else TH.TEXT,
-                        font=TH.schrift(14, aktiv))
+            if aktiv != getattr(b, "_aktiv", None):
+                b._aktiv = aktiv
+                b.configure(fg_color=TH.CHIP if aktiv else "transparent", text_color=TH.LINK if aktiv else TH.TEXT,
+                            font=self._nav_schrift[aktiv])
         self.aktive_seite = key
-        zeigen = getattr(self.seiten[key], "zeigen", None)
+        zeigen = getattr(seite, "zeigen", None)
         if zeigen:
             zeigen()
         if key == "suche":
@@ -745,7 +968,8 @@ class App(ctk.CTk):
         iid = str(len(self.zeilen_geraete))
         self.zeilen_geraete.append(g)
         self.iid_index[iid] = int(iid)
-        typ = g.geraetetyp + (" (bidir.)" if g.bidirektional and g.geraetetyp != shop.LAST else "")
+        typ = g.geraetetyp + (" (bidir.)" if g.bidirektional and g.geraetetyp != shop.LAST else "") + \
+            {3: " 3~", 1: " 1~"}.get(g.phasen, "")
         self.tv.insert(eltern, "end", iid=iid, tags=tags, open=False,
                        values=[bew, g.bestellnummer, g.name, typ, g.spannung or "–", g.strom or "–", g.leistung or "–",
                                reserve, hinweis])
@@ -801,7 +1025,9 @@ class App(ctk.CTk):
                                      "springt der Link direkt zum Gerät.")
 
     def _alternative_zu(self) -> str:
-        if self.fremd and self.eingabe.get().strip() == self.fremd_anfrage:
+        """Nur bei Vergleichsgeräten: „Alternative zu …“. Ein zu versorgendes Gerät (Waschmaschine) ist keine
+        Alternative – dann zeigen Empfehlung und Gegenüberstellung die Anforderung."""
+        if self.fremd and self.fremd.rolle != "verbraucher" and self.eingabe.get().strip() == self.fremd_anfrage:
             return self.fremd.hersteller_typ or self.fremd.modell
         return ""
 
@@ -822,7 +1048,7 @@ class App(ctk.CTk):
             self.info.configure(text="Bitte zuerst bis zu vier Geräte auswählen (Karten „Auswählen“ oder Strg + Klick).")
             return
         fremd = self.fremd if self._alternative_zu() else None
-        self.seiten["vergleich"].setzen(tr, self.anfrage(), fremd, self._kunde_name())
+        self.seite("vergleich").setzen(tr, self.anfrage(), fremd, self._kunde_name())
         self.seite_zeigen("vergleich")
 
     def gegenueberstellung(self, sprache: str, tr: list[Q.Treffer] | None = None, a: Q.Anfrage | None = None,
@@ -907,10 +1133,11 @@ class App(ctk.CTk):
             return
         mail, erk = self.vorgang
         menge = erk.menge or 1
+        je_artikel = {p["bestellnummer"]: p["menge"] for p in getattr(erk, "positionen", []) if p.get("bestellnummer")}
         geraete = []
         for g in auswahl:
             if g.bestellnummer not in [x[0] for x in geraete]:
-                geraete.append((g.bestellnummer, g.name, menge))
+                geraete.append((g.bestellnummer, g.name, je_artikel.get(g.bestellnummer, menge)))
         self._merken("In Weclapp vorbereitet", [self._treffer_zu(g) for g in auswahl])
         WeclappDialog(self, erk.kunde, geraete, erk.termin, notiz=(f"Anfrage: {mail.betreff}" if mail.betreff else ""))
 
@@ -924,14 +1151,41 @@ class App(ctk.CTk):
         self.fremd_rahmen.pack_forget()
         self.typ.set("automatisch")
         self.seite_zeigen("suche")
+        k = erkennung.kunde
+        if erkennung.positionen:                      # Anfragekorb: Kunde hat die Geräte schon gewählt
+            self.eingabe.set(erkennung.suchtext)
+            n = self._positionen_markieren(erkennung.positionen)
+            self.info.configure(text=f"Anfrage {erkennung.anfrage_nr} von {k.firmenname or k.email} übernommen – "
+                                     f"{len(erkennung.positionen)} Artikel vom Kunden gewählt, {n} davon markiert")
+            self.feld.focus_set()
+            return
         if mail.anhaenge:
-            self.datenblatt_laden(mail.anhaenge[0])
+            self.datenblatt_laden(mail.anhaenge[0], mailtext=f"{mail.betreff}\n{erkennung.anfrage or mail.text}")
         else:
             self.eingabe.set(erkennung.suchtext)
-        k = erkennung.kunde
         self.info.configure(text=f"Anfrage von {k.firmenname or k.email} übernommen"
                                  + (f" – {len(mail.anhaenge)} Anhang/Anhänge" if mail.anhaenge else ""))
         self.feld.focus_set()
+
+    def _positionen_markieren(self, positionen: list[dict]) -> int:
+        """Vom Kunden gewählte Artikel in Karten und Liste auswählen. Gibt die Zahl der gefundenen zurück."""
+        nummern = {p["bestellnummer"] for p in positionen if p.get("bestellnummer")}
+        gefunden = set()
+        for nr, (t, _, _) in enumerate(self.karten_treffer):
+            if t.g.bestellnummer in nummern:
+                self.karten_gewaehlt.add(nr)
+                gefunden.add(t.g.bestellnummer)
+        self._karten_zeigen()
+        sel = [iid for iid, i in self.iid_index.items() if self.zeilen_geraete[i].bestellnummer in nummern]
+        for iid in sel:
+            gefunden.add(self.zeilen_geraete[self.iid_index[iid]].bestellnummer)
+            eltern = self.tv.parent(iid)
+            if eltern:
+                self.tv.item(eltern, open=True)
+        if sel:
+            self.tv.selection_set(sel)
+            self.tv.see(sel[0])
+        return len(gefunden)
 
     def verlauf_uebernehmen(self, e: dict):
         from . import datenblatt
@@ -977,7 +1231,7 @@ class App(ctk.CTk):
         mails = [p for p in alle if p.suffix.lower() in (".msg", ".eml")]
         if mails and self.einstellungen.experimentell:
             self.seite_zeigen("anfragen")
-            self.after(10, lambda: self.seiten["anfragen"].dateien_laden(mails))
+            self.after(10, lambda: self.seite("anfragen").dateien_laden(mails))
             return "copy"
         pfade = [p for p in alle if p.suffix.lower() in (".pdf", ".docx", ".docm")]
         if pfade:
@@ -993,19 +1247,35 @@ class App(ctk.CTk):
         if pfad:
             self.datenblatt_laden(Path(pfad))
 
-    def datenblatt_laden(self, pfad: Path, fertig_cb=None):
-        """Kunden-/Fremddatenblatt auslesen (im Hintergrund), Modell/Variante wählen lassen, Anfrage ins Suchfeld setzen."""
-        from . import datenblatt
+    def datenblatt_laden(self, pfad: Path, fertig_cb=None, rolle: str | None = None, mailtext: str = ""):
+        """Kunden-/Fremddatenblatt auslesen (im Hintergrund), Modell/Variante wählen lassen, Anfrage ins Suchfeld setzen.
+
+        rolle: None = automatisch erkennen (Verbraucher → Abfrage), "verbraucher" = Abfrage erzwingen,
+        "vergleich" = wie bisher ohne Abfrage."""
+        from . import datenblatt, verbraucher as V
         if self.beschaeftigt:
             return
+        self._fremd_pfad = Path(pfad)
+        self._fremd_mailtext = mailtext
 
         def fehler_melden(fehler):
             messagebox.showerror("Kunden-Datenblatt", f"Das PDF konnte nicht gelesen werden:\n{fehler}", parent=self)
             self.info.configure(text="")
 
-        def nach_analyse(analyse, fehler):
+        def nach_analyse(erg, fehler):
             if fehler:
                 return fehler_melden(fehler)
+            analyse, text = erg
+            if rolle == "verbraucher" or (rolle is None and (V.wahrscheinlich(text) or
+                                                             (mailtext and V.wahrscheinlich(mailtext + "\n" + text)))):
+                v = V.lesen(text)
+                fund = V.aus_mail(v, mailtext) if mailtext else []
+                wahl = RolleDialog(self, v, pfad.name, aus_mail=fund).ergebnis
+                if wahl is None:
+                    self.info.configure(text="Abgebrochen.")
+                    return
+                if wahl:
+                    return nach_lesen(datenblatt.als_verbraucher(pfad, wahl), None)
             modell = variante = None
             if analyse.modelle and analyse.hat_text:
                 wahl = modell_waehlen(self, analyse.modelle, pfad.name)
@@ -1026,6 +1296,8 @@ class App(ctk.CTk):
                 return fehler_melden(fehler)
             self._fremd_anzeigen(fg)
             self.typ.set("automatisch")
+            if fg.rolle == "verbraucher" and fg.geraetetyp:
+                self.typ.set(fg.geraetetyp[0])
             self.eingabe.set(self.fremd_anfrage)
             self.feld.focus_set()
             self.feld.icursor("end")
@@ -1036,7 +1308,8 @@ class App(ctk.CTk):
             if fertig_cb:
                 fertig_cb(fg)
 
-        self._hintergrund(lambda: datenblatt.analysieren(pfad), nach_analyse, f"Lese {pfad.name} …")
+        self._hintergrund(lambda: (datenblatt.analysieren(pfad), datenblatt.volltext(pfad)), nach_analyse,
+                          f"Lese {pfad.name} …")
 
     def offene_punkte(self) -> list[str]:
         from . import anforderung
@@ -1045,16 +1318,22 @@ class App(ctk.CTk):
         hinweise = [t.hinweis for t in self.treffer[:3] if t.hinweis]
         return anforderung.offene_punkte(self.fremd, hinweise)
 
+    def _kundenfragen(self) -> list[str]:
+        if self.fremd and self.fremd.rolle == "verbraucher" and self.fremd.verbraucher:
+            from . import verbraucher as V
+            return V.aus_dict(self.fremd.verbraucher).kundenfragen()
+        return []
+
     def _offene_punkte_zeigen(self, still: bool = True):
         """Warnung am Ende des Einlesens: was die Suche nicht selbst klären konnte."""
         offen = self.offene_punkte()
         if offen:
             self.fremd_lbl.configure(text=self.fremd_lbl.cget("text") +
-                                     f"\n⚠ {len(offen)} ungeklärte Punkte – vor dem Angebot klären (hier klicken für die Liste)")
+                                     f"\n⚠ {len(offen)} offene Punkte – beim Kunden nachfragen bzw. vor dem Angebot klären (hier klicken)")
             self.fremd_rahmen.configure(fg_color=TH.GELB)
             self.fremd_lbl.configure(text_color=TH.GELB_TEXT)
         if offen and not still:
-            OffenePunkteDialog(self, offen, self.fremd.datei)
+            OffenePunkteDialog(self, offen, self.fremd.datei, self._kundenfragen())
 
     def _fremd_anzeigen(self, fg, aus_verlauf: bool = False):
         self.fremd = fg
@@ -1068,8 +1347,34 @@ class App(ctk.CTk):
         if aus_verlauf:
             kopf += "  (aus dem Verlauf)"
         self.fremd_rahmen.configure(fg_color=TH.CHIP)
-        self.fremd_lbl.configure(text="\n".join([kopf, werte or "Keine Werte gefunden."] + fg.hinweise), text_color=TH.TEXT)
+        hinweise = fg.hinweise
+        if fg.rolle == "verbraucher":
+            from . import verbraucher as V
+            v = V.aus_dict(fg.verbraucher)
+            kopf = f"Zu versorgendes Gerät: {fg.hersteller_typ or fg.datei}  ({fg.datei})" + \
+                ("  (aus dem Verlauf)" if aus_verlauf else "")
+            versorgung = {"netz": "Kunde hat Stromnetz → AC/AC", "dc": "Kunde hat Batterie/DC"
+                          + (f" {_zahl(v.dc_spannung)} V" if v.dc_spannung else "") + " → DC/AC",
+                          "unbekannt": "Versorgung beim Kunden noch offen"}[v.versorgung]
+            werte = v.zusammenfassung() + "  ·  " + versorgung
+            hinweise = [h for h in fg.hinweise[1:] if not h.startswith("Klären:")]
+        self.fremd_rahmen.configure(fg_color=TH.CHIP)
+        self.fremd_lbl.configure(text="\n".join([kopf, werte or "Keine Werte gefunden."] + hinweise), text_color=TH.TEXT)
+        pfad = getattr(self, "_fremd_pfad", None)
+        if pfad and pfad.name == fg.datei and not aus_verlauf:
+            self.rolle_knopf.configure(text="Doch Vergleichsgerät …" if fg.rolle == "verbraucher"
+                                       else "Als zu versorgendes Gerät …")
+            self.rolle_knopf.pack(side="right", padx=(0, 12), pady=8, before=self.fremd_lbl)
+        else:
+            self.rolle_knopf.pack_forget()
         self.fremd_rahmen.pack(fill="x", pady=(10, 0), after=self.such_karte)
+
+    def rolle_wechseln(self):
+        """Banner-Knopf: dasselbe Dokument mit der anderen Rolle neu einlesen."""
+        pfad = getattr(self, "_fremd_pfad", None)
+        if pfad and self.fremd:
+            self.datenblatt_laden(pfad, rolle="vergleich" if self.fremd.rolle == "verbraucher" else "verbraucher",
+                                  mailtext=getattr(self, "_fremd_mailtext", ""))
 
     # ------------------------------------------------------------------ Shopdaten
     def datenquelle_wechseln(self):
@@ -1201,6 +1506,8 @@ class App(ctk.CTk):
                     self.info.configure(text=f"Neue Shopdaten verworfen: {grund}")
                     self.stand_lbl.configure(text=self.stand_lbl.cget("text") + "\nneues Einlesen verworfen")
                     return
+            for g in neu:
+                g.phasen = shop.phasen_aus(g)
             self.geraete = neu
             try:
                 shop.speichern(self.geraete, self.pfad)
@@ -1371,9 +1678,19 @@ class App(ctk.CTk):
         self.after(200, abfragen)
 
 
+def startbild_schliessen() -> None:
+    """Startbild der EXE (PyInstaller-Splash, erscheint sofort beim Doppelklick) schließen."""
+    try:
+        import pyi_splash  # noqa: PLC0415 – gibt es nur in der fertigen EXE
+        pyi_splash.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["--selbsttest"]:
+        startbild_schliessen()
         from .selbsttest import selbsttest
         return selbsttest(Path(argv[1]) if len(argv) > 1 else Path.cwd())
     App().mainloop()

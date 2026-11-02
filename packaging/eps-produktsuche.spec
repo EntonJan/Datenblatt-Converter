@@ -18,15 +18,18 @@ a = Analysis(
                    "eps_produktsuche.outlook", "eps_produktsuche.einstellungen", "eps_produktsuche._build", "eps_produktsuche.weclapp",
                    "eps_produktsuche.weclapp_attrappe", "eps_produktsuche.weclapp_dialog", "eps_produktsuche.zugang",
                    "eps_produktsuche.datenquelle", "eps_produktsuche.weclapp_felder",
-                   "eps_produktsuche.thema", "eps_produktsuche.seiten", "customtkinter", "darkdetect",
+                   "eps_produktsuche.thema", "eps_produktsuche.seiten", "eps_produktsuche.verbraucher", "eps_produktsuche.anfrage_format", "customtkinter", "darkdetect",
                    "keyring.backends.Windows", "win32ctypes.pywin32.win32cred", "extract_msg",
                    "win32com.client", "pythoncom", "win32timezone", "pywintypes", "eps_produktsuche.aktualisierung", "eps_converter.auslesen",
                    "eps_converter.importieren", "PIL._tkinter_finder", "tkinterdnd2"],
     excludes=["pytest"],
 )
 pyz = PYZ(a.pure)
+# Startbild: erscheint sofort beim Doppelklick, während die EXE sich entpackt (schließt das Programm selbst)
+splash = Splash(str(ROOT / "assets" / "splash.png"), binaries=a.binaries, datas=a.datas, text_pos=None,
+                minify_script=True, always_on_top=False)
 exe = EXE(
-    pyz, a.scripts, a.binaries, a.datas, [],
+    pyz, a.scripts, splash, splash.binaries, a.binaries, a.datas, [],
     name="EPS-Produktsuche",
     icon=str(ROOT / "assets" / "icon.ico"),
     console=False,

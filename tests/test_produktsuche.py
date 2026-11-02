@@ -678,3 +678,45 @@ def test_einstellungen_dunkelmodus(tmp_path):
     e = Einstellungen(dunkelmodus=True)
     e.speichern(tmp_path / "e.json")
     assert Einstellungen.laden(tmp_path / "e.json").dunkelmodus is True
+
+
+# ---------------------------------------------------------------- 1.4.1: Phasenzahl des AC-Ausgangs
+
+def test_phasen_aus_shoptexten():
+    from eps_produktsuche.shop import Geraet, phasen_aus
+    def ph(name, spannung, typ="AC/AC"):
+        return phasen_aus(Geraet("1", name, geraetetyp=typ, spannung=spannung, ac=True))
+    assert ph("EPS/FC 1040033 10 kVA Avionik Konverter", "200/115 VAC 3ph.+N") == 3
+    assert ph("EPS/ACS 4800-3P AC/AC und DC Quelle", "0-300VAC,L-N/0-520VAC,L-L / 0-425V DC") == 3
+    assert ph("EPS/FTT 6000-AE-19 AC/AC Frequenzwandler", "3x 400V AC (L-L)") == 3
+    assert ph("EPS/BB3.0-SSR-AU AC/AC Frequenzwandler", "1ph. 125VAC+-25A,250VAC+-") == 1
+    assert ph("EPS/CSI 300-24-230 Sinus-Wechselrichter", "230 VAC", "DC/AC") is None
+    assert phasen_aus(Geraet("2", "EPS/PS 10060-1000 3U", geraetetyp="AC/DC", spannung="0-60 V")) is None
+
+
+def test_dreiphasig_in_der_suche():
+    from eps_produktsuche.shop import Geraet
+    a = Q.anfrage_lesen("AC/AC 230VAC 10kVA 3-phasig")
+    assert a.phasen == 3 and "3-phasig" in a.erkannt
+    assert Q.anfrage_lesen("AC/AC 230VAC 10kVA").phasen is None
+    def g(ph):
+        x = Geraet("1", "X", geraetetyp="AC/AC", ac=True, spannung="0-300 VAC", umax=300, pmax=12000)
+        x.phasen = ph
+        return x
+    assert Q.merkmale_pruefen(g(3), a) == (True, [])
+    assert Q.merkmale_pruefen(g(1), a)[0] is False
+    assert Q.merkmale_pruefen(g(None), a) == (True, ["Phasenzahl nicht im Shop angegeben – prüfen"])
+
+
+def test_drehstrom_beim_netzgeraet_meint_den_anschluss():
+    """„Netzgerät … Drehstrom“: kein AC-Ausgang erzwingen, DC-Geräte nicht prüfen; „400V 3-phasig“ bei AC = L-L."""
+    from eps_produktsuche.shop import Geraet
+    a = Q.anfrage_lesen("Netzgerät 60V 100A Drehstrom")
+    assert a.phasen == 3 and a.ausgang == "" and "3-phasig (gilt für AC-Ausgänge)" in a.erkannt
+    dc = Geraet("1", "PS 10060-100", geraetetyp="AC/DC", spannung="0-60 V")
+    assert Q.merkmale_pruefen(dc, a) == (True, [])
+    assert "3-phasiger Netzanschluss (nicht geprüft)" in Q.anfrage_lesen("AC/DC 60V 100A 3-phasig").erkannt
+    assert Q.anfrage_lesen("AC/AC 230VAC 10kVA 3 Phasen").phasen == 3
+    a = Q.anfrage_lesen("AC/AC 400VAC 10kVA 3-phasig")
+    assert a.spannung == 230 and a.erkannt[0] == "U = 400 V (L-L) → 230 V je Phase"
+    assert Q.anfrage_lesen("AC/AC 400VAC 10kVA").spannung == 400          # ohne Drehstrom-Angabe bleibt es

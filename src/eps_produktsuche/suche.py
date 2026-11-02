@@ -34,6 +34,7 @@ _EINGANG = re.compile(r"(?:eingang|input|\bu_?e\b|\buin\b)\s*[:=]?\s*"
                       r"(?P<u>\d+(?:[.,]\d+)?)\s*v\s*(?:dc)?\b", re.I)
 _EINGANG_VOR = re.compile(r"(?P<u>\d+(?:[.,]\d+)?)\s*v\s*dc\s*(?:to|→|->|zu|nach|auf)\s*(?P<aus>\d+(?:[.,]\d+)?\s*v\s*ac)", re.I)
 EINGANG_TOLERANZ = 0.10
+_L_N = {380: 220, 400: 230, 415: 240, 440: 254, 480: 277}     # Drehstrom: Außenleiter → Strangspannung
 
 
 def obergrenze(wunsch: float) -> float:
@@ -76,6 +77,7 @@ class Anfrage:
     wasser: bool = False
     frequenzen: list[float] = field(default_factory=list)
     eingang: float | None = None # DC-Eingangsspannung (Wechselrichter, DC/DC), z. B. „Eingang 125VDC“
+    phasen: int | None = None    # 3 = dreiphasiger Ausgang gefordert („3-phasig“, „3ph“, „Drehstrom“)
 
     @property
     def leistung_bedarf(self) -> float | None:
@@ -131,7 +133,14 @@ def anfrage_lesen(text: str) -> Anfrage:
     if a.eingang and not a.geraetetyp and not a.last:   # DC-Eingang: Wechselrichter (AC-Ausgang) bzw. DC/DC
         a.geraetetyp = "DC/AC" if a.ausgang == "AC" or re.search(r"\d\s*v\s*ac|vac|wechselrichter|inverter", tl) else "DC/DC"
     merkmale_lesen(a, tl)
-    if a.spannung is not None:
+    strang = None
+    if a.phasen == 3 and a.spannung and (a.ausgang == "AC" or a.geraetetyp in ("AC/AC", "DC/AC")) and \
+            round(a.spannung) in _L_N and "l-n" not in tl:
+        strang = float(_L_N[round(a.spannung)])     # Drehstrom „400 V“ = Außenleiter; Shopdaten führen L-N
+    if strang:
+        a.erkannt.append(f"U = {zahl_text(a.spannung, 'V')} (L-L) → {zahl_text(strang, 'V')} je Phase")
+        a.spannung = strang
+    elif a.spannung is not None:
         a.erkannt.append(f"U = {zahl_text(a.spannung, 'V')}")
     if a.strom is not None:
         a.erkannt.append(f"I = {zahl_text(a.strom, 'A')}")
@@ -151,6 +160,11 @@ def anfrage_lesen(text: str) -> Anfrage:
         a.erkannt.append(" / ".join(zahl_text(f, "Hz") for f in a.frequenzen))
     if a.eingang:
         a.erkannt.append(f"Eingang {zahl_text(a.eingang, 'V')} DC")
+    if a.phasen == 3:
+        dc = a.ausgang == "DC" or a.geraetetyp in ("AC/DC", "DC/DC", LAST, "Ladegeräte")
+        ac = a.ausgang == "AC" or a.geraetetyp in ("AC/AC", "DC/AC")
+        a.erkannt.append("3-phasiger Netzanschluss (nicht geprüft)" if dc else
+                         ("3-phasig" if ac else "3-phasig (gilt für AC-Ausgänge)"))
     return a
 
 
@@ -169,6 +183,11 @@ def merkmale_lesen(a: Anfrage, tl: str) -> None:
     a.rueckspeisung = bool(re.search(r"rückspeis|ruckspeis|regenerativ|regenerative|energy recovery", tl))
     a.wasser = bool(re.search(r"wassergek(ü|ue)hlt|wasserk(ü|ue)hlung|water.?cool|\bwc\b", tl))
     a.frequenzen = sorted({float(x.replace(",", ".")) for x in re.findall(r"(\d+(?:[.,]\d+)?)\s*hz\b", tl)})
+    # Gilt nur für AC-Ausgänge. Bei Netzgeräten (DC-Ausgang) meint „Drehstrom“ den Netzanschluss – der wird nicht
+    # geprüft und legt die Suche auch nicht auf AC-Ausgang fest.
+    if re.search(r"\b3\s*-?\s*phasig|dreiphasig|\b(?:3|drei)\s*phasen\b|\b3\s*-?\s*ph\b|\b3\s*n?\s*~|drehstrom|"
+                 r"three[- ]phase|\b3[- ]phase", tl):
+        a.phasen = 3
     if a.frequenzen and not a.ausgang and not a.geraetetyp:
         a.ausgang = "AC"                           # eine Ausgangsfrequenz gibt es nur bei AC-Ausgängen
 
@@ -246,6 +265,12 @@ def merkmale_pruefen(g: Geraet, a: Anfrage) -> tuple[bool, list[str]]:
             hinweise.append("Wasserkühlung als Option")
         elif w != "ja":
             return False, []
+    if a.phasen == 3 and (g.ac or g.geraetetyp in ("AC/AC", "DC/AC")):    # nur AC-Ausgänge haben Phasen
+        ph = getattr(g, "phasen", None)
+        if ph == 1:
+            return False, []
+        if ph is None:
+            hinweise.append("Phasenzahl nicht im Shop angegeben – prüfen")
     if a.eingang and g.geraetetyp in ("DC/AC", "DC/DC"):
         ue = getattr(g, "u_eingang", None)
         if ue is None:
@@ -357,6 +382,8 @@ def textsuche(geraete: list[Geraet], text: str) -> list[Geraet]:
     worte = [w.lower() for w in re.split(r"\s+", text.strip()) if w]
     if not worte:
         return []
+    if len(worte) > 1 and all(re.fullmatch(r"\d{6}", w) for w in worte):   # mehrere Bestellnummern: jede einzeln
+        return [g for g in geraete if g.bestellnummer in worte]
     return [g for g in geraete if all(w in f"{g.bestellnummer} {g.name} {g.serie}".lower() for w in worte)]
 
 

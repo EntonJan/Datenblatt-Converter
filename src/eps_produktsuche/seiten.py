@@ -85,8 +85,16 @@ class VerlaufSeite(ctk.CTkFrame):
         self.eintraege: list[dict] = []
 
     def zeigen(self):
-        self.fuellen()
-        self._zahlen()
+        stand = []
+        for pfad in (self.app.verlauf_pfad, self.app.pfad):       # Verlauf und Shopdaten (Kachel „Shopdaten …“)
+            try:
+                stand.append(pfad.stat().st_mtime)
+            except OSError:
+                stand.append(None)
+        if stand != getattr(self, "_stand", "neu"):
+            self._stand = stand
+            self.fuellen()
+            self._zahlen()
 
     def _zahlen(self):
         z = verlauf.kennzahlen(verlauf.laden(self.app.verlauf_pfad))
@@ -147,13 +155,23 @@ class VerlaufSeite(ctk.CTkFrame):
         i = self._gewaehlt()
         if i is not None and messagebox.askyesno("Verlauf", "Diesen Eintrag löschen?", parent=self):
             verlauf.loeschen(self.app.verlauf_pfad, i)
+            self._stand = "neu"
             self.zeigen()
 
     # ---------------------------------------------------------------- Shop-Änderungen
     def _aenderungen(self) -> dict | None:
+        """Unterschied zum vorigen Stand – zwischengespeichert, bis sich eine der beiden Dateien ändert."""
         vorher_pfad = self.app.pfad.with_name(self.app.pfad.stem + "_vorher.json")
-        if not vorher_pfad.exists():
+        try:
+            schluessel = (str(self.app.pfad), vorher_pfad.stat().st_mtime, self.app.pfad.stat().st_mtime,
+                          len(self.app.geraete))
+        except OSError:
             return None
+        if getattr(self, "_cache", (None,))[0] != schluessel:
+            self._cache = (schluessel, self._aenderungen_berechnen(vorher_pfad))
+        return self._cache[1]
+
+    def _aenderungen_berechnen(self, vorher_pfad) -> dict | None:
         alt, _ = shop.laden(vorher_pfad)
         if not alt:
             return None
@@ -461,17 +479,25 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
 
         # Outlook
         g = self._gruppe(rechts, "Outlook-Anfragen")
-        TH.text(g, "Anfrage-Ordner im klassischen Outlook (Pfad mit „/“; gemeinsames Postfach: dessen Name vorn, "
+        TH.text(g, "Anfrage- und Bestellungs-Ordner im klassischen Outlook (Pfad mit „/“; gemeinsames Postfach: dessen Name vorn, "
                    "z. B. „vertrieb@eps-germany.de/Posteingang/Anfragen“)", 12, farbe=TH.GRAU, anchor="w",
                 justify="left", wraplength=560).pack(fill="x", padx=18)
         self.ordner_rahmen = ctk.CTkFrame(g, fg_color="transparent")
         self.ordner_rahmen.pack(fill="x", padx=18, pady=(6, 0))
-        self.zeilen: list[tuple[tk.StringVar, tk.StringVar, tk.BooleanVar]] = []
+        self.zeilen: list[tuple[tk.StringVar, tk.StringVar, tk.BooleanVar, tk.StringVar]] = []
         self.erledigt = tk.StringVar()
+        self.erledigt_b = tk.StringVar()
         self.bearbeitung = tk.StringVar()
         self.domains = tk.StringVar()
-        self._zeile(g, "Erledigte Mails nach", "Name = Unterordner, mit „/“ = fester Ordner",
+        ok = ctk.CTkFrame(g, fg_color="transparent")
+        ok.pack(fill="x", padx=18, pady=(8, 2))
+        TH.knopf(ok, "+ Fehlende Ordner in Outlook anlegen", self.ordner_anlegen, height=32).pack(side="left")
+        self.ordner_status = TH.text(ok, "", 12, farbe=TH.GRAU, anchor="w", justify="left", wraplength=360)
+        self.ordner_status.pack(side="left", padx=10, fill="x", expand=True)
+        self._zeile(g, "Erledigte Anfragen nach", "Name = Unterordner, mit „/“ = fester Ordner",
                     TH.eingabe(g, textvariable=self.erledigt, width=300))
+        self._zeile(g, "Erledigte Bestellungen nach", "z. B. Posteingang/Bestellungen/Erledigt",
+                    TH.eingabe(g, textvariable=self.erledigt_b, width=300))
         self._zeile(g, "„In Bearbeitung“", "für gemeinsame Postfächer (Name oder Pfad)",
                     TH.eingabe(g, textvariable=self.bearbeitung, width=300))
         self._zeile(g, "Eigene Domains", "Mails von dort = Weiterleitung, der Kunde steht darunter",
@@ -491,7 +517,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         unten = ctk.CTkFrame(self, fg_color="transparent")
         unten.pack(fill="x", pady=(14, 4))
         TH.knopf(unten, "Speichern", self.speichern, haupt=True, width=140).pack(side="left")
-        TH.knopf(unten, "Verwerfen", self.zeigen).pack(side="left", padx=8)
+        TH.knopf(unten, "Verwerfen", self.fuellen).pack(side="left", padx=8)
         self.gespeichert = TH.text(unten, "", 12, farbe=TH.GRUEN)
         self.gespeichert.pack(side="left", padx=8)
         self.zeigen()
@@ -520,23 +546,30 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         for w in self.ordner_rahmen.winfo_children():
             w.destroy()
         self.zeilen = []
-        liste = list(ordner) + [Anfrageordner("", "pruefen")] * max(0, 3 - len(ordner))
-        for o in liste[:6]:
+        liste = list(ordner) + [Anfrageordner("", "pruefen")] * max(0, 5 - len(ordner))
+        for o in liste[:8]:
             pfad = tk.StringVar(value=o.pfad)
+            typ = tk.StringVar(value="Bestellungen" if o.typ == "bestellung" else "Anfragen")
             art = tk.StringVar(value="automatisch" if o.art == "automatisch" else "selbst prüfen")
             gem = tk.BooleanVar(value=o.gemeinsam)
             z = ctk.CTkFrame(self.ordner_rahmen, fg_color="transparent")
             z.pack(fill="x", pady=3)
             TH.eingabe(z, textvariable=pfad, placeholder_text="Posteingang/Anfragen/…").pack(side="left", fill="x",
                                                                                           expand=True)
-            TH.auswahl(z, ["automatisch", "selbst prüfen"], art, breite=130).pack(side="left", padx=(6, 0))
+            TH.auswahl(z, ["Anfragen", "Bestellungen"], typ, breite=125).pack(side="left", padx=(6, 0))
+            TH.auswahl(z, ["automatisch", "selbst prüfen"], art, breite=125).pack(side="left", padx=(6, 0))
             ctk.CTkCheckBox(z, text="gemeinsam", variable=gem, font=TH.schrift(12), text_color=TH.TEXT, width=20,
                             fg_color=TH.AKZENT).pack(side="left", padx=(8, 0))
             TH.knopf(z, "Aus Outlook …", lambda v=pfad: self.waehlen(v), height=32, width=110).pack(side="left",
                                                                                                    padx=(6, 0))
-            self.zeilen.append((pfad, art, gem))
+            self.zeilen.append((pfad, art, gem, typ))
 
     def zeigen(self):
+        if not getattr(self, "_gefuellt", False):
+            self.fuellen()
+
+    def fuellen(self):
+        self._gefuellt = True
         e = self.app.einstellungen
         self.dunkel_var.set(e.dunkelmodus)
         self.experimentell.set(e.experimentell)
@@ -544,6 +577,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         self.frist.set(str(e.preisfrist_monate))
         self._ordner_zeilen(e.anfrageordner)
         self.erledigt.set(e.ordner_erledigt)
+        self.erledigt_b.set(e.erledigt_fuer("bestellung"))
         self.bearbeitung.set(e.ordner_in_bearbeitung)
         self.domains.set(", ".join(e.interne_domains))
         self.weclapp.set(e.weclapp_adresse)
@@ -613,12 +647,61 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         threading.Thread(target=lauf, daemon=True).start()
         self.after(150, abfragen)
 
+    def _formular_einstellungen(self):
+        """Einstellungen so, wie sie gerade im Formular stehen (noch nicht gespeichert)."""
+        from .einstellungen import Einstellungen
+        e = Einstellungen()
+        e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "automatisch" else "pruefen",
+                                         g.get(), "bestellung" if t.get() == "Bestellungen" else "anfrage")
+                           for p, a, g, t in self.zeilen if p.get().strip()]
+        e.ordner_erledigt = self.erledigt.get().strip() or "Erledigt"
+        e.ordner_erledigt_bestellung = self.erledigt_b.get().strip()
+        e.ordner_in_bearbeitung = self.bearbeitung.get().strip() or "In Bearbeitung"
+        return e
+
+    def ordner_anlegen(self):
+        """Alle Ordner der eingestellten Struktur in Outlook anlegen (fehlende) – nur auf Klick."""
+        from . import outlook
+        if not outlook.verfuegbar():
+            self.ordner_status.configure(text="Klassisches Outlook ist auf diesem Rechner nicht verfügbar.")
+            return
+        pfade = outlook.benoetigte_ordner(self._formular_einstellungen())
+        self.ordner_status.configure(text=f"Prüfe {len(pfade)} Ordner …")
+        ergebnis: dict = {}
+
+        def lauf():
+            try:
+                with outlook.Outlook() as ol:
+                    ergebnis["liste"] = ol.ordner_anlegen(pfade)
+            except Exception as ex:  # noqa: BLE001
+                ergebnis["fehler"] = ex
+            ergebnis["fertig"] = True
+
+        def abfragen():
+            if not ergebnis.get("fertig"):
+                self.after(150, abfragen)
+                return
+            if "fehler" in ergebnis:
+                self.ordner_status.configure(text=f"Outlook: {ergebnis['fehler']}")
+                return
+            liste = ergebnis["liste"]
+            neu = [p for p, st in liste if st == "angelegt"]
+            fehler = [f"{p}: {st}" for p, st in liste if st not in ("angelegt", "vorhanden")]
+            text = (f"Angelegt: {', '.join(neu)}" if neu else "Alle Ordner sind schon vorhanden.") + \
+                (f"\nNicht möglich: {'; '.join(fehler)}" if fehler else "")
+            self.ordner_status.configure(text=text, text_color=TH.ORANGE if fehler else TH.GRUEN)
+
+        threading.Thread(target=lauf, daemon=True).start()
+        self.after(150, abfragen)
+
     def speichern(self):
         e = self.app.einstellungen
         e.experimentell = self.experimentell.get()
         e.anfrageordner = [Anfrageordner(p.get().strip(), "automatisch" if a.get() == "automatisch" else "pruefen",
-                                         g.get()) for p, a, g in self.zeilen if p.get().strip()]
+                                         g.get(), "bestellung" if t.get() == "Bestellungen" else "anfrage")
+                           for p, a, g, t in self.zeilen if p.get().strip()]
         e.ordner_erledigt = self.erledigt.get().strip() or "Erledigt"
+        e.ordner_erledigt_bestellung = self.erledigt_b.get().strip()
         e.weclapp_adresse = self.weclapp.get().strip()
         alte_quelle = e.datenquelle
         e.datenquelle = "weclapp" if self.quelle.get() == "Weclapp" and e.weclapp_adresse else "shop"

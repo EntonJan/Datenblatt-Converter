@@ -1,0 +1,28 @@
+--- EPS-Anfrage ---
+Format: EPS-Anfrage 1
+Anfrage-Nr.: EPS-20261102-114805-7F3A
+Erstellt: 2026-11-02T11:48:05+01:00
+Quelle: Produktkonfigurator
+Sprache: de
+Firma: Muster Prüftechnik
+Rechtsform: GmbH
+Anrede: Herr
+Vorname: Max
+Nachname: Mustermann
+E-Mail: m.mustermann@example.com
+Telefon: +49 821 1234567
+Straße: Musterweg 12
+PLZ: 86150
+Ort: Augsburg
+Land: DE
+USt-IdNr.: DE123456789
+Position 1: 202307 · EPS/HC 40030-1000-WC DC Stromquelle · Menge 2
+Position 2: 200961 · EPS/HC 40030-1200-M DC Stromquelle · Menge 1
+Suche: Stromquelle 0-30V 1kA 30kW
+Gerätetyp: AC/DC
+Filter: cooling=Wasser; output_current=1000-1200; output_voltage=0-30
+Wunschtermin: KW 50
+Datenschutz: zugestimmt
+Nachricht: Bitte ein Angebot für beide Varianten.
+Lieferung nach Augsburg.
+--- Ende ---

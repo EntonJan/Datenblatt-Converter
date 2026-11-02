@@ -8,6 +8,7 @@ Alle Aufrufe laufen in einem eigenen Thread; die Oberfläche bekommt nur einfach
 """
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 from datetime import datetime
@@ -112,20 +113,43 @@ class Outlook:
             kandidaten, teile = treffer[:1], teile[1:]
         else:
             kandidaten = postfaecher
-        bester, tiefe = None, -1
+        bester, tiefe, bester_lokal = None, -1, True
         for p in kandidaten:
             ordner, n = self._gehen(p, teile)
-            if n > tiefe:
-                bester, tiefe = ordner, n
+            lokal = bool(re.search(r"outlook[- ]?(?:datendatei|data file)|persönliche ordner|personal folders",
+                                   getattr(p, "Name", ""), re.I))
+            # gleich tief: lieber im echten Konto als in einer lokalen Outlook-Datendatei (dort anlegen wäre falsch)
+            if n > tiefe or (n == tiefe and bester_lokal and not lokal):
+                bester, tiefe, bester_lokal = ordner, n, lokal
             if n == len(teile):
                 break
         if tiefe == len(teile):
             return bester
-        if not anlegen or bester is None or tiefe < len(teile) - 1:
+        # Anlegen höchstens zwei Ebenen unter einem vorhandenen Ordner (z. B. „Bestellungen/Erledigt“ im Posteingang) –
+        # ein Tippfehler im Postfach- oder Posteingangsnamen legt nichts an
+        if not anlegen or bester is None or tiefe < 1 or len(teile) - tiefe > 2:
             gesucht = "/".join(teile[:tiefe + 1]) if tiefe >= 0 else pfad
             raise OutlookFehler(f"Ordner „{gesucht}“ in keinem Postfach gefunden. Pfad in den Einstellungen prüfen "
                                 "oder mit „Aus Outlook wählen …“ auswählen.")
-        return bester.Folders.Add(teile[-1])              # nur der letzte Teil (z. B. „Erledigt“) wird angelegt
+        for name in teile[tiefe:]:
+            bester = bester.Folders.Add(name)
+        return bester
+
+    def ordner_anlegen(self, pfade: list[str]) -> list[tuple[str, str]]:
+        """Alle Ordner sicherstellen → [(Pfad, "vorhanden" | "angelegt" | Fehlertext)]. Legt nur unter vorhandenen
+        Ordnern an (höchstens zwei Ebenen, siehe ordner), Doppelte werden einmal behandelt."""
+        ergebnis = []
+        for pfad in dict.fromkeys(p.strip().strip("/") for p in pfade if p and p.strip()):
+            try:
+                self.ordner(pfad)
+                ergebnis.append((pfad, "vorhanden"))
+            except OutlookFehler:
+                try:
+                    self.ordner(pfad, anlegen=True)
+                    ergebnis.append((pfad, "angelegt"))
+                except Exception as e:  # noqa: BLE001 – z. B. keine Rechte im gemeinsamen Postfach
+                    ergebnis.append((pfad, str(e)))
+        return ergebnis
 
     def ordner_waehlen(self) -> str:
         """Outlook-eigenen Ordnerdialog öffnen → Pfad im Format der Einstellungen („Postfach/Posteingang/…“) oder ""."""
@@ -184,7 +208,18 @@ class Outlook:
                     inner = msg_lesen(ziel, anhang_ordner / f"eingebettet{j}")
                     m.eingebettet.append(inner)
                     m.anhaenge.extend(inner.anhaenge)
+                    m.daten = m.daten or inner.daten
                 except Exception:  # noqa: BLE001 – Weiterleitung als Text funktioniert trotzdem
+                    pass
+                continue
+            if name.lower().endswith(".json") and m.daten is None:   # EPS-Anfrage.json (Homepage/Konfigurator)
+                anhang_ordner.mkdir(parents=True, exist_ok=True)
+                ziel = anhang_ordner / _sicherer_name(name)
+                try:
+                    a.SaveAsFile(str(ziel))
+                    from .anfrage_format import ist_anfrage_json
+                    m.daten = ist_anfrage_json(name, ziel.read_bytes())
+                except Exception:  # noqa: BLE001 – dann gilt der Textblock
                     pass
                 continue
             if name.lower().endswith(ANHANG_ENDUNGEN):
@@ -210,6 +245,18 @@ class Outlook:
         except Exception as e:  # noqa: BLE001
             raise OutlookFehler("Die Mail wurde nicht mehr gefunden – evtl. schon verschoben oder gelöscht.") from e
         item.Delete()
+
+
+def benoetigte_ordner(einstellungen) -> list[str]:
+    """Alle Ordner, die die eingestellte Struktur braucht: die Lese-Ordner, je Art das Erledigt-Ziel und bei
+    gemeinsamen Postfächern „In Bearbeitung“."""
+    pfade = []
+    for o in einstellungen.anfrageordner:
+        pfade.append(o.pfad)
+        pfade.append(unterordner(o.pfad, einstellungen.erledigt_fuer(o.typ)))
+        if o.gemeinsam:
+            pfade.append(unterordner(o.pfad, einstellungen.ordner_in_bearbeitung))
+    return list(dict.fromkeys(pfade))
 
 
 def unterordner(pfad: str, name: str) -> str:

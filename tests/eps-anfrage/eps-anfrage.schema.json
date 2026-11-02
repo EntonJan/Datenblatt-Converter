@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eps-anfrage-1",
+  "title": "EPS-Anfrage, Format 1",
+  "description": "Eine Kundenanfrage aus Homepage-Anfragefeld, Produktkonfigurator (Anfragekorb) oder Shop. Wird als Mail-Anhang EPS-Anfrage.json verschickt; derselbe Inhalt steht als Textblock im Mailtext.",
+  "type": "object",
+  "required": ["format", "version", "anfrage_nr", "erstellt", "quelle", "kunde", "positionen", "nachricht", "datenschutz"],
+  "properties": {
+    "format": {"const": "eps-anfrage"},
+    "version": {"const": 1},
+    "anfrage_nr": {"type": "string", "description": "Eindeutig, z. B. EPS-20261102-114805-7F3A"},
+    "erstellt": {"type": "string", "description": "ISO 8601 mit Zeitzone"},
+    "quelle": {"enum": ["produktkonfigurator", "anfrageformular", "shop"]},
+    "sprache": {"enum": ["de", "en"], "default": "de"},
+    "kunde": {
+      "type": "object",
+      "required": ["email"],
+      "properties": {
+        "firma": {"type": "string"}, "rechtsform": {"type": "string"}, "anrede": {"type": "string"},
+        "vorname": {"type": "string"}, "nachname": {"type": "string"}, "email": {"type": "string"},
+        "telefon": {"type": "string"}, "strasse": {"type": "string"}, "plz": {"type": "string"},
+        "ort": {"type": "string"}, "land": {"type": "string", "description": "ISO-Code, z. B. DE"},
+        "ust_id": {"type": "string"}
+      }
+    },
+    "positionen": {
+      "type": "array",
+      "description": "Leer bei reiner Textanfrage",
+      "items": {
+        "type": "object",
+        "required": ["bestellnummer", "menge"],
+        "properties": {
+          "bestellnummer": {"type": "string"}, "name": {"type": "string"},
+          "menge": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "suche": {
+      "type": "object",
+      "description": "Was der Kunde im Konfigurator eingegeben hatte (optional)",
+      "properties": {
+        "text": {"type": "string"}, "geraetetyp": {"type": "string"},
+        "filter": {"type": "object", "description": "Schlüssel aus der Filter-Registry des Konfigurators"}
+      }
+    },
+    "wunschtermin": {"type": "string", "default": "ASAP"},
+    "nachricht": {"type": "string", "description": "Freitext, mehrzeilig"},
+    "datenschutz": {"type": "boolean"}
+  }
+}

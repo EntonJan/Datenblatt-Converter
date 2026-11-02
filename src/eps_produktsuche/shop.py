@@ -64,6 +64,7 @@ class Geraet:
     rueckspeisung: bool = False     # Netzrückspeisung / regenerativ
     seite_url: str = ""             # Shopseite, auf der das Gerät steht (Serie/Folgeseite) + Sprungmarke zur Zeile
     u_eingang: float | None = None  # DC-Nenneingangsspannung (Wechselrichter, DC/DC), aus der Typbezeichnung
+    phasen: int | None = None       # AC-Ausgang: 3 = dreiphasig, 1 = einphasig, None = nicht angegeben
 
     @property
     def kann_senken(self) -> bool:
@@ -556,6 +557,24 @@ def pruefen(neu: list[Geraet], alt: list[Geraet]) -> str:
     return ""
 
 
+_DREI = re.compile(r"3\s*-?\s*ph|3\s*N?\s*~|\bL-L\b|3\s*x\s*\d{3}\s*V|dreiphas|drehstrom|three[- ]phase|"
+                   r"(?:^|[\s/,(-])3P(?:\b|$)", re.I)
+_EIN = re.compile(r"1\s*-?\s*ph|1\s*~|einphas|single[- ]phase|(?:^|[\s/,(-])1P(?:\b|$)", re.I)
+
+
+def phasen_aus(g: Geraet) -> int | None:
+    """Phasenzahl des AC-Ausgangs aus Name und Shoptexten („3ph.+N“, „L-L“, „3x 400V“, „-3P“, „1ph.“).
+    DC-Ausgänge und Geräte ohne Angabe: None."""
+    if not (g.ac or g.geraetetyp in ("AC/AC", "DC/AC")):
+        return None
+    text = " ".join((g.name, g.spannung, g.strom, g.leistung))
+    if _DREI.search(text):
+        return 3
+    if _EIN.search(text):
+        return 1
+    return None
+
+
 def laden(pfad: Path) -> tuple[list[Geraet], str]:
     """(Geräte, Stand) – leere Liste, wenn noch nichts gespeichert ist."""
     try:
@@ -570,6 +589,7 @@ def laden(pfad: Path) -> tuple[list[Geraet], str]:
         g.rueckspeisung = ist_rueckspeisend(g.name, g.serie)   # gespeicherte Werte vor dem 30.10.2026 waren teils falsch
         if g.u_eingang is None:                   # Eingangsspannung kommt aus dem Namen – geht ohne neues Einlesen
             g.u_eingang = eingang_aus_name(g.name, g.geraetetyp)
+        g.phasen = phasen_aus(g)                  # aus den Texten – geht ohne neues Einlesen
     return geraete, d.get("stand", "")
 
 
