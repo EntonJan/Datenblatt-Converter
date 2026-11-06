@@ -36,6 +36,8 @@ GRUEN_BG = ("#E3F2E4", "#18331F")
 GRUEN = ("#1E5E22", "#7BD88F")
 GRUEN_RAND = ("#2E7D32", "#4CAF66")
 ORANGE = ("#8E5A00", "#F2C46D")
+ROT_BG = ("#FDE2E1", "#4A1616")      # Ausschluss (z. B. nicht unser Sortiment) – stärker als Gelb
+ROT_TEXT = ("#8B1A1A", "#FFB4AB")
 LINK = ("#35528C", "#7CC8E4")
 TEST = ("#B26A00", "#FFD54F")
 

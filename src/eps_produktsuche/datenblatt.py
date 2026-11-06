@@ -254,7 +254,7 @@ def _sortiment_pruefen(fg: "Fremdgeraet", volltext: str) -> None:
     from . import sortiment
     fg.fachfremd = sortiment.fachfremd(volltext)
     if fg.fachfremd:
-        fg.hinweise.insert(0, "⚠ " + sortiment.hinweis(fg.fachfremd))
+        fg.hinweise.insert(0, "⛔ " + sortiment.hinweis(fg.fachfremd))
 
 
 def _eingang_setzen(fg: Fremdgeraet, text: str) -> None:

@@ -59,5 +59,5 @@ def fachfremd(text: str) -> list[str]:
 
 
 def hinweis(funde: list[str]) -> str:
-    return ("Möglicherweise kein Produkt aus unserem Sortiment (" + ", ".join(f"„{f}“" for f in funde) +
-            ") – Anfrage prüfen, bevor ein Angebot rausgeht.")
+    return ("Nicht aus unserem Sortiment (" + ", ".join(f"„{f}“" for f in funde) +
+            ") – Ausschlusskriterium, keine Weiterbearbeitung nötig.")

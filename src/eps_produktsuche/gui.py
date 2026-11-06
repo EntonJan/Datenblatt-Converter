@@ -1323,8 +1323,9 @@ class App(ctk.CTk):
             self.eingabe.set(erkennung.suchtext)
         self.info.configure(text=f"{nr}: {'Bestellung' if nr.startswith('Bes') else 'Anfrage'} von "
                                  f"{k.firmenname or k.email} übernommen"
-                                 + (f" – {len(mail.anhaenge)} Anhang/Anhänge" if mail.anhaenge else "")
-                                 + (f"\n⚠ {sortiment.hinweis(erkennung.fachfremd)}" if erkennung.fachfremd else ""))
+                                 + (f" – {len(mail.anhaenge)} Anhang/Anhänge" if mail.anhaenge else ""))
+        if erkennung.fachfremd and self.fremd is None:     # mit Datenblatt färbt _fremd_anzeigen den Kasten rot
+            self._ausschluss_mail(erkennung.fachfremd, f"Mail: {mail.betreff} – {k.firmenname or k.email}")
         self.feld.focus_set()
 
     def _anhang_waehlen(self, anhaenge: list):
@@ -1503,8 +1504,29 @@ class App(ctk.CTk):
                                      f"\n⚠ {len(offen)} offene Punkte – beim Kunden nachfragen bzw. vor dem Angebot klären (hier klicken)")
             self.fremd_rahmen.configure(fg_color=TH.GELB)
             self.fremd_lbl.configure(text_color=TH.GELB_TEXT)
+        self._ausschluss_faerben()
         if offen and not still:
             OffenePunkteDialog(self, offen, self.fremd.datei, self._kundenfragen())
+
+    def _ausschluss_faerben(self):
+        """Nicht unser Sortiment = Ausschlusskriterium: Kasten rot statt gelb."""
+        aus_dok = self.fremd is not None and getattr(self.fremd, "fachfremd", None)
+        aus_mail = self.vorgang and getattr(self.vorgang[1], "fachfremd", None)
+        if not (aus_dok or aus_mail):
+            return
+        text = self.fremd_lbl.cget("text")
+        zeilen = [z for z in text.split("\n") if not z.startswith("⛔")]
+        kopf = f"⛔ {sortiment.hinweis(aus_dok or aus_mail)}"          # Ausschluss immer als erste Zeile
+        self.fremd_lbl.configure(text="\n".join([kopf] + zeilen))
+        self.fremd_rahmen.configure(fg_color=TH.ROT_BG)
+        self.fremd_lbl.configure(text_color=TH.ROT_TEXT)
+
+    def _ausschluss_mail(self, funde: list[str], mailinfo: str):
+        """Mail ohne Datenblatt, aber fachfremd: roter Kasten unter der Suche."""
+        self.fremd_rahmen.configure(fg_color=TH.ROT_BG)
+        self.fremd_lbl.configure(text=f"⛔ {sortiment.hinweis(funde)}\n{mailinfo}", text_color=TH.ROT_TEXT)
+        self.rolle_knopf.pack_forget()
+        self.fremd_rahmen.pack(fill="x", pady=(10, 0), after=self.such_karte)
 
     def _fremd_anzeigen(self, fg, aus_verlauf: bool = False):
         self.fremd = fg
@@ -1531,6 +1553,7 @@ class App(ctk.CTk):
             hinweise = [h for h in fg.hinweise[1:] if not h.startswith("Klären:")]
         self.fremd_rahmen.configure(fg_color=TH.CHIP)
         self.fremd_lbl.configure(text="\n".join([kopf, werte or "Keine Werte gefunden."] + hinweise), text_color=TH.TEXT)
+        self._ausschluss_faerben()
         pfad = getattr(self, "_fremd_pfad", None)
         if pfad and pfad.name == fg.datei and not aus_verlauf:
             self.rolle_knopf.configure(text="Doch Vergleichsgerät …" if fg.rolle == "verbraucher"

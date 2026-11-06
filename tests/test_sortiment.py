@@ -34,4 +34,4 @@ def test_datenblatt_hinweis(tmp_path):
     from eps_produktsuche import datenblatt as D
     fg = D.Fremdgeraet(datei="x.pdf")
     D._sortiment_pruefen(fg, "Elektronischer Lenkungsregler; Spannung 24V; Strom 40A")
-    assert fg.fachfremd == ["Lenkungsregler"] and fg.hinweise[0].startswith("⚠ Möglicherweise kein Produkt")
+    assert fg.fachfremd == ["Lenkungsregler"] and fg.hinweise[0].startswith("⛔ Nicht aus unserem Sortiment")

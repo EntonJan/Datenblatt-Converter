@@ -499,8 +499,12 @@ class AnfragenSeite(ctk.CTkFrame):
                    else "") + (("Bitte prüfen: " + " · ".join(e.unsicher)) if e.unsicher else "")
         hinweis = hinweis or \
             ((f"EPS-Anfrage {e.anfrage_nr} – vollständig erkannt" if e.anfrage_nr else "Homepage-Formular – vollständig erkannt") if e.formular else "")
-        self.unsicher.configure(text=hinweis, fg_color=TH.GELB if e.unsicher else (TH.GRUEN_BG if hinweis else "transparent"),
-                                text_color=TH.GELB_TEXT if e.unsicher else TH.GRUEN)
+        if e.fachfremd:                                     # Ausschlusskriterium: rot statt gelb
+            self.unsicher.configure(text="⛔ " + hinweis.replace("Bitte prüfen: ", "", 1), fg_color=TH.ROT_BG,
+                                    text_color=TH.ROT_TEXT)
+        else:
+            self.unsicher.configure(text=hinweis, fg_color=TH.GELB if e.unsicher else (TH.GRUEN_BG if hinweis else "transparent"),
+                                    text_color=TH.GELB_TEXT if e.unsicher else TH.GRUEN)
         herkunft = {"produktkonfigurator": f"Produktkonfigurator · {len(e.positionen)} Artikel" if e.positionen
                     else "Produktkonfigurator", "anfrageformular": "Homepage-Anfrage", "shop": "Shop"}
         text = herkunft.get(e.quelle) or ("Homepage-Formular" if e.formular else
