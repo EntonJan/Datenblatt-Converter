@@ -56,7 +56,7 @@ def zielordner(einstellungen, typ: str, art: str) -> str:
 
 def geraete_finden(mail, e: K.Erkennung, geraete: list, datenblatt_lesen=None) -> int:
     """Wie viele Geräte würde die Suche liefern? 0 = „Selbst prüfen“. Ohne Oberfläche, ohne Rückfragen."""
-    if not geraete:
+    if not geraete or getattr(e, "fachfremd", None):     # klingt nicht nach unserem Sortiment → selbst prüfen
         return 0
     nummern = {str(g.bestellnummer) for g in geraete}
     if e.positionen:
@@ -82,6 +82,8 @@ def geraete_finden(mail, e: K.Erkennung, geraete: list, datenblatt_lesen=None) -
             a = Q.anfrage_lesen(fg.anfrage())
         except Exception:  # noqa: BLE001 – unlesbares Datenblatt → selbst prüfen
             continue
+        if getattr(fg, "fachfremd", None):
+            return 0
         if not a.leer():
             n = sum(1 for t in Q.suchen(geraete, a, knapp_zeigen=False) if t.kategorie != Q.KNAPP_DARUNTER)
             if n:

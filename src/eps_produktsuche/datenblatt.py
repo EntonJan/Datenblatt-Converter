@@ -37,6 +37,7 @@ class Fremdgeraet:
     geraetetyp: list[str] = field(default_factory=list)
     hersteller_typ: str = ""
     hinweise: list[str] = field(default_factory=list)
+    fachfremd: list[str] = field(default_factory=list)   # Produktbegriffe außerhalb unseres Sortiments
     merkmale: list[str] = field(default_factory=list)   # z. B. ["19Zoll", "bidirektional", "400Hz"] – Teil der Anfrage
     pflicht: list[str] = field(default_factory=list)    # markierte Stellen (Textmarker) = muss genau erfüllt sein
     eingang: float | None = None                        # DC-Eingangsspannung (Wechselrichter, DC/DC)
@@ -245,7 +246,15 @@ def lesen(pfad: Path, modell: auslesen.Modellspalte | None = None,
     if ergaenzt:
         fg.hinweise.append("Ohne feste Bezeichnung erkannt (bitte kurz prüfen): " + ", ".join(ergaenzt) + ".")
     fg.pflicht = anforderung.pdf_markierungen(pfad)
+    _sortiment_pruefen(fg, volltext)
     return _abschliessen(fg)
+
+
+def _sortiment_pruefen(fg: "Fremdgeraet", volltext: str) -> None:
+    from . import sortiment
+    fg.fachfremd = sortiment.fachfremd(volltext)
+    if fg.fachfremd:
+        fg.hinweise.insert(0, "⚠ " + sortiment.hinweis(fg.fachfremd))
 
 
 def _eingang_setzen(fg: Fremdgeraet, text: str) -> None:
@@ -296,6 +305,7 @@ def _word_lesen(pfad: Path, variante: allgemein.Variante | None) -> Fremdgeraet:
         fg.hinweise.append(_merkmal_hinweis(fg.merkmale, "Dokument"))
     name = _produktname(doc.text) or Path(pfad).stem.replace("_", " ")
     fg.hersteller_typ = f"{name} ({variante.label})" if variante else name
+    _sortiment_pruefen(fg, doc.text)
     return _abschliessen(fg)
 
 

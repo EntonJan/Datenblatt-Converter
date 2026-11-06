@@ -80,6 +80,7 @@ class Erkennung:
     art_sicher: bool = True
     bestell_nr: str = ""         # Bestellnummer des Kunden (Purchase Order)
     angebots_nr: str = ""        # unser Angebot, auf das sich die Mail bezieht
+    fachfremd: list[str] = field(default_factory=list)   # Produktbegriffe außerhalb unseres Sortiments (Hinweis)
 
 
 INTERN = ("eps-germany.de",)     # eigene Domains: Mails von hier sind Weiterleitungen, nie der Kunde
@@ -588,4 +589,14 @@ def erkennen(mail: Mail, intern=INTERN) -> Erkennung:
     if not e.suchtext:
         e.unsicher.append("Keine technischen Werte in der Mail – Anhang oder Text prüfen")
     art_erkennen(e, mail, nachricht)
+    _sortiment_pruefen(e, f"{mail.betreff}\n{nachricht}")
     return e
+
+
+def _sortiment_pruefen(e: Erkennung, text: str) -> None:
+    """Hinweis, wenn die Anfrage nach etwas klingt, das wir nicht führen (Text ohne Signatur – Firmennamen wie
+    „Müller Hydraulik GmbH“ zählen nicht)."""
+    from . import sortiment
+    e.fachfremd = sortiment.fachfremd(text)
+    if e.fachfremd:
+        e.unsicher.insert(0, sortiment.hinweis(e.fachfremd))

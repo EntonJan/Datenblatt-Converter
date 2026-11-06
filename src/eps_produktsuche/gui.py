@@ -20,7 +20,7 @@ from tkinter import ttk, messagebox
 
 import customtkinter as ctk
 
-from . import __version__, shop, suche as Q, verlauf, aktualisierung, thema as TH
+from . import __version__, shop, sortiment, suche as Q, verlauf, aktualisierung, thema as TH
 from .einstellungen import Einstellungen
 
 TESTVERSION = "dev" in __version__        # Test-Builds vom Branch: kein Selbst-Update, keine Aufräumaktion
@@ -1323,7 +1323,8 @@ class App(ctk.CTk):
             self.eingabe.set(erkennung.suchtext)
         self.info.configure(text=f"{nr}: {'Bestellung' if nr.startswith('Bes') else 'Anfrage'} von "
                                  f"{k.firmenname or k.email} übernommen"
-                                 + (f" – {len(mail.anhaenge)} Anhang/Anhänge" if mail.anhaenge else ""))
+                                 + (f" – {len(mail.anhaenge)} Anhang/Anhänge" if mail.anhaenge else "")
+                                 + (f"\n⚠ {sortiment.hinweis(erkennung.fachfremd)}" if erkennung.fachfremd else ""))
         self.feld.focus_set()
 
     def _anhang_waehlen(self, anhaenge: list):
