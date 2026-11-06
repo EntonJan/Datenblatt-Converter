@@ -102,15 +102,26 @@ def _zahlenreihe(rest: str) -> list[tuple[float, str]]:
     return out
 
 
+_TRENNER = re.compile(r"\s*[;|]\s*")
+
+
+def _abschnitte(text: str):
+    """Zeilen, mehrere Angaben einer Zeile getrennt: „Spannung 24V; Strom 40A“ → „Spannung 24V“, „Strom 40A“.
+    Sonst gilt nur der Text vor der ersten Zahl als Bezeichnung, und alles Weitere hinge an der Spannung."""
+    for roh in (text or "").splitlines():
+        zeile = re.sub(r"^[\s•\-*\uf000-\uf8ff■▪●◦]+", "", roh).strip()
+        teile = [t.strip() for t in _TRENNER.split(zeile)] if _TRENNER.search(zeile) else [zeile]
+        for teil in teile:
+            if teil:
+                yield teil
+
+
 def erkennen(text: str) -> Erkennung:
     erg = Erkennung()
     abschnitt = ""
     reihen: dict[str, list[list[tuple[float, str]]]] = {"V": [], "A": [], "W": []}
     einzel: dict[str, list[tuple[float, str, int]]] = {"V": [], "A": [], "W": []}   # (Wert, Text, Priorität)
-    for roh in (text or "").splitlines():
-        zeile = re.sub(r"^[\s•\-*\uf000-\uf8ff■▪●◦]+", "", roh).strip()
-        if not zeile:
-            continue
+    for zeile in _abschnitte(text):
         if _UEBERSCHRIFT.match(zeile) and not re.search(r"\d", zeile):
             abschnitt = zeile.lower()
             continue

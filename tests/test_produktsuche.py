@@ -776,3 +776,14 @@ def test_update_waehlt_ordner_zip_und_installiert_ordner(tmp_path, monkeypatch):
     weg = A.alte_ordner_entfernen(exe=neu, versuche=1)
     assert weg == ["EPS-Produktsuche-v1.0.0"]
     assert sorted(p.name for p in basis.iterdir()) == ["EPS-Produktsuche-Daten", "EPS-Produktsuche-v99.0.0"]
+
+
+def test_mehrere_angaben_in_einer_zeile_werden_getrennt():
+    """Anfrage-PDF (Impexron, 06.11.2026): „Spannung 24V; Strom 40A“ – Strom fehlte, alles hing an der Spannung."""
+    from eps_produktsuche import allgemein
+    e = allgemein.erkennen("Elektronischer Lenkungsregler; Modell 1220-2201; Teilenummer 17728700;\n"
+                           "Spannung 24V; Strom 40A")
+    assert (e.umax, e.imax) == (24.0, 40.0)
+    assert e.spannung == "Spannung 24V" and e.strom == "Strom 40A"
+    e = allgemein.erkennen("Ausgangsspannung 0-60 V | Ausgangsstrom 0-20 A | Leistung 1200 W")
+    assert (e.umax, e.imax, e.pmax) == (60.0, 20.0, 1200.0)
