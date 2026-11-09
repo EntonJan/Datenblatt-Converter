@@ -629,6 +629,8 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
 
         def fertig(text, fehler):
             self.weclapp_status.configure(text=str(fehler) if fehler else text)
+            if not fehler and e.weclapp_adresse and e.weclapp_adresse.lower() != "demo":
+                self.app.starttag_melden("t6")                  # Checkliste Weclapp-Start
         weclapp_dialog._hintergrund(self, arbeit, fertig)
 
     def waehlen(self, var: tk.StringVar):

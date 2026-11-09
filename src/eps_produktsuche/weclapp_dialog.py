@@ -179,6 +179,8 @@ class WeclappDialog(ctk.CTkToplevel):
         if erg.anfrage_ids:
             text.append(f"{len(erg.anfrage_ids)} Herstelleranfrage(n) erzeugt")
         self._meldung(" · ".join(text), TH.GRUEN_BG, TH.GRUEN)
+        if self.app.einstellungen.weclapp_adresse.lower() != "demo" and hasattr(self.app, "starttag_melden"):
+            self.app.starttag_melden("t7")                  # Checkliste Weclapp-Start: Probevorgang angelegt
         leiste = ctk.CTkFrame(self.leiste_rahmen, fg_color="transparent")
         leiste.pack(fill="x", pady=(8, 0))
         if not erg.links:

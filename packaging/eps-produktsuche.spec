@@ -18,7 +18,7 @@ a = Analysis(
                    "eps_produktsuche.outlook", "eps_produktsuche.einstellungen", "eps_produktsuche._build", "eps_produktsuche.weclapp",
                    "eps_produktsuche.weclapp_attrappe", "eps_produktsuche.weclapp_dialog", "eps_produktsuche.zugang",
                    "eps_produktsuche.datenquelle", "eps_produktsuche.weclapp_felder",
-                   "eps_produktsuche.thema", "eps_produktsuche.seiten", "eps_produktsuche.verbraucher", "eps_produktsuche.anfrage_format", "eps_produktsuche.eingang", "eps_produktsuche.vorgangsnummer", "eps_produktsuche.selectline", "eps_produktsuche.sortiment", "customtkinter", "darkdetect",
+                   "eps_produktsuche.thema", "eps_produktsuche.seiten", "eps_produktsuche.verbraucher", "eps_produktsuche.anfrage_format", "eps_produktsuche.eingang", "eps_produktsuche.vorgangsnummer", "eps_produktsuche.selectline", "eps_produktsuche.sortiment", "eps_produktsuche.starttag", "customtkinter", "darkdetect",
                    "keyring.backends.Windows", "win32ctypes.pywin32.win32cred", "extract_msg",
                    "win32com.client", "pythoncom", "win32timezone", "pywintypes", "eps_produktsuche.aktualisierung", "eps_converter.auslesen",
                    "eps_converter.importieren", "PIL._tkinter_finder", "tkinterdnd2"],

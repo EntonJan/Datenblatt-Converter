@@ -532,6 +532,7 @@ class App(ctk.CTk):
         # Die übrigen Seiten erst nach dem ersten Zeichnen bauen, nacheinander – der Start wartet nicht darauf,
         # und der erste Wechsel ist trotzdem sofort da
         self.after(400, self._seiten_vorbereiten)
+        self.after(700, self._starttag_aufbauen)
         self.after(2500, self._vorsortieren_starten)
         self.after(4000, self._eingang_pruefen)
         self.after(50, startbild_schliessen)                 # Fenster steht – Startbild weg
@@ -1255,8 +1256,37 @@ class App(ctk.CTk):
             pass
 
     # ------------------------------------------------------------------ Anfragen / Weclapp (experimentell)
+    # ------------------------------------------------------------------ Weclapp-Starttag (rechte Seitenleiste)
+    def _starttag_aufbauen(self):
+        if getattr(self, "starttag", None) is not None or not self.einstellungen.experimentell:
+            return
+        from .starttag import StarttagLeiste
+        self.starttag = StarttagLeiste(self, self)
+        self.starttag.aktualisieren()                       # zeigt sich über starttag_sichtbar(), solange etwas rot ist
+
+    def starttag_sichtbar(self, offen: bool):
+        leiste = getattr(self, "starttag", None)
+        if leiste is None:
+            return
+        if offen and self.einstellungen.experimentell:
+            leiste.grid(row=0, column=2, sticky="ns")
+        else:
+            leiste.grid_remove()
+
+    def starttag_melden(self, pid: str):
+        leiste = getattr(self, "starttag", None)
+        if leiste is None:
+            from .starttag import Stand, DATEI
+            Stand(self.pfad.parent / DATEI).setzen(pid, True)
+        else:
+            leiste.melden(pid)
+
     def _experimentell_zeigen(self):
         e = self.einstellungen
+        if getattr(self, "starttag", None) is not None:
+            self.starttag.aktualisieren()
+        elif e.experimentell and getattr(self, "seiten", None) and "suche" in self.seiten:
+            self.after(10, self._starttag_aufbauen)
         if e.experimentell:
             self.nav["anfragen"].pack(fill="x", pady=1, after=self.nav["suche"])
         else:
