@@ -117,6 +117,13 @@ LAENDER = {
     "usa": "US", "united states": "US", "kanada": "CA", "canada": "CA", "luxemburg": "LU", "luxembourg": "LU",
     "ungarn": "HU", "hungary": "HU", "slowakei": "SK", "slovakia": "SK", "slowenien": "SI", "slovenia": "SI",
     "portugal": "PT", "türkei": "TR", "turkey": "TR", "indien": "IN", "india": "IN", "china": "CN", "israel": "IL",
+    "chile": "CL", "brasilien": "BR", "brazil": "BR", "brasil": "BR", "mexiko": "MX", "mexico": "MX",
+    "argentinien": "AR", "argentina": "AR", "kolumbien": "CO", "colombia": "CO", "japan": "JP",
+    "südkorea": "KR", "south korea": "KR", "korea": "KR", "taiwan": "TW", "australien": "AU", "australia": "AU",
+    "griechenland": "GR", "greece": "GR", "rumänien": "RO", "romania": "RO", "bulgarien": "BG", "bulgaria": "BG",
+    "kroatien": "HR", "croatia": "HR", "südafrika": "ZA", "south africa": "ZA", "russland": "RU", "russia": "RU",
+    "vereinigte arabische emirate": "AE", "united arab emirates": "AE", "uae": "AE", "singapur": "SG",
+    "singapore": "SG", "thailand": "TH", "vietnam": "VN", "malaysia": "MY", "ägypten": "EG", "egypt": "EG",
 }
 VORWAHL = {"49": "DE", "43": "AT", "41": "CH", "33": "FR", "39": "IT", "31": "NL", "32": "BE", "34": "ES", "48": "PL",
            "420": "CZ", "45": "DK", "46": "SE", "47": "NO", "358": "FI", "44": "GB", "353": "IE", "1": "US",
@@ -187,23 +194,50 @@ _FELDER = {"firma": "firma", "company": "firma", "rechtsform": "rechtsform", "an
            "street": "strasse", "plz": "plz", "zip": "plz", "ort": "ort", "city": "ort", "land": "land",
            "country": "land", "ust-idnr.": "ust_id", "vat id": "ust_id", "produkt": "produkt", "product": "produkt",
            "menge": "menge", "quantity": "menge", "wunschtermin": "termin", "nachricht": "nachricht",
-           "message": "nachricht"}
+           "message": "nachricht", "postcode": "plz", "post code": "plz", "postal code": "plz", "telephone": "telefon",
+           "tel": "telefon", "tel.": "telefon", "mobile": "telefon", "vat": "ust_id", "vat no": "ust_id",
+           "vat number": "ust_id", "delivery date": "termin", "desired date": "termin",
+           # Artikelnummer (deutsch/englisch) – „ID“ ist die Shop-interne ID und wird bewusst nur ignoriert
+           "artikelnummer": "artnr", "artikel-nr": "artnr", "artikel-nr.": "artnr", "art.-nr.": "artnr",
+           "art.nr.": "artnr", "bestellnummer": "artnr", "bestell-nr": "artnr", "bestell-nr.": "artnr",
+           "product model": "artnr", "product number": "artnr", "product no": "artnr", "product no.": "artnr",
+           "product code": "artnr", "part number": "artnr", "part no": "artnr", "part no.": "artnr",
+           "article number": "artnr", "article no": "artnr", "article no.": "artnr", "item number": "artnr",
+           "item no": "artnr", "item no.": "artnr", "model": "artnr", "model number": "artnr", "id": "shop_id"}
+_FORMULAR_ENDE = re.compile(r"(?im)^[ \t>]*(?:EPS Stromversorgung GmbH|-{3,}\s*(?:Ende der weitergeleiteten|End of forwarded)).*$")
+_FORMULAR_KERN = {"vorname", "nachname", "firma", "email", "produkt", "artnr"}
 
 
-def _formular(text: str) -> dict | None:
-    m = _FORMULAR.search(text or "")
-    if not m:
-        return None
+def _formular_werte(block: str) -> dict[str, str]:
     werte: dict[str, str] = {}
     letzter = ""
-    for zeile in m.group(1).strip().split("\n"):
-        km = re.match(r"\s*([\w .\-ä-üÄ-Üß]+?)\s*:\s*(.*)$", zeile)
+    for zeile in block.strip().split("\n"):
+        km = re.match(r"[ \t>]*([\w .\-ä-üÄ-Üß]+?)\s*:\s*(.*)$", zeile)
         if km and km.group(1).lower() in _FELDER:
             letzter = _FELDER[km.group(1).lower()]
             werte[letzter] = km.group(2).strip()
         elif letzter == "nachricht":                       # mehrzeilige Nachricht
             werte[letzter] += "\n" + zeile.rstrip()
+    if "nachricht" in werte:
+        werte["nachricht"] = werte["nachricht"].strip()
     return werte
+
+
+def _formular(text: str) -> dict | None:
+    """Homepage-Formular: mit Klammer „--- EPS-Anfrage ---“ oder – wie das Shop-Kontaktformular (deutsch/englisch) –
+    als blanke Liste „Feld: Wert“ (mind. 4 bekannte Felder, darunter E-Mail und Name/Firma/Produkt). Die Fußzeile von
+    EPS (Anschrift, USt-IdNr.) gehört nie dazu."""
+    text = text or ""
+    m = _FORMULAR.search(text)
+    if m:
+        return _formular_werte(m.group(1))
+    ende = _FORMULAR_ENDE.search(text)
+    kern = text[:ende.start()] if ende else text
+    werte = _formular_werte(kern)
+    felder = set(werte)
+    if len(felder - {"shop_id"}) >= 4 and "email" in felder and felder & (_FORMULAR_KERN - {"email"}):
+        return werte
+    return None
 
 
 # ------------------------------------------------------------------------ freie Mail
@@ -556,8 +590,14 @@ def erkennen(mail: Mail, intern=INTERN) -> Erkennung:
             menge = None
         e = Erkennung(kunde=k, anfrage=(produkt + "\n" + nachricht).strip(), formular=True, menge=menge,
                       termin=werte.get("termin") or "ASAP")
+        artnr = re.sub(r"\s", "", werte.get("artnr", ""))
+        if artnr:
+            e.anfrage = (produkt + (f" ({artnr})" if artnr not in produkt else "") + "\n" + nachricht).strip()
         bm = re.search(r"\((\d{6})\)|\b(\d{6})\b", produkt)
-        e.suchtext = (bm.group(1) or bm.group(2)) if bm else suchtext(e.anfrage)
+        if re.fullmatch(r"\d{6}", artnr):
+            e.suchtext = artnr                               # eindeutige Artikelnummer schlägt jeden Text
+        else:
+            e.suchtext = (bm.group(1) or bm.group(2)) if bm else (artnr or suchtext(e.anfrage))
         e.unsicher = [f for f, v in (("Firma", k.firma), ("E-Mail", k.email), ("Land", k.land)) if not v]
         return e
     if ist_intern(mail.absender_email, intern) or (not mail.absender_email and mail.eingebettet):

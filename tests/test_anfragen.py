@@ -382,3 +382,71 @@ def test_outlook_fehlende_ordner_anlegen():
     assert len(bestellungen) == 1 and sorted(k.Name for k in bestellungen[0]._kinder) == \
         ["Automatisch", "Erledigt", "Selbst prüfen"]
     assert set(dict(outlook.Outlook(namespace=ns).ordner_anlegen(pfade)).values()) == {"vorhanden"}   # zweiter Klick
+
+
+# ---------------------------------------------------------------- englisches Shop-Kontaktformular (ohne Klammer)
+ENGLISCHES_FORMULAR = """
+----- Weitergeleitete Nachricht von EPS - Contact form <info@eps-germany.de> -----
+     Datum: Mon, 16 Nov 2026 13:25:09 +0100
+       Von: EPS - Contact form <info@eps-germany.de <mailto:info@eps-germany.de> >
+Antwort an: Ignacio Manriquez <ignacio.manriquez@lambdacore.cl <mailto:ignacio.manriquez@lambdacore.cl> >
+   Betreff: Your inquiry at EPS
+        An: EPS - Contact form <info@eps-germany.de <mailto:info@eps-germany.de> >
+
+ <https://www.eps-germany.de/shop/templates/bootstrap3/img/logo.gif> \t
+You have received a request for quotation\t 
+
+Below are the details of the request:
+
+First name: Ignacio
+Last name: Manriquez
+E-mail: ignacio.manriquez@lambdacore.cl
+Company: LambdaCore SpA
+Street: Calle Coquimbo 607, depto C-21, Chiguayante
+Postcode: 4110661
+City: Concepcion
+Country: Chile
+Telephone: 958556898\t 
+Product: E/PS 2384-05B Triple Laboratory Power Supply
+ID: 4451
+Product model: 123461
+Quantity: 1\t 
+Message:\t 
+
+
+
+
+
+EPS Stromversorgung GmbH - Electronic Power Supplies
+Alter Postweg 101
+86159 Augsburg
+E-Mail: info@eps-germany.de
+USt-IdNr.: DE157793348
+Handelsregister Amtsgericht Augsburg HRB 15799
+
+----- Ende der weitergeleiteten Nachricht -----
+"""
+
+
+def test_englisches_kontaktformular_weitergeleitet():
+    e = K.erkennen(Mail(absender_name="SALES", absender_email="info@eps-germany.de", text=ENGLISCHES_FORMULAR))
+    k = e.kunde
+    assert e.formular and e.suchtext == "123461" and e.menge == 1       # nicht „Quelle“, nicht die Shop-ID 4451
+    assert (k.firma, k.rechtsform, k.vorname, k.nachname, k.land) == ("LambdaCore", "SpA", "Ignacio", "Manriquez", "CL")
+    assert k.email == "ignacio.manriquez@lambdacore.cl" and k.plz == "4110661" and k.ort == "Concepcion"
+    assert k.ust_id == "" and "eps-germany" not in k.web                # EPS-Fußzeile ist nie Kundendaten
+    assert not any("EPS-intern" in u for u in e.unsicher)
+    assert "123461" in e.anfrage and "4451" not in e.suchtext
+
+
+def test_artikelnummer_labels_deutsch_und_englisch():
+    for label in ("Artikelnummer", "Bestellnummer", "Product number", "Part number", "Product model", "Article no."):
+        text = (f"First name: A\nLast name: B\nE-mail: a.b@firma-x.de\nCompany: Firma X GmbH\nProduct: Netzgerät\n"
+                f"{label}: 200423\nQuantity: 2\nMessage: Bitte Angebot")
+        e = K.erkennen(Mail(absender_email="a.b@firma-x.de", text=text))
+        assert e.suchtext == "200423" and e.menge == 2, label
+
+
+def test_normale_mail_mit_zwei_labels_ist_kein_formular():
+    text = "Hallo,\nName: Max\nE-mail: max@firma-x.de\nwir brauchen 60V 100A.\n\nGrüße Max"
+    assert K._formular(text) is None
