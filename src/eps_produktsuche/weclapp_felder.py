@@ -31,7 +31,8 @@ STANDARD = {
     "hersteller_bestellnummer": ("Bezugsquelle: Artikelnummer beim Lieferanten", "articleSupplySource.supplierArticleNumber",
                                  "Hersteller-Bestellnummer"),
     "bilder": ("Artikelbilder", "articleImages", "Bilder werden in Weclapp hochgeladen"),
-    "optionen": ("Zubehör / verknüpfte Artikel", "—", "Optionen sind eigene Artikel mit einheitlicher Optionsnummer"),
+    "optionen": ("Optionen (Katalog)", "—", "Optionskatalog 1–68; jede Option ist ein eigener Artikel 80 + Kategorie-Ziffer + "
+                 "Nummer (3-stellig), z. B. 802001; die Nummern am Gerät stehen im Attribut eps_optionen"),
 }
 
 TYP = {"Text": "STRING", "Ja/Nein": "BOOLEAN", "Schnittstelle": "LIST", "Auswahl": "LIST",
@@ -56,7 +57,11 @@ ZUSATZ = [
     ("datenblatt_url", "Datenblatt (Link)", "Datasheet (link)", "URL", "", "Übergang: Shop-PDF; später Dokument in Weclapp"),
     ("geraetetyp", "Gerätetyp (alle)", "Device type (all)", "MULTISELECT_LIST", "",
      "Warengruppe + ggf. „Elektronische Last“ bei bidirektionalen Geräten"),
+    ("optionen", "Optionen (Katalognummern)", "Options (catalog numbers)", "STRING", "",
+     "Katalognummern 1–68 des Optionskatalogs, kommagetrennt, z. B. „1, 3, 8“ (Konfigurator: Optionssuche, "
+     "exakter Zahlenvergleich); Zubehör gibt es als eigene Nummern nicht mehr"),
 ]
+KERN_ZUSATZ = {"optionen"}                                # Zusatzfelder, die als Filter im Konfigurator dienen
 
 
 @dataclass
@@ -106,7 +111,8 @@ def feldliste(katalog) -> tuple[list[Attribut], list[tuple]]:
     for sid, de, en, typ, einheit, bem in ZUSATZ:
         werte = next((x.auswahl for x in katalog.felder if x.id == sid), []) if sid == "geraetetyp" else []
         attribute.append(Attribut(PREFIX + sid, de, en, typ, einheit, "; ".join(w[0] for w in werte),
-                                  "; ".join(w[1] for w in werte), abschnitt="Produktsuche/Konfigurator", bemerkung=bem))
+                                  "; ".join(w[1] for w in werte), abschnitt="Produktsuche/Konfigurator",
+                                  filter="Optionssuche" if sid in KERN_ZUSATZ else "", bemerkung=bem))
     return attribute, standard
 
 
