@@ -119,3 +119,12 @@ def test_datenquelle_weclapp_gleich_wie_shop():
         vorher = {(t.g.bestellnummer, t.bewertung) for t in Q.suchen(geraete, a)}
         nachher = {(t.g.bestellnummer, t.bewertung) for t in Q.suchen(zurueck, a)}
         assert vorher == nachher, fall["anfrage"]
+
+
+def test_antwort_gzip_wird_gelesen():
+    import gzip
+    from eps_produktsuche.weclapp import _text
+    roh = '{"result": [{"name": "Größe ß"}]}'.encode("utf-8")
+    assert _text(gzip.compress(roh)) == roh.decode("utf-8")                 # an den Bytes 1f 8b erkannt
+    assert _text(gzip.compress(roh), "gzip") == roh.decode("utf-8")
+    assert _text(roh) == roh.decode("utf-8") and _text(b"") == ""          # unkomprimiert / leer wie bisher

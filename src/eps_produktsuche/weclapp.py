@@ -15,6 +15,7 @@ Token: pro Benutzer in der Windows-Anmeldeinformationsverwaltung (zugang.py), ni
 """
 from __future__ import annotations
 
+import gzip
 import json
 import urllib.error
 import urllib.parse
@@ -44,6 +45,13 @@ class WeclappFehler(RuntimeError):
 
 # ------------------------------------------------------------------------ Transport
 
+def _text(daten: bytes, kodierung: str = "") -> str:
+    """Antwort als Text lesen. weclapp liefert auch ohne Anfrage gzip-komprimiert (erkennbar an den Bytes 1f 8b)."""
+    if (kodierung or "").lower() == "gzip" or daten[:2] == b"\x1f\x8b":
+        daten = gzip.decompress(daten)
+    return daten.decode("utf-8", "replace")
+
+
 class Http:
     """Echte Verbindung: https://<firma>.weclapp.com/webapp/api/v1 + Header „AuthenticationToken“."""
 
@@ -60,12 +68,16 @@ class Http:
         url = self.basis + pfad + ("?" + urllib.parse.urlencode(params) if params else "")
         body = json.dumps(daten).encode("utf-8") if daten is not None else None
         req = urllib.request.Request(url, data=body, method=methode, headers={
-            "AuthenticationToken": self.token, "Accept": "application/json", "Content-Type": "application/json"})
+            "AuthenticationToken": self.token, "Accept": "application/json", "Content-Type": "application/json",
+            "Accept-Encoding": "identity"})
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                inhalt = r.read().decode("utf-8")
+                inhalt = _text(r.read(), r.headers.get("Content-Encoding", ""))
         except urllib.error.HTTPError as e:
-            text = e.read().decode("utf-8", "replace")[:500]
+            try:
+                text = _text(e.read(), e.headers.get("Content-Encoding", ""))[:500]
+            except (OSError, ValueError):
+                text = ""
             if e.code in (401, 403):
                 raise WeclappFehler("Zugang abgelehnt – Token oder Rechte prüfen.") from e
             raise WeclappFehler(f"Weclapp meldet {e.code} bei {methode} {pfad}: {text}") from e
