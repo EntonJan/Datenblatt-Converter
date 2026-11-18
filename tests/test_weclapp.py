@@ -131,3 +131,13 @@ def test_antwort_gzip_wird_gelesen():
     assert _text(gzip.compress(roh)) == roh.decode("utf-8")                 # an den Bytes 1f 8b erkannt
     assert _text(gzip.compress(roh), "gzip") == roh.decode("utf-8")
     assert _text(roh) == roh.decode("utf-8") and _text(b"") == ""          # unkomprimiert / leer wie bisher
+
+
+def test_stammdatenimport_format_und_standardwerte():
+    from eps_produktsuche import shop, weclapp_felder as WF, weclapp_import as WI
+    assert len(WI.KOPF) == 93 and WI.KOPF[0] == "ARTIKELNAME" and WI.KOPF[3] == "ARTIKELNUMMER" and WI.KOPF[9] == "EINHEIT"
+    g = shop.Geraet("123456", "E/PS 10060-1000 4U", geraetetyp="AC/DC")
+    z = WF.stammdaten_zeilen([g])[0]
+    assert len(z) == 93 and z[0] == "E/PS 10060-1000 4U" and z[3] == "123456" and z[9] == "Stk." and z[12] == "AC/DC"
+    assert z[WI._index("BN")] == "STORABLE" and z[WI._index("BR")] == "nein"      # kein Ladehilfsmittel
+    assert z[WI._index("E")] == z[WI._index("F")] == z[WI._index("I")] == ""       # kein Preis
