@@ -22,8 +22,8 @@ STANDARD = {
     "typbezeichnung": ("Artikelname", "name", "EPS-Name, z. B. „E/PS 10060-1000 4U“"),
     "beschreibung": ("Beschreibung", "description", "DE; EN-Text siehe eps_beschreibung_en (Übersetzungen in Weclapp prüfen)"),
     "geraetetyp": ("Artikelkategorie / Warengruppe", "articleCategoryId",
-                   "Warengruppen: AC/AC, AC/DC, DC/AC, DC/DC, Elektronische Last, Ladegeräte; bidirektional zusätzlich "
-                   "Elektronische Last → als Mehrfachauswahl-Attribut eps_geraetetyp zusätzlich"),
+                   "Warengruppen: AC/AC, AC/DC, DC/AC, DC/DC, Elektronische Last, Ladegeräte; die Warengruppe allein "
+                   "bestimmt den Gerätetyp (Entscheidung 18.11.2026; bidirektional ist ein eigenes Merkmal)"),
     "gewicht": ("Gewicht (kg)", "articleGrossWeight", "Standardfeld Gewicht"),
     "hersteller": ("Bezugsquelle: Lieferant", "articleSupplySource.supplierId", "Lieferantendaten am Artikel"),
     "hersteller_typ": ("Bezugsquelle: Artikelname beim Lieferanten", "articleSupplySource.articleName",
@@ -55,8 +55,6 @@ ZUSATZ = [
      "z. B. „400“ – gegen Aufpreis lieferbar"),
     ("beschreibung_en", "Beschreibung (EN)", "Description (EN)", "LARGE_TEXT", "", "falls Weclapp keine Übersetzung kennt"),
     ("datenblatt_url", "Datenblatt (Link)", "Datasheet (link)", "URL", "", "Übergang: Shop-PDF; später Dokument in Weclapp"),
-    ("geraetetyp", "Gerätetyp (alle)", "Device type (all)", "MULTISELECT_LIST", "",
-     "Warengruppe + ggf. „Elektronische Last“ bei bidirektionalen Geräten"),
     ("optionen", "Optionen (Katalognummern)", "Options (catalog numbers)", "STRING", "",
      "Katalognummern 1–68 des Optionskatalogs, kommagetrennt, z. B. „1, 3, 8“ (Konfigurator: Optionssuche, "
      "exakter Zahlenvergleich); Zubehör gibt es als eigene Nummern nicht mehr"),
@@ -155,7 +153,7 @@ IMPORT_SPALTEN = [
     ("Artikelnummer", "articleNumber"), ("Artikelname", "name"), ("Warengruppe", "articleCategory"),
     ("Einheit", "unit"), ("Beschreibung", "description"),
     ("Lieferant (ausfüllen)", "supplier"), ("Hersteller-Typ (ausfüllen)", "supplierArticleName"),
-    (PREFIX + "geraetetyp", ""), (PREFIX + "serie", ""),
+    (PREFIX + "serie", ""),
     (PREFIX + "ausgangsspannung", ""), (PREFIX + "ausgangsspannung_min", ""), (PREFIX + "ausgangsspannung_max", ""),
     (PREFIX + "ausgangsspannung_fest", ""),
     (PREFIX + "ausgangsstrom", ""), (PREFIX + "ausgangsstrom_min", ""), (PREFIX + "ausgangsstrom_max", ""),
@@ -173,7 +171,6 @@ def artikel_zeilen(geraete) -> list[list]:
     from .suche import unplausibel
     zeilen = []
     for g in sorted(geraete, key=lambda x: x.bestellnummer):
-        typen = [g.geraetetyp] + (["Elektronische Last"] if g.bidirektional and g.geraetetyp != "Elektronische Last" else [])
         pruefen = []
         if unplausibel(g):
             pruefen.append("Leistung > U × I im Shop (Datenfehler, siehe Fehlerliste)")
@@ -185,7 +182,7 @@ def artikel_zeilen(geraete) -> list[list]:
         zeilen.append([
             g.bestellnummer, g.name, g.geraetetyp, "Stk", g.serie,
             "", "",
-            "; ".join(typen), g.serie,
+            g.serie,
             g.spannung, _z(g.umin), _z(g.umax), "; ".join(_z(u) for u in g.u_fest),
             g.strom, "0" if g.imax is not None else "", _z(g.imax),
             g.leistung, "0" if g.pmax is not None else "", _z(g.pmax),
