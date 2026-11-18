@@ -196,3 +196,12 @@ def artikel_zeilen(geraete) -> list[list]:
             g.pdf_url, "; ".join(pruefen),
         ])
     return zeilen
+
+
+def stammdaten_zeilen(geraete) -> list[list[str]]:
+    """Geräte im Format des weclapp-Stammdatenimports (Verkaufsartikel-Stammdaten, CSV): Name, Nummer, Einheit,
+    Warengruppe. Lieferant/Hersteller-Typ bleiben leer (nicht im Shop; Entscheidung 12.11.). Die technischen Werte
+    (eps_…) kennt dieser Import nicht – sie werden per API geschrieben (Zeilen aus artikel_zeilen)."""
+    from .weclapp_import import zeile
+    return [zeile(A=g.name, D=g.bestellnummer, J="Stk.", L="ja", M=g.geraetetyp)
+            for g in sorted(geraete, key=lambda x: x.bestellnummer)]

@@ -21,7 +21,7 @@ from openpyxl.styles import Alignment, Font, PatternFill        # noqa: E402
 from openpyxl.utils import get_column_letter                    # noqa: E402
 
 from eps_converter import katalog as K, pfade                  # noqa: E402
-from eps_produktsuche import shop, weclapp_felder as WF         # noqa: E402
+from eps_produktsuche import shop, weclapp_felder as WF, weclapp_import as WI   # noqa: E402
 
 KOPF = PatternFill("solid", fgColor="35528C")
 HELL = PatternFill("solid", fgColor="EEF4FA")
@@ -111,10 +111,19 @@ def main(quelle: str, ziel: str) -> None:
         ["Zahlen mit Komma als Dezimaltrennzeichen; Bereiche min/max in V, A, W."],
     ], [110])
     wb.save(ziel / "Weclapp-Artikelimport.xlsx")
-    with open(ziel / "Weclapp-Artikelimport.csv", "w", encoding="utf-8-sig", newline="") as fh:
+    with open(ziel / "Weclapp-eps-Werte.csv", "w", encoding="utf-8-sig", newline="") as fh:   # für das Schreiben per API
         w = csv.writer(fh, delimiter=";")
         w.writerow(kopf)
         w.writerows(zeilen)
+    # Stammdatenimport im weclapp-Format (Importassistent „Verkaufsartikel-Stammdaten“); Probe = je Gerätetyp ein Gerät
+    stamm = WF.stammdaten_zeilen(geraete)
+    WI.schreiben(ziel / "Weclapp-Geraete-Stammdaten.csv", stamm)
+    probe, gesehen = [], set()
+    for g, z in zip(sorted(geraete, key=lambda x: x.bestellnummer), stamm):
+        if g.geraetetyp not in gesehen and g.geraetetyp:
+            gesehen.add(g.geraetetyp)
+            probe.append(z)
+    WI.schreiben(ziel / "Weclapp-Geraete-Stammdaten-Probe.csv", probe)
     print(f"{len(attribute)} eigene Attribute, {len(standard)} Standardfelder, {len(zeilen)} Artikel → {ziel}")
 
 
