@@ -81,3 +81,39 @@ def schreiben(pfad, zeilen: list[list[str]]) -> None:
         w = csv.writer(fh, delimiter=";")
         w.writerow(KOPF)
         w.writerows(zeilen)
+
+
+# ---------------------------------------------------------------- Bezugsquellen-Import
+# Quelle: SupplySourcesWeclapp DemoImportfile_de / Importfile Columnorder_de (28.10.2024).
+# Pflichtfelder: A ARTIKELNAME, D Lieferantenartikelnummer, F LIEFERANTENNUMMER, O Artikel-Mengeneinheit.
+# V/W: „Zugehörigen Verkaufsartikel erstellen oder aktualisieren“ + Verkaufsartikel-Nummer (Verknüpfung).
+BQ_KOPF = ['ARTIKELNAME', 'Handelssprache', 'Lokaler Artikelname', 'Lieferantenartikelnummer', 'Lieferanten Firmenname',
+ 'LIEFERANTENNUMMER', 'Bruttokaufpreis', 'Zu- und Abschläge Bezeichnung 1', 'Zu- und Abschläge Preisart 1',
+ 'Zu- und Abschläge Wert 1', 'Zu- und Abschläge Bezeichnung 2', 'Zu- und Abschläge Preisart 2',
+ 'Zu- und Abschläge Wert 2', 'Währung', 'Artikel-Mengeneinheit', 'Matchcode', 'Artikel aktiv', 'Preis-Eintritt',
+ 'Warengruppen-Name', 'Warengruppen Beschreibung', 'Steuersatz',
+ 'Zugehörigen Verkaufsartikel erstellen oder aktualisieren', 'Verkaufsartikel-Nummer',
+ 'Bruttopreis des zugehörigen Verkaufsartikels', 'Verkaufsartikel-Währung', 'Vertriebsweg', 'Vertriebsweg-Steuersatz',
+ 'Kurztext 1', 'Handelssprache', 'Lokalisierte Kurztext 1', 'Kurztext 2', 'Handelssprache', 'Lokalisierte Kurztext 2',
+ 'Artikelbeschreibung', 'Handelssprache', 'Lokalisierte Artikelbeschreibung', 'Interner Hinweis', 'Handelssprache',
+ 'Lokalisierter interner Hinweis', 'Artikel-Langbeschreibung', 'Handelssprache',
+ 'Lokalisierte Lange Artikelbeschreibung', 'EAN-Nummer', 'MPN-Nummer', 'Artikeltyp', 'Serienartikel', 'Hersteller',
+ 'Bruttogewicht', 'Nettogewicht', 'Zolltarifnummer', 'Länge Artikel', 'Breite Artikel', 'Höhe Artikel',
+ 'Herstellertyp', 'Einführungsdatum', 'Sicherheitstage', 'Mindestlagerbestand', 'Zielbestand',
+ 'Wiederbeschaffungstage', 'Durchschnittliche Lieferzeit', 'Mindestbestellmenge', 'Gebindemenge',
+ 'Lieferantenbestand', 'Dropshipping möglich', 'In Dropshipping-Automatisierung ignorieren', 'Kostenstelle Verkauf',
+ 'Kostenstelle Einkauf', 'Kostenart', 'Primäre Bezugsquelle']
+
+
+def bq_zeile(**felder: str) -> list[str]:
+    z = [""] * len(BQ_KOPF)
+    for b, v in felder.items():
+        z[_index(b)] = str(v)
+    return z
+
+
+def bq_schreiben(pfad, zeilen: list[list[str]]) -> None:
+    with open(Path(pfad), "w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.writer(fh, delimiter=";")
+        w.writerow(BQ_KOPF)
+        w.writerows(zeilen)

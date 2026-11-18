@@ -141,3 +141,10 @@ def test_stammdatenimport_format_und_standardwerte():
     assert len(z) == 93 and z[0] == "E/PS 10060-1000 4U" and z[3] == "123456" and z[9] == "Stk." and z[12] == "AC/DC"
     assert z[WI._index("BN")] == "STORABLE" and z[WI._index("BR")] == "nein"      # kein Ladehilfsmittel
     assert z[WI._index("E")] == z[WI._index("F")] == z[WI._index("I")] == ""       # kein Preis
+
+
+def test_bezugsquellen_format():
+    from eps_produktsuche import weclapp_import as WI
+    assert len(WI.BQ_KOPF) == 69 and WI.BQ_KOPF[0] == "ARTIKELNAME" and WI.BQ_KOPF[3] == "Lieferantenartikelnummer"
+    z = WI.bq_zeile(A="x", D="y", F="73628", O="Stk.", W="200000", BQ="ja")
+    assert (z[0], z[3], z[5], z[14], z[22], z[68]) == ("x", "y", "73628", "Stk.", "200000", "ja")
