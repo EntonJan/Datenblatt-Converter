@@ -95,6 +95,10 @@ def main(quelle: str, ziel: str) -> None:
     wb.save(ziel / "Weclapp-Feldliste.xlsx")
 
     geraete, stand = shop.laden(Path(quelle))
+    # Nummernkreis: maßgeblich sind nur 200000–799999; 1xxxxx-Altartikel bekommen neue Nummern bzw. fallen weg
+    # (Entscheidungen 12.11.2026) – sie gehören nicht in den Import, sondern in die Liste „1xxxxx offen“.
+    alt = [g for g in geraete if g.bestellnummer.startswith("1")]
+    geraete = [g for g in geraete if not g.bestellnummer.startswith("1")]
     kopf = [s for s, _ in WF.IMPORT_SPALTEN]
     zeilen = WF.artikel_zeilen(geraete)
     wb = Workbook()
@@ -124,6 +128,11 @@ def main(quelle: str, ziel: str) -> None:
             gesehen.add(g.geraetetyp)
             probe.append(z)
     WI.schreiben(ziel / "Weclapp-Geraete-Stammdaten-Probe.csv", probe)
+    with open(ziel / "Weclapp-Geraete-1xxxxx-offen.csv", "w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.writer(fh, delimiter=";")
+        w.writerow(["Nummer (alt)", "Typbezeichnung", "Gerätetyp", "Serie"])
+        w.writerows([g.bestellnummer, g.name, g.geraetetyp, g.serie] for g in sorted(alt, key=lambda x: x.bestellnummer))
+    print(f"{len(alt)} Altartikel 1xxxxx nicht im Import")
     print(f"{len(attribute)} eigene Attribute, {len(standard)} Standardfelder, {len(zeilen)} Artikel → {ziel}")
 
 
