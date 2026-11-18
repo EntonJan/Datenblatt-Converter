@@ -78,7 +78,7 @@ def main(shopdaten: str, artikel_lieferant: str, lieferanten: str, ziel: str) ->
                 A=name[nr], D=bestell or nr, E=f["Firma"], F=f["Nummer"].strip(),
                 G=ek if ek_ok else "", N=w if ek_ok else "", O="Stk.", Q="ja",
                 R=r["DatumLetzterEK"].strip() if ek_ok else "",
-                V="ja", W=nr, BQ="ja" if i == 0 else "nein"))
+                V="ja", W=nr, Y="EUR", BQ="ja" if i == 0 else "nein"))
 
     alle = [z for nr in sorted(zeilen) for z in zeilen[nr]]
     WI.bq_schreiben(ziel / "Weclapp-Bezugsquellen.csv", alle)
