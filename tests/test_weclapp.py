@@ -94,6 +94,7 @@ def test_feldliste_und_import():
     assert next(a for a in attribute if a.schluessel == "eps_bauform").auswahl_de.endswith("DIN Rail")
     opt = next(a for a in attribute if a.schluessel == "eps_optionen")
     assert opt.typ == "STRING" and opt.filter and "eps_zubehoer" not in schluessel         # ein Feld für Optionen
+    assert next(a for a in attribute if a.schluessel == "eps_schnittstellen").filter == ""            # Schnittstellen: Filter über Optionen
     assert "eps_bestellnummer" not in schluessel and any(s[0] == "bestellnummer" for s in standard)
     g = shop.Geraet("T-125", "TEST CTP 6000-125-400 Wechselrichter", serie="TEST", geraetetyp="DC/AC",
                     spannung="3x 400V AC (L-L)", strom="8,6A", leistung="6000 VA")

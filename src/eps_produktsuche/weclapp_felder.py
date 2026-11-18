@@ -107,6 +107,9 @@ def feldliste(katalog) -> tuple[list[Attribut], list[tuple]]:
         bemerkung = f.bemerkung or ""
         if f.typ == "Schnittstelle":
             bemerkung = "Standard / Option (leer = nicht vorhanden)"
+        if f.id == "schnittstellen":                      # Entscheidung 18.11.: Konfigurator filtert Schnittstellen über Optionen
+            basis["filter"] = ""
+            bemerkung = "nur Datenblatt; Filter im Konfigurator über Optionsnummern (eps_optionen), nicht als eigenes Feld"
         attribute.append(Attribut(PREFIX + f.id, f.de, f.en, TYP.get(f.typ, "STRING"), bemerkung=bemerkung, **basis))
     for sid, de, en, typ, einheit, bem in ZUSATZ:
         werte = next((x.auswahl for x in katalog.felder if x.id == sid), []) if sid == "geraetetyp" else []
