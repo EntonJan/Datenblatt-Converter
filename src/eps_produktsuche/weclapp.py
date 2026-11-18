@@ -157,6 +157,21 @@ class Weclapp:
         r = self.t("GET", PFADE["artikel"], {"pageSize": 1})
         return f"Verbindung OK ({len(_liste(r))} Testartikel gelesen)."
 
+    def diagnose(self) -> dict:
+        """Nur lesen: Zusatzfeld-Definitionen, zuletzt geänderte Artikel und Kategorien – Rohdaten zum Prüfen der
+        Feldnamen gegen das echte System (kein Token, nichts wird geändert)."""
+        def holen(pfad: str, params: dict) -> dict:
+            try:
+                return self.t("GET", pfad, params)
+            except WeclappFehler as e:
+                return {"fehler": str(e), "pfad": pfad}
+        return {
+            "erstellt": datetime.now().isoformat(timespec="seconds"),
+            "definitionen": holen("/customAttributeDefinition", {"pageSize": 200}),
+            "artikel_zuletzt": holen(PFADE["artikel"], {"pageSize": 15, "sort": "-lastModifiedDate"}),
+            "kategorien": holen("/articleCategory", {"pageSize": 50}),
+        }
+
     # ---------------------------------------------------------------- Kunde
     def kunde_finden(self, k) -> dict | None:
         if k.email:

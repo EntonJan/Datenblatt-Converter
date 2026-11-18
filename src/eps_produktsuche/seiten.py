@@ -520,6 +520,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         wk = ctk.CTkFrame(g, fg_color="transparent")
         TH.knopf(wk, "Token eintragen …", self.token_eintragen, height=32).pack(side="left")
         TH.knopf(wk, "Verbindung testen", self.verbindung_testen, height=32).pack(side="left", padx=(8, 0))
+        TH.knopf(wk, "Diagnose speichern …", self.diagnose_speichern, height=32).pack(side="left", padx=(8, 0))
         self._zeile(g, "Zugang", "Token liegt nur in der Windows-Anmeldeinformationsverwaltung", wk)
         self.weclapp_status = TH.text(g, "", 12, farbe=TH.GRAU, anchor="w", justify="left", wraplength=560)
         self.weclapp_status.pack(fill="x", padx=18, pady=(0, 14))
@@ -631,6 +632,31 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
             self.weclapp_status.configure(text=str(fehler) if fehler else text)
             if not fehler and e.weclapp_adresse and e.weclapp_adresse.lower() != "demo":
                 self.app.starttag_melden("t6")                  # Checkliste Weclapp-Start
+        weclapp_dialog._hintergrund(self, arbeit, fertig)
+
+    def diagnose_speichern(self):
+        """Weclapp-Rohdaten (Zusatzfelder, letzte Artikel) als JSON speichern – nur lesen, ohne Token in der Datei."""
+        import json
+        from tkinter import filedialog
+        from . import weclapp_dialog
+        from .einstellungen import Einstellungen
+        e = Einstellungen(weclapp_adresse=self.weclapp.get().strip())
+        self.weclapp_status.configure(text="Lese Diagnosedaten …")
+
+        def arbeit():
+            return weclapp_dialog.verbindung(e, self.app.geraete).diagnose()
+
+        def fertig(daten, fehler):
+            if fehler:
+                self.weclapp_status.configure(text=str(fehler))
+                return
+            pfad = filedialog.asksaveasfilename(parent=self, defaultextension=".json", initialfile="weclapp-diagnose.json",
+                                                filetypes=[("JSON", "*.json")], title="Weclapp-Diagnose speichern")
+            if not pfad:
+                self.weclapp_status.configure(text="Nicht gespeichert.")
+                return
+            Path(pfad).write_text(json.dumps(daten, ensure_ascii=False, indent=1), encoding="utf-8")
+            self.weclapp_status.configure(text=f"Diagnose gespeichert: {pfad}")
         weclapp_dialog._hintergrund(self, arbeit, fertig)
 
     def waehlen(self, var: tk.StringVar):

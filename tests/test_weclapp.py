@@ -131,3 +131,18 @@ def test_antwort_gzip_wird_gelesen():
     assert _text(gzip.compress(roh)) == roh.decode("utf-8")                 # an den Bytes 1f 8b erkannt
     assert _text(gzip.compress(roh), "gzip") == roh.decode("utf-8")
     assert _text(roh) == roh.decode("utf-8") and _text(b"") == ""          # unkomprimiert / leer wie bisher
+
+
+def test_diagnose_liest_nur_und_faengt_fehler_pro_abschnitt():
+    aufrufe = []
+
+    def transport(methode, pfad, params=None, daten=None):
+        aufrufe.append((methode, pfad))
+        if pfad == "/articleCategory":
+            raise W.WeclappFehler("Weclapp meldet 404")
+        return {"result": [{"id": "1"}]}
+
+    d = W.Weclapp(transport, web_basis="x").diagnose()
+    assert all(m == "GET" for m, _ in aufrufe) and len(aufrufe) == 3
+    assert d["definitionen"]["result"] and d["artikel_zuletzt"]["result"]
+    assert "404" in d["kategorien"]["fehler"] and "token" not in str(d).lower()
