@@ -9,11 +9,12 @@ Eingabe: die vorbereitete Lieferantenliste (Nummer, Firma, Adresse, Land als ISO
   Weclapp-Lieferanten-Hinweise.csv  Auffälligkeiten (Land fehlt, Straße fehlt …)
 Die Nummer steht in Spalte C „Alte Lieferantennummer“ – im Assistenten „Alte Lieferantennummer übernehmen“ anhaken.
 Pflichtfeld LAND fehlt bei Sammelkonten: ersatzweise „Deutschland“ (steht in den Hinweisen).
-Zahlungs- und Lieferbedingungen bleiben leer: zulässig sind nur in weclapp bereits angelegte Werte.
+Ungültige E-Mail-Adressen werden weggelassen (Hinweis). Zahlungs- und Lieferbedingungen bleiben leer: zulässig sind nur in weclapp bereits angelegte Werte.
 """
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from babel import Locale                                         # noqa: E402
 from eps_produktsuche import weclapp_import as WI                # noqa: E402
 
 ERSATZ_LAND = "Deutschland"
+EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def land_name(iso: str) -> str:
@@ -42,9 +44,13 @@ def main(quelle: str, ziel: str) -> None:
             land = ERSATZ_LAND
         if f["Prüfen"].strip():
             hinweise.append([f["Nummer"], f["Firma"], "aus der Vorbereitung: " + f["Prüfen"].strip()])
+        mail = f["E-Mail"].strip()
+        if mail and not EMAIL.match(mail):                 # weclapp prüft die Adresse und lehnt den Import sonst ab
+            hinweise.append([f["Nummer"], f["Firma"], f"E-Mail {mail!r} ist keine gültige Adresse – nicht importiert, bitte klären"])
+            mail = ""
         zeilen.append(WI.li_zeile(
             A=f["Firma"], B=f["Firmenzusatz"], C=f["Nummer"].strip(), L=f["Straße"], N=f["PLZ"], O=f["Ort"], Q=land,
-            R="ja", S="ja", T="ja", AJ=f["Währung"], AK=f["USt-IdNr."], AQ=f["Homepage"], AR=f["E-Mail"],
+            R="ja", S="ja", T="ja", AJ=f["Währung"], AK=f["USt-IdNr."], AQ=f["Homepage"], AR=mail,
             AS=f["Telefon"], AT=f["Fax"]))
         nummern.append(f["Nummer"].strip())
     WI.li_schreiben(ziel / "Weclapp-Lieferanten.csv", zeilen)
