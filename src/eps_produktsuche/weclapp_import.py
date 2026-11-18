@@ -117,3 +117,45 @@ def bq_schreiben(pfad, zeilen: list[list[str]]) -> None:
         w = csv.writer(fh, delimiter=";")
         w.writerow(BQ_KOPF)
         w.writerows(zeilen)
+
+
+# ---------------------------------------------------------------- Lieferanten-Import
+# Quelle: SupplierWeclapp DemoImportfile_de / Importfile Columnorder_de (11.09.2025). Pflichtfelder: A LIEFERANT-FIRMA, Q LAND
+# (Ländername auf Deutsch). Der Import hat keine Spalte für die Weclapp-Nummer: Spalte C „Alte Lieferantennummer“ +
+# Häkchen „Alte Lieferantennummer übernehmen“ im Assistenten.
+LI_KOPF = ['LIEFERANT-FIRMA', 'Lieferant-Firma-Zusatz', 'Alte Lieferantennummer', 'Verantwortlicher', 'Beschreibung',
+ 'Adresse-Firma (abweichende Firma)', 'Adresse-Firma-Zusatz (abweichende Firma)', 'Adresse-Anrede', 'Adresse-Titel',
+ 'Adresse-Vorname', 'Adresse-Nachname', 'Straße', 'Adresse-Zusatz', 'PLZ', 'Stadt', 'Bundesland', 'LAND',
+ 'Primäre Adresse?', 'Primäre Lieferadresse?', 'Primäre Rechnungsadresse?', 'Globale Lokationsnummer (GLN)',
+ 'Postfach Nummer', 'Postfach PLZ', 'Postfach Stadt', 'Bezugsquellen immer mit Dropshipping möglich anlegen?',
+ 'Bestellsperre?', 'Referenznummer', 'Personenkonto', 'Handelsregister', 'Abweichende Vorsteuer',
+ 'Einkauf über Plafond', 'Zahlungsbedingungen', 'Lieferant zahlungsart', 'Lieferbedingung', 'ABC-Klasse', 'Währung',
+ 'USt-Id Nr.', 'Steuernummer', 'IBAN', 'SWIFT-BIC', 'Kontoinhaber', 'Kreditinstitut', 'Website', 'E-Mail', 'Telefon',
+ 'Telefax', 'Rechtsform', 'Branche', 'Thema', 'Kundennummer beim Lieferant', 'Jahresumsatz', 'Unternehmensgröße',
+ 'Leitweg-ID', 'Ansprechpartner-Referenznummer', 'Ansprechpartner-Telefonnummer', 'Ansprechpartner-Telefonnummer 2',
+ 'Ansprechpartner-Fax', 'Ansprechpartner-E-Mail', 'Ansprechpartner-Mobilnummer', 'Ansprechpartner-Mobilnummer 2',
+ 'Ansprechpartner-Beschreibung', 'Ansprechpartner-Privat-Telefonnummer', 'Ansprechpartner-Website',
+ 'Ansprechpartner-Bevorzugte-Kontaktmethode', 'Ansprechpartner-Verantwortlicher', 'Ansprechpartner-Anrede',
+ 'Ansprechpartner-Titel', 'Ansprechpartner-Vorname', 'Ansprechpartner-Zweiter-Vorname', 'Ansprechpartner-Nachname',
+ 'Primärer Ansprechpartner?', 'Ansprechpartner-Geburtstag', 'Ansprechpartner-Abteilung', 'Ansprechpartner-Funktion',
+ 'Ansprechpartner-Firma', 'Ansprechpartner-Firma-Zusatz', 'Ansprechpartner-Firmenadresse',
+ 'Ansprechpartner-Firmenadresse-Zusatz', 'Kontaktadresse Anrede', 'Kontaktadresse Titel', 'Kontaktadresse Vorname',
+ 'Kontaktadresse Nachname', 'Ansprechpartner-Straße', 'Ansprechpartner-Adresse-Zusatz', 'Ansprechpartner-PLZ',
+ 'Ansprechpartner-Stadt', 'Ansprechpartner-Bundesland', 'Ansprechpartner Land', 'Ansprechpartner-Primäre Adresse?',
+ 'Ansprechpartner-Primäre Lieferadresse?', 'Ansprechpartner-Primäre Rechnungsadresse?',
+ 'Ansprechpartner-Postfach Nummer', 'Ansprechpartner-Postfach PLZ', 'Ansprechpartner-Postfach Stadt',
+ 'Art (Importtyp)']
+
+
+def li_zeile(**felder: str) -> list[str]:
+    z = [""] * len(LI_KOPF)
+    for b, v in felder.items():
+        z[_index(b)] = str(v)
+    return z
+
+
+def li_schreiben(pfad, zeilen: list[list[str]]) -> None:
+    with open(Path(pfad), "w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.writer(fh, delimiter=";")
+        w.writerow(LI_KOPF)
+        w.writerows(zeilen)
