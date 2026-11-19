@@ -71,7 +71,11 @@ def main(shopdaten: str, artikel_lieferant: str, lieferanten: str, ziel: str) ->
                 hinweise.append([nr, name[nr], f"Herstellerbestellnummer fehlt (Pflichtfeld) – ersatzweise EPS-Nummer {nr}"])
             ek = r["LetzterEK"].strip()
             ek_ok = ek not in ("", "0,00")
-            if not ek_ok:
+            if ek_ok and not r["DatumLetzterEK"].strip():
+                # weclapp verlangt zu jedem Preis ein Eintrittsdatum (priceStartDate); ohne Datum Preis weglassen
+                hinweise.append([nr, name[nr], f"Einkaufspreis {ek} ohne Datum bei Lieferant {r['Lieferant']} – Preis weggelassen (weclapp verlangt ein Datum)"])
+                ek_ok = False
+            if not ek_ok and not (ek and r["DatumLetzterEK"].strip() == "" and ek not in ("", "0,00")):
                 hinweise.append([nr, name[nr], f"kein letzter Einkaufspreis bei Lieferant {r['Lieferant']}"])
             w = WAEHRUNG.get(r["Waehrung"].strip(), r["Waehrung"].strip())
             zeilen[nr].append(WI.bq_zeile(
