@@ -84,6 +84,16 @@ def main(shopdaten: str, artikel_lieferant: str, lieferanten: str, ziel: str) ->
                 R=r["DatumLetzterEK"].strip() if ek_ok else "",
                 V="ja", W=nr, Y="EUR", BQ="ja" if i == 0 else "nein"))
 
+    # weclapp: Lieferant + Lieferantenartikelnummer müssen über alle importierten Zeilen eindeutig sein.
+    # Teilen sich mehrere EPS-Artikel dieselbe Nummer (Sammel-/Platzhalternummer), bekommt jede Zeile die EPS-Nummer angehängt.
+    from collections import Counter
+    haeufig = Counter((z[5], z[3]) for nr in zeilen for z in zeilen[nr])
+    for nr in sorted(zeilen):
+        for z in zeilen[nr]:
+            if haeufig[(z[5], z[3])] > 1:
+                alt = z[3]
+                z[3] = f"{alt} ({nr})"
+                hinweise.append([nr, name[nr], f"Lieferantenartikelnummer {alt} bei Lieferant {z[5]} mehrfach vergeben – umbenannt in {z[3]} (weclapp verlangt Eindeutigkeit)"])
     alle = [z for nr in sorted(zeilen) for z in zeilen[nr]]
     WI.bq_schreiben(ziel / "Weclapp-Bezugsquellen.csv", alle)
 
