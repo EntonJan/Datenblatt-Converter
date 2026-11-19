@@ -521,6 +521,7 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         TH.knopf(wk, "Token eintragen …", self.token_eintragen, height=32).pack(side="left")
         TH.knopf(wk, "Verbindung testen", self.verbindung_testen, height=32).pack(side="left", padx=(8, 0))
         TH.knopf(wk, "Diagnose speichern …", self.diagnose_speichern, height=32).pack(side="left", padx=(8, 0))
+        TH.knopf(wk, "Technische Werte schreiben …", self.werte_schreiben, height=32).pack(side="left", padx=(8, 0))
         self._zeile(g, "Zugang", "Token liegt nur in der Windows-Anmeldeinformationsverwaltung", wk)
         self.weclapp_status = TH.text(g, "", 12, farbe=TH.GRAU, anchor="w", justify="left", wraplength=560)
         self.weclapp_status.pack(fill="x", padx=18, pady=(0, 14))
@@ -633,6 +634,16 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
             if not fehler and e.weclapp_adresse and e.weclapp_adresse.lower() != "demo":
                 self.app.starttag_melden("t6")                  # Checkliste Weclapp-Start
         weclapp_dialog._hintergrund(self, arbeit, fertig)
+
+    def werte_schreiben(self):
+        """Dialog: technische Werte (eps_…) in Weclapp-Artikel schreiben – Vorschau, Einzeltest, alle (nur nach Klick)."""
+        from .einstellungen import Einstellungen
+        from .weclapp_werte_dialog import WerteDialog
+        e = Einstellungen(weclapp_adresse=self.weclapp.get().strip())
+        if not e.weclapp_adresse:
+            messagebox.showinfo("Weclapp", "Erst die Weclapp-Adresse eintragen.", parent=self)
+            return
+        WerteDialog(self.app, e)
 
     def diagnose_speichern(self):
         """Weclapp-Rohdaten (Zusatzfelder, letzte Artikel) als JSON speichern – nur lesen, ohne Token in der Datei."""

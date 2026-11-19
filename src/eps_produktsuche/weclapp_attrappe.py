@@ -141,4 +141,15 @@ class Attrappe:
                 self.daten["purchaseOrderRequest"].append(r)
                 neu.append(r)
             return {"result": neu}
+        if methode == "PUT" and len(teile) == 3 and teile[1] == "id":
+            a = next((x for x in self.daten.get(art, []) if x["id"] == teile[2]), None)
+            if a is None:
+                raise ValueError(f"Attrappe: {pfad} nicht gefunden")
+            d = dict(daten or {})
+            version = d.pop("version", None)
+            if version is not None and str(version) != str(a.get("version", "0")):
+                raise ValueError("Attrappe: Version veraltet (wie Weclapp 409)")
+            a.update(d)
+            a["version"] = str(int(a.get("version", "0")) + 1)
+            return a
         raise ValueError(f"Attrappe kennt {methode} {pfad} nicht")

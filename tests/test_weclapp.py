@@ -169,3 +169,85 @@ def test_lieferanten_format():
     assert len(WI.LI_KOPF) == 95 and WI.LI_KOPF[0] == "LIEFERANT-FIRMA" and WI.LI_KOPF[2] == "Alte Lieferantennummer"
     z = WI.li_zeile(A="EA", C="73628", Q="Deutschland")
     assert (z[0], z[2], z[16]) == ("EA", "73628", "Deutschland") and WI.LI_KOPF[16] == "LAND"
+
+
+def _geraete_fuer_schreiben():
+    import json
+    from pathlib import Path
+    from eps_produktsuche import shop
+    faelle = json.loads((Path(__file__).with_name("gemeinsame-suchfaelle.json")).read_text(encoding="utf-8"))
+    geraete = [shop.Geraet(**g) for g in faelle["geraete"]]
+    for g in geraete:
+        g.rueckspeisung = shop.ist_rueckspeisend(g.name, g.serie)
+        g.u_eingang = shop.eingang_aus_name(g.name, g.geraetetyp)
+    return geraete
+
+
+def _leeres_weclapp(geraete):
+    """Weclapp mit Zusatzfeld-Definitionen und Artikeln OHNE eps_-Werte (wie nach dem Stammdatenimport)."""
+    a = Attrappe.mit_importdaten(geraete)
+    for art in a.daten["article"]:
+        art["customAttributes"] = []
+        art["version"] = "1"
+    return a
+
+
+def test_schreiben_vorschau_aendert_nichts_und_schreiben_stimmt_mit_lesen():
+    from eps_produktsuche import datenquelle as D, weclapp_schreiben as S
+    geraete = _geraete_fuer_schreiben()
+    erwartet = {g.bestellnummer: g for g in D.geraete_lesen(Attrappe.mit_importdaten(geraete))}
+    a = _leeres_weclapp(geraete)
+    werte = S.werte_aus_geraeten(geraete)
+    plaene = S.planen(a, werte)
+    assert not [m for m, _ in a.aufrufe if m != "GET"]                  # Vorschau liest nur
+    assert all(p.aenderungen and not p.fehler for p in plaene) and "Artikel geprüft" in S.zusammenfassung(plaene)
+    lauf = S.alle_schreiben(a, plaene)
+    assert lauf.geschrieben == len(geraete) and lauf.fehler == []
+    assert all(art["version"] == "2" for art in a.daten["article"])      # Version wurde mitgeschickt und erhöht
+    gelesen = {g.bestellnummer: g for g in D.geraete_lesen(a)}
+    assert gelesen.keys() == erwartet.keys()
+    for nr, g in gelesen.items():
+        e = erwartet[nr]
+        assert (g.umin, g.umax, g.imax, g.pmax, g.geraetetyp, g.bauart) == (e.umin, e.umax, e.imax, e.pmax, e.geraetetyp, e.bauart)
+    # zweiter Lauf: alles schon da
+    assert all(not p.aenderungen for p in S.planen(a, werte))
+
+
+def test_schreiben_einzelner_artikel_mit_kontrolle_und_fehlende_felder():
+    from eps_produktsuche import weclapp_schreiben as S
+    geraete = _geraete_fuer_schreiben()
+    a = _leeres_weclapp(geraete)
+    nr = geraete[0].bestellnummer
+    werte = S.werte_aus_geraeten(geraete)
+    # ein Zusatzfeld fehlt in Weclapp, bei einem Auswahlfeld fehlt der Wert in der Liste
+    a.daten["customAttributeDefinition"] = [d for d in a.daten["customAttributeDefinition"]
+                                            if d["attributeKey"] != "eps_serie"]
+    bauform = next(d for d in a.daten["customAttributeDefinition"] if d["attributeKey"] == "eps_bauform")
+    bauform["selectableValues"] = []
+    soll = dict(werte[nr], eps_bauform="Gartenhaus")
+    plan = S.planen(a, {nr: soll}, [nr])[0]
+    assert "eps_serie" in plan.fehlt_feld and ("eps_bauform", "Gartenhaus") in plan.fehlt_wert
+    S.schreiben(a, plan)
+    gesetzt = {c["attributeDefinitionId"] for art in a.daten["article"] if art["articleNumber"] == nr
+               for c in art["customAttributes"]}
+    assert len(gesetzt) == plan.aenderungen and bauform["id"] not in gesetzt
+    assert S.kontrolle(a, plan, soll, S.definitionen_lesen(a)) == []      # alles Schreibbare ist angekommen
+    assert all(art["customAttributes"] == [] for art in a.daten["article"] if art["articleNumber"] != nr)
+
+
+def test_schreiben_unbekannter_artikel_und_veraltete_version():
+    from eps_produktsuche import weclapp_schreiben as S
+    from eps_produktsuche.weclapp import WeclappFehler
+    geraete = _geraete_fuer_schreiben()
+    a = _leeres_weclapp(geraete)
+    werte = S.werte_aus_geraeten(geraete)
+    p = S.planen(a, {"XXX": {"eps_bauform": "19 Zoll"}}, ["XXX"])[0]
+    assert p.fehler and p.status == "Artikel nicht in Weclapp gefunden"
+    nr = geraete[0].bestellnummer
+    plan = S.planen(a, {nr: werte[nr]}, [nr])[0]
+    for art in a.daten["article"]:                                     # jemand ändert dazwischen
+        art["version"] = "9"
+    with pytest.raises(ValueError):
+        S.schreiben(a, plan)
+    lauf = S.alle_schreiben(lambda *x, **k: (_ for _ in ()).throw(WeclappFehler("409")), [plan])
+    assert lauf.geschrieben == 0 and "409" in lauf.fehler[0]
