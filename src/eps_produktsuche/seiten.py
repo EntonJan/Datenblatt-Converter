@@ -521,8 +521,10 @@ class EinstellungenSeite(ctk.CTkScrollableFrame):
         TH.knopf(wk, "Token eintragen …", self.token_eintragen, height=32).pack(side="left")
         TH.knopf(wk, "Verbindung testen", self.verbindung_testen, height=32).pack(side="left", padx=(8, 0))
         TH.knopf(wk, "Diagnose speichern …", self.diagnose_speichern, height=32).pack(side="left", padx=(8, 0))
-        TH.knopf(wk, "Technische Werte schreiben …", self.werte_schreiben, height=32).pack(side="left", padx=(8, 0))
         self._zeile(g, "Zugang", "Token liegt nur in der Windows-Anmeldeinformationsverwaltung", wk)
+        self._zeile(g, "Technische Werte", "eps_-Werte aus Weclapp-eps-Werte.csv in die Artikel schreiben – erst Vorschau, "
+                                           "dann Einzeltest; geschrieben wird nur nach Klick",
+                    TH.knopf(g, "Werte schreiben …", self.werte_schreiben, height=32))
         self.weclapp_status = TH.text(g, "", 12, farbe=TH.GRAU, anchor="w", justify="left", wraplength=560)
         self.weclapp_status.pack(fill="x", padx=18, pady=(0, 14))
 
