@@ -183,20 +183,25 @@ def test_e_artikel_behalten_e_nummer_und_typ():
     assert any("keine E-Nummer" in h[2] for h in hinweise)
 
 
-def test_optin_liste_nimmt_prio_0_und_1_mit_gueltiger_mail(tmp_path):
+def test_optin_liste_nur_prio_1_prio_0_ist_sperre(tmp_path):
     m = _tool("selectline-optin")
     kopf = ["Kunde", "Lieferant", "Interessent", "Id", "Hauptadresse", "Vorname", "Name", "Firma", "Email", "Prioritaet", "_EPS"]
     zeilen = [kopf,
               ["10004", "", "", "4", "", "", "Pichler", "", "", "", ""],
               ["", "", "", "10", "4", "Eva", "Muster", "", "Eva@Pichler.de", "1", "*"],
-              ["", "", "", "11", "4", "Max", "Muster", "", "eva@pichler.de", "0", ""],
+              ["", "", "", "11", "4", "Max", "Muster", "", "max@pichler.de", "0", ""],
               ["", "", "", "12", "4", "Kai", "Keiner", "", "kein Interesse", "0", ""],
-              ["", "", "", "13", "4", "Ohne", "Prio", "", "ohne@prio.de", "", ""]]
+              ["", "", "", "13", "4", "Ohne", "Prio", "", "ohne@prio.de", "", ""],
+              ["", "", "", "14", "4", "Zwie", "Spalt", "", "zwie@pichler.de", "1", ""],
+              ["", "", "", "15", "4", "Zwie", "Spalt2", "", "ZWIE@pichler.de", "0", ""]]
     p = tmp_path / "Adressen.csv"
     p.write_text("\n".join(";".join(z) for z in zeilen), encoding="utf-8")
     m.main(p, tmp_path / "aus")
     import csv
-    ok = list(csv.reader(open(tmp_path / "aus" / "Optin-Kontakte.csv", encoding="utf-8-sig"), delimiter=";"))
+
+    def lies(name):
+        return list(csv.reader(open(tmp_path / "aus" / name, encoding="utf-8-sig"), delimiter=";"))
+    ok = lies("Optin-Kontakte.csv")
     assert [x[0] for x in ok[1:]] == ["eva@pichler.de"] and ok[1][4:6] == ["Kunde", "10004"] and "EPS" in ok[1][7]
-    aus = list(csv.reader(open(tmp_path / "aus" / "Optin-Ausgeschlossen.csv", encoding="utf-8-sig"), delimiter=";"))
-    assert [x[0] for x in aus[1:]] == ["kein Interesse"]
+    assert sorted(x[0] for x in lies("Newsletter-Sperre.csv")[1:]) == ["max@pichler.de", "zwie@pichler.de"]
+    assert [x[0] for x in lies("Optin-Ausgeschlossen.csv")[1:]] == ["kein Interesse"]
