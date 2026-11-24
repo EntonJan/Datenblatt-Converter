@@ -155,3 +155,48 @@ def test_lieferanten_format():
     assert len(WI.LI_KOPF) == 95 and WI.LI_KOPF[0] == "LIEFERANT-FIRMA" and WI.LI_KOPF[2] == "Alte Lieferantennummer"
     z = WI.li_zeile(A="EA", C="73628", Q="Deutschland")
     assert (z[0], z[2], z[16]) == ("EA", "73628", "Deutschland") and WI.LI_KOPF[16] == "LAND"
+
+
+def _tool(name):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), Path(__file__).parent.parent / "tools" / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_e_artikel_behalten_e_nummer_und_typ():
+    m = _tool("weclapp-e-artikel")
+    liste = [{"Artikelnummer": "E000039", "Bezeichnung": "Dienstleistung", "Mengeneinheit": "Tag", "Artikelgruppe": "Dienstleistungen", "Lagerartikel": "nein"},
+             {"Artikelnummer": "E110835", "Bezeichnung": "Sechskantschraube", "Mengeneinheit": "Stück", "Artikelgruppe": "Schraube, Mutter", "Lagerartikel": "ja"},
+             {"Artikelnummer": "E100027", "Bezeichnung": "", "Mengeneinheit": "Stück", "Artikelgruppe": "Option", "Lagerartikel": "nein"},
+             {"Artikelnummer": "123456", "Bezeichnung": "x", "Mengeneinheit": "Stück", "Artikelgruppe": "", "Lagerartikel": "ja"}]
+    sl = [["Artikelnummer", "Zusatz"], ["E000039", "Reisetag"]]
+    zeilen, hinweise = m.zeilen_bauen(liste, sl)
+    assert set(zeilen) == {"E000039", "E110835", "E100027"}
+    w = m.W
+    z = zeilen["E000039"]
+    assert z[w._index("D")] == "E000039" and z[w._index("BN")] == "SERVICE" and z[w._index("P")] == "Reisetag"
+    assert zeilen["E110835"][w._index("BN")] == "STORABLE" and zeilen["E110835"][w._index("J")] == "Stk."
+    assert zeilen["E100027"][w._index("M")] == "Optionen und Zubehör" and zeilen["E100027"][w._index("A")] == "E100027"
+    assert any("keine E-Nummer" in h[2] for h in hinweise)
+
+
+def test_optin_liste_nimmt_prio_0_und_1_mit_gueltiger_mail(tmp_path):
+    m = _tool("selectline-optin")
+    kopf = ["Kunde", "Lieferant", "Interessent", "Id", "Hauptadresse", "Vorname", "Name", "Firma", "Email", "Prioritaet", "_EPS"]
+    zeilen = [kopf,
+              ["10004", "", "", "4", "", "", "Pichler", "", "", "", ""],
+              ["", "", "", "10", "4", "Eva", "Muster", "", "Eva@Pichler.de", "1", "*"],
+              ["", "", "", "11", "4", "Max", "Muster", "", "eva@pichler.de", "0", ""],
+              ["", "", "", "12", "4", "Kai", "Keiner", "", "kein Interesse", "0", ""],
+              ["", "", "", "13", "4", "Ohne", "Prio", "", "ohne@prio.de", "", ""]]
+    p = tmp_path / "Adressen.csv"
+    p.write_text("\n".join(";".join(z) for z in zeilen), encoding="utf-8")
+    m.main(p, tmp_path / "aus")
+    import csv
+    ok = list(csv.reader(open(tmp_path / "aus" / "Optin-Kontakte.csv", encoding="utf-8-sig"), delimiter=";"))
+    assert [x[0] for x in ok[1:]] == ["eva@pichler.de"] and ok[1][4:6] == ["Kunde", "10004"] and "EPS" in ok[1][7]
+    aus = list(csv.reader(open(tmp_path / "aus" / "Optin-Ausgeschlossen.csv", encoding="utf-8-sig"), delimiter=";"))
+    assert [x[0] for x in aus[1:]] == ["kein Interesse"]
