@@ -118,6 +118,8 @@ class Attrappe:
                 elif schluessel.endswith("-ilike"):
                     feld, w = schluessel[:-6], str(wert).strip("%").lower()
                     liste = [x for x in liste if w in str(x.get(feld, "")).lower()]
+            if teile[-1] == "count":                                  # GET /article/count → {"result": Anzahl}
+                return {"result": len(liste)}
             groesse, seite = int((params or {}).get("pageSize", 100)), int((params or {}).get("page", 1))
             return {"result": liste[(seite - 1) * groesse: seite * groesse]}
         if methode == "POST" and len(teile) == 1:
